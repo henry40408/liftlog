@@ -8,38 +8,34 @@
 <h1>Add Custom Exercise</h1>
 
 {% if let Some(err) = error %}
-<p style="color: red;">{{ err }}</p>
+<div class="error">{{ err }}</div>
 {% endif %}
 
 <form method="post" action="/exercises">
-    <p>
-        <label>Name:<br>
-            <input type="text" name="name" required autofocus>
-        </label>
-    </p>
-    <p>
-        <label>Category:<br>
-            <select name="category" required>
-                {% for cat in categories %}
-                <option value="{{ cat.name }}">{{ cat.display_name }}</option>
-                {% endfor %}
-            </select>
-        </label>
-    </p>
-    <p>
-        <label>Muscle Group:<br>
-            <input type="text" name="muscle_group" required placeholder="e.g., Biceps">
-        </label>
-    </p>
-    <p>
-        <label>Equipment (optional):<br>
-            <input type="text" name="equipment" placeholder="e.g., Barbell, Dumbbell">
-        </label>
-    </p>
-    <p>
-        <button type="submit">Add Exercise</button>
-    </p>
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required autofocus>
+    </div>
+    <div class="form-group">
+        <label for="category">Category</label>
+        <select id="category" name="category" required>
+            {% for cat in categories %}
+            <option value="{{ cat.name }}">{{ cat.display_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="muscle_group">Muscle Group</label>
+        <input type="text" id="muscle_group" name="muscle_group" required placeholder="e.g., Biceps">
+    </div>
+    <div class="form-group">
+        <label for="equipment">Equipment (optional)</label>
+        <input type="text" id="equipment" name="equipment" placeholder="e.g., Barbell, Dumbbell">
+    </div>
+    <button type="submit">[Add Exercise]</button>
 </form>
 
-<p><a href="/exercises">&larr; Back to Exercises</a></p>
+<div class="link">
+    &larr; <a href="/exercises">[Back to Exercises]</a>
+</div>
 {% endblock %}

@@ -6,28 +6,44 @@
 {% include "nav.html" %}
 
 <h1>{{ exercise.name }}</h1>
-<p>
+
+<p class="muted">
     Category: {{ exercise.category }} |
     Muscle: {{ exercise.muscle_group }}
-    {% if let Some(equip) = exercise.equipment %}
+    {% match exercise.equipment %}
+    {% when Some with (equip) %}
     | Equipment: {{ equip }}
-    {% endif %}
+    {% when None %}
+    {% endmatch %}
 </p>
 
 <h2>Personal Records</h2>
 {% if prs.is_empty() %}
-<p>No PRs for this exercise yet.</p>
+<p class="muted">No PRs for this exercise yet.</p>
 {% else %}
-<ul>
-    {% for pr in prs %}
-    <li>{{ pr.record_type }}: {{ pr.value }} ({{ pr.achieved_at.format("%Y-%m-%d") }})</li>
-    {% endfor %}
-</ul>
+<table>
+    <thead>
+        <tr>
+            <th>Type</th>
+            <th>Value</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pr in prs %}
+        <tr>
+            <td>{{ pr.record_type }}</td>
+            <td>{{ pr.value }}</td>
+            <td class="muted">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
 {% endif %}
 
 <h2>Recent History</h2>
 {% if history.is_empty() %}
-<p>No history for this exercise.</p>
+<p class="muted">No history for this exercise.</p>
 {% else %}
 <table>
     <thead>
@@ -36,7 +52,7 @@
             <th>Weight</th>
             <th>Reps</th>
             <th>RPE</th>
-            <th>PR</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
@@ -46,12 +62,14 @@
             <td>{{ log.weight }}</td>
             <td>{{ log.reps }}</td>
             <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
-            <td>{% if log.is_pr %}*{% endif %}</td>
+            <td>{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% endif %}
 
-<p><a href="/exercises">&larr; Back to Exercises</a></p>
+<div class="link">
+    &larr; <a href="/exercises">[Back to Exercises]</a>
+</div>
 {% endblock %}

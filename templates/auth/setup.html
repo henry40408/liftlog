@@ -3,27 +3,23 @@
 {% block title %}Setup - LiftLog{% endblock %}
 
 {% block content %}
-<h1>LiftLog</h1>
-<h2>Initial Setup</h2>
-<p>Create the first user account to get started.</p>
+<h1>Initial Setup</h1>
+
+<p class="muted">Create the first user account to get started.</p>
 
 {% if let Some(err) = error %}
-<p style="color: red;">{{ err }}</p>
+<div class="error">{{ err }}</div>
 {% endif %}
 
 <form method="post" action="/auth/setup">
-    <p>
-        <label>Username:<br>
-            <input type="text" name="username" required autofocus>
-        </label>
-    </p>
-    <p>
-        <label>Password (min 6 characters):<br>
-            <input type="password" name="password" required minlength="6">
-        </label>
-    </p>
-    <p>
-        <button type="submit">Create Account</button>
-    </p>
+    <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus>
+    </div>
+    <div class="form-group">
+        <label for="password">Password (min 6 characters)</label>
+        <input type="password" id="password" name="password" required minlength="6">
+    </div>
+    <button type="submit">[Create Account]</button>
 </form>
 {% endblock %}

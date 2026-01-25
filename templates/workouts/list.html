@@ -7,10 +7,10 @@
 
 <h1>Workouts</h1>
 
-<p><a href="/workouts/new">+ New Workout</a></p>
+<p><a href="/workouts/new">[+ New Workout]</a></p>
 
 {% if workouts.is_empty() %}
-<p>No workouts yet.</p>
+<p class="muted">No workouts yet.</p>
 {% else %}
 <table>
     <thead>
@@ -23,20 +23,20 @@
         {% for w in workouts %}
         <tr>
             <td><a href="/workouts/{{ w.id }}">{{ w.date }}</a></td>
-            <td>{{ w.notes.as_deref().unwrap_or("-") }}</td>
+            <td class="muted">{% match w.notes %}{% when Some with (n) %}{{ n }}{% when None %}-{% endmatch %}</td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 
 {% if total_pages > 1 %}
-<p>
+<p class="muted">
     Page {{ page }} of {{ total_pages }}
     {% if page > 1 %}
-    | <a href="/workouts?page={{ page - 1 }}">&larr; Previous</a>
+    | <a href="/workouts?page={{ page - 1 }}">[&larr; Previous]</a>
     {% endif %}
     {% if page < total_pages %}
-    | <a href="/workouts?page={{ page + 1 }}">Next &rarr;</a>
+    | <a href="/workouts?page={{ page + 1 }}">[Next &rarr;]</a>
     {% endif %}
 </p>
 {% endif %}

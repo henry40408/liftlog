@@ -2,7 +2,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use tower_http::services::ServeDir;
 
 use crate::handlers::{auth, dashboard, exercises, stats, workouts};
 
@@ -45,6 +44,4 @@ pub fn create_router(
         .route("/stats/exercise/:id", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
         .with_state(stats_state)
-        // Static files
-        .nest_service("/static", ServeDir::new("static"))
 }

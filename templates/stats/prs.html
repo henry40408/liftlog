@@ -8,7 +8,7 @@
 <h1>Personal Records</h1>
 
 {% if prs.is_empty() %}
-<p>No personal records yet. Start lifting!</p>
+<p class="muted">No personal records yet. Start lifting!</p>
 {% else %}
 <table>
     <thead>
@@ -25,12 +25,14 @@
             <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
             <td>{{ pr.record_type }}</td>
             <td>{{ pr.value }}</td>
-            <td>{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+            <td class="muted">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% endif %}
 
-<p><a href="/stats">&larr; Back to Stats</a></p>
+<div class="link">
+    &larr; <a href="/stats">[Back to Stats]</a>
+</div>
 {% endblock %}

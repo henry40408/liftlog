@@ -3,26 +3,21 @@
 {% block title %}Login - LiftLog{% endblock %}
 
 {% block content %}
-<h1>LiftLog</h1>
-<h2>Login</h2>
+<h1>Login</h1>
 
 {% if let Some(err) = error %}
-<p style="color: red;">{{ err }}</p>
+<div class="error">{{ err }}</div>
 {% endif %}
 
 <form method="post" action="/auth/login">
-    <p>
-        <label>Username:<br>
-            <input type="text" name="username" required autofocus>
-        </label>
-    </p>
-    <p>
-        <label>Password:<br>
-            <input type="password" name="password" required>
-        </label>
-    </p>
-    <p>
-        <button type="submit">Login</button>
-    </p>
+    <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus autocomplete="username">
+    </div>
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+    </div>
+    <button type="submit">[Login]</button>
 </form>
 {% endblock %}

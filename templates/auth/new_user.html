@@ -8,24 +8,22 @@
 <h1>Add New User</h1>
 
 {% if let Some(err) = error %}
-<p style="color: red;">{{ err }}</p>
+<div class="error">{{ err }}</div>
 {% endif %}
 
 <form method="post" action="/users/new">
-    <p>
-        <label>Username:<br>
-            <input type="text" name="username" required autofocus>
-        </label>
-    </p>
-    <p>
-        <label>Password (min 6 characters):<br>
-            <input type="password" name="password" required minlength="6">
-        </label>
-    </p>
-    <p>
-        <button type="submit">Create User</button>
-    </p>
+    <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus>
+    </div>
+    <div class="form-group">
+        <label for="password">Password (min 6 characters)</label>
+        <input type="password" id="password" name="password" required minlength="6">
+    </div>
+    <button type="submit">[Create User]</button>
 </form>
 
-<p><a href="/users">&larr; Back to Users</a></p>
+<div class="link">
+    &larr; <a href="/users">[Back to Users]</a>
+</div>
 {% endblock %}
