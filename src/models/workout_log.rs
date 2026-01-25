@@ -1,8 +1,22 @@
 use chrono::{DateTime, Utc};
 use rusqlite::Row;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::FromSqliteRow;
+
+/// Deserialize an optional integer from a form field.
+/// Handles empty strings by returning None instead of failing.
+fn deserialize_optional_i32<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        Some(s) if s.is_empty() => Ok(None),
+        Some(s) => s.parse().map(Some).map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkoutLog {
@@ -38,6 +52,7 @@ pub struct CreateWorkoutLog {
     pub exercise_id: String,
     pub reps: i32,
     pub weight: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_i32")]
     pub rpe: Option<i32>,
 }
 
