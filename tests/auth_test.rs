@@ -22,10 +22,7 @@ async fn test_login_page_redirects_to_setup_when_no_users() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(
-        response.headers().get("location").unwrap(),
-        "/auth/setup"
-    );
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/setup");
 }
 
 #[tokio::test]
@@ -52,19 +49,11 @@ async fn test_dashboard_requires_auth() {
     let app = common::create_test_app(pool);
 
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
     // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(
-        response.headers().get("location").unwrap(),
-        "/auth/login"
-    );
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }

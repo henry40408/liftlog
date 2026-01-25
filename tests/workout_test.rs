@@ -23,10 +23,7 @@ async fn test_workouts_list_requires_auth() {
 
     // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(
-        response.headers().get("location").unwrap(),
-        "/auth/login"
-    );
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
 
 #[tokio::test]

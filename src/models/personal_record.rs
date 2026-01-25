@@ -52,6 +52,7 @@ impl FromSqliteRow for PersonalRecordWithExercise {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordType {
     MaxWeight,
@@ -59,6 +60,7 @@ pub enum RecordType {
     FiveRepMax,
 }
 
+#[allow(dead_code)]
 impl RecordType {
     pub fn as_str(&self) -> &'static str {
         match self {

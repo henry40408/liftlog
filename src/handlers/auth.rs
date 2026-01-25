@@ -8,7 +8,7 @@ use axum::{
 use axum_extra::extract::cookie::SignedCookieJar;
 
 use crate::error::{AppError, Result};
-use crate::middleware::{AuthUser, auth::OptionalAuthUser};
+use crate::middleware::{auth::OptionalAuthUser, AuthUser};
 use crate::models::{CreateUser, LoginCredentials, User};
 use crate::repositories::UserRepository;
 use crate::session::SessionKey;
@@ -62,7 +62,12 @@ pub async fn login_page(
     }
 
     let template = LoginTemplate { error: None };
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn login_submit(
@@ -87,14 +92,20 @@ pub async fn login_submit(
             let template = LoginTemplate {
                 error: Some("Invalid username or password".to_string()),
             };
-            Ok((jar, Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?)).into_response())
+            Ok((
+                jar,
+                Html(
+                    template
+                        .render()
+                        .map_err(|e| AppError::Internal(e.to_string()))?,
+                ),
+            )
+                .into_response())
         }
     }
 }
 
-pub async fn setup_page(
-    State(state): State<AuthState>,
-) -> Result<Response> {
+pub async fn setup_page(State(state): State<AuthState>) -> Result<Response> {
     // Only allow setup if no users exist
     let user_count = state.user_repo.count().await?;
     if user_count > 0 {
@@ -102,7 +113,12 @@ pub async fn setup_page(
     }
 
     let template = SetupTemplate { error: None };
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn setup_submit(
@@ -124,18 +140,37 @@ pub async fn setup_submit(
         let template = SetupTemplate {
             error: Some("Username is required".to_string()),
         };
-        return Ok((jar, Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?)).into_response());
+        return Ok((
+            jar,
+            Html(
+                template
+                    .render()
+                    .map_err(|e| AppError::Internal(e.to_string()))?,
+            ),
+        )
+            .into_response());
     }
 
     if form.password.len() < 6 {
         let template = SetupTemplate {
             error: Some("Password must be at least 6 characters".to_string()),
         };
-        return Ok((jar, Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?)).into_response());
+        return Ok((
+            jar,
+            Html(
+                template
+                    .render()
+                    .map_err(|e| AppError::Internal(e.to_string()))?,
+            ),
+        )
+            .into_response());
     }
 
     // Create the first user (admin)
-    let user = state.user_repo.create(&form.username, &form.password).await?;
+    let user = state
+        .user_repo
+        .create(&form.username, &form.password)
+        .await?;
 
     // Auto login
     let jar = AuthUser::login(jar, &user);
@@ -143,10 +178,7 @@ pub async fn setup_submit(
     Ok((jar, Redirect::to("/")).into_response())
 }
 
-pub async fn logout(
-    Extension(key): Extension<SessionKey>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn logout(Extension(key): Extension<SessionKey>, headers: HeaderMap) -> Response {
     let jar = SignedCookieJar::from_headers(&headers, key.0);
     let jar = AuthUser::logout(jar);
     (jar, Redirect::to("/auth/login")).into_response()
@@ -157,7 +189,12 @@ pub async fn new_user_page(auth_user: AuthUser) -> Result<Response> {
         user: auth_user,
         error: None,
     };
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn new_user_submit(
@@ -171,7 +208,12 @@ pub async fn new_user_submit(
             user: auth_user,
             error: Some("Username is required".to_string()),
         };
-        return Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response());
+        return Ok(Html(
+            template
+                .render()
+                .map_err(|e| AppError::Internal(e.to_string()))?,
+        )
+        .into_response());
     }
 
     if form.password.len() < 6 {
@@ -179,29 +221,52 @@ pub async fn new_user_submit(
             user: auth_user,
             error: Some("Password must be at least 6 characters".to_string()),
         };
-        return Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response());
+        return Ok(Html(
+            template
+                .render()
+                .map_err(|e| AppError::Internal(e.to_string()))?,
+        )
+        .into_response());
     }
 
     // Check if username already exists
-    if state.user_repo.find_by_username(&form.username).await?.is_some() {
+    if state
+        .user_repo
+        .find_by_username(&form.username)
+        .await?
+        .is_some()
+    {
         let template = NewUserTemplate {
             user: auth_user,
             error: Some("Username already exists".to_string()),
         };
-        return Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response());
+        return Ok(Html(
+            template
+                .render()
+                .map_err(|e| AppError::Internal(e.to_string()))?,
+        )
+        .into_response());
     }
 
     // Create user
-    state.user_repo.create(&form.username, &form.password).await?;
+    state
+        .user_repo
+        .create(&form.username, &form.password)
+        .await?;
 
     Ok(Redirect::to("/users").into_response())
 }
 
-pub async fn users_list(
-    State(state): State<AuthState>,
-    auth_user: AuthUser,
-) -> Result<Response> {
+pub async fn users_list(State(state): State<AuthState>, auth_user: AuthUser) -> Result<Response> {
     let users = state.user_repo.find_all().await?;
-    let template = UsersListTemplate { user: auth_user, users };
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    let template = UsersListTemplate {
+        user: auth_user,
+        users,
+    };
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }

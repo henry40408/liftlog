@@ -98,7 +98,12 @@ fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
     let migrations_dir = PathBuf::from("migrations");
     let mut entries: Vec<_> = std::fs::read_dir(&migrations_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "sql").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "sql")
+                .unwrap_or(false)
+        })
         .collect();
 
     entries.sort_by_key(|e| e.file_name());

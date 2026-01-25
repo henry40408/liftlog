@@ -21,22 +21,21 @@ impl ExerciseRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM exercises WHERE id = ?")?;
-            let result = stmt
-                .query_row([&id], |row| Exercise::from_row(row))
-                .optional()?;
+            let result = stmt.query_row([&id], Exercise::from_row).optional()?;
             Ok(result)
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    #[allow(dead_code)]
     pub async fn find_all(&self) -> Result<Vec<Exercise>> {
         let pool = self.pool.clone();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM exercises ORDER BY category, name")?;
             let exercises = stmt
-                .query_map([], |row| Exercise::from_row(row))?
+                .query_map([], Exercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
@@ -44,14 +43,16 @@ impl ExerciseRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    #[allow(dead_code)]
     pub async fn find_by_category(&self, category: &str) -> Result<Vec<Exercise>> {
         let pool = self.pool.clone();
         let category = category.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare("SELECT * FROM exercises WHERE category = ? ORDER BY name")?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM exercises WHERE category = ? ORDER BY name")?;
             let exercises = stmt
-                .query_map([&category], |row| Exercise::from_row(row))?
+                .query_map([&category], Exercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
@@ -68,7 +69,7 @@ impl ExerciseRepository {
                 "SELECT * FROM exercises WHERE is_default = 1 OR user_id = ? ORDER BY category, name"
             )?;
             let exercises = stmt
-                .query_map([&user_id], |row| Exercise::from_row(row))?
+                .query_map([&user_id], Exercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
@@ -76,16 +77,16 @@ impl ExerciseRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    #[allow(dead_code)]
     pub async fn find_user_custom(&self, user_id: &str) -> Result<Vec<Exercise>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-                "SELECT * FROM exercises WHERE user_id = ? ORDER BY category, name"
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM exercises WHERE user_id = ? ORDER BY category, name")?;
             let exercises = stmt
-                .query_map([&user_id], |row| Exercise::from_row(row))?
+                .query_map([&user_id], Exercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
@@ -136,6 +137,7 @@ impl ExerciseRepository {
         Ok(exercise)
     }
 
+    #[allow(dead_code)]
     pub async fn delete(&self, id: &str, user_id: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();

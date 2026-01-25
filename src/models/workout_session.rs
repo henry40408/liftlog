@@ -31,6 +31,7 @@ pub struct CreateWorkoutSession {
     pub notes: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct UpdateWorkoutSession {
     pub date: Option<NaiveDate>,

@@ -24,13 +24,19 @@ struct DashboardTemplate {
     recent_workouts: Vec<WorkoutSession>,
 }
 
-pub async fn index(
-    State(state): State<DashboardState>,
-    auth_user: AuthUser,
-) -> Result<Response> {
-    let workouts_this_week = state.workout_repo.count_workouts_this_week(&auth_user.id).await?;
-    let workouts_this_month = state.workout_repo.count_workouts_this_month(&auth_user.id).await?;
-    let total_volume = state.workout_repo.get_total_volume_this_week(&auth_user.id).await?;
+pub async fn index(State(state): State<DashboardState>, auth_user: AuthUser) -> Result<Response> {
+    let workouts_this_week = state
+        .workout_repo
+        .count_workouts_this_week(&auth_user.id)
+        .await?;
+    let workouts_this_month = state
+        .workout_repo
+        .count_workouts_this_month(&auth_user.id)
+        .await?;
+    let total_volume = state
+        .workout_repo
+        .get_total_volume_this_week(&auth_user.id)
+        .await?;
     let recent_workouts = state
         .workout_repo
         .find_sessions_by_user_paginated(&auth_user.id, 5, 0)
@@ -44,5 +50,10 @@ pub async fn index(
         recent_workouts,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }

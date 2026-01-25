@@ -1,10 +1,10 @@
-use chrono::Utc;
-use rusqlite::OptionalExtension;
-use uuid::Uuid;
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
+use chrono::Utc;
+use rusqlite::OptionalExtension;
+use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
@@ -31,15 +31,14 @@ impl UserRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    #[allow(dead_code)]
     pub async fn find_by_id(&self, id: &str) -> Result<Option<User>> {
         let pool = self.pool.clone();
         let id = id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM users WHERE id = ?")?;
-            let result = stmt
-                .query_row([&id], |row| User::from_row(row))
-                .optional()?;
+            let result = stmt.query_row([&id], User::from_row).optional()?;
             Ok(result)
         })
         .await
@@ -52,9 +51,7 @@ impl UserRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM users WHERE username = ?")?;
-            let result = stmt
-                .query_row([&username], |row| User::from_row(row))
-                .optional()?;
+            let result = stmt.query_row([&username], User::from_row).optional()?;
             Ok(result)
         })
         .await
@@ -67,7 +64,7 @@ impl UserRepository {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM users ORDER BY created_at DESC")?;
             let users = stmt
-                .query_map([], |row| User::from_row(row))?
+                .query_map([], User::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(users)
         })
@@ -94,7 +91,12 @@ impl UserRepository {
             let conn = pool.get()?;
             conn.execute(
                 "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                rusqlite::params![user_clone.id, user_clone.username, user_clone.password_hash, user_clone.created_at],
+                rusqlite::params![
+                    user_clone.id,
+                    user_clone.username,
+                    user_clone.password_hash,
+                    user_clone.created_at
+                ],
             )?;
             Ok(())
         })
@@ -119,6 +121,7 @@ impl UserRepository {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();

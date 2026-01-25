@@ -9,7 +9,9 @@ use serde::Deserialize;
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
-use crate::models::{CreateWorkoutLog, CreateWorkoutSession, Exercise, WorkoutLogWithExercise, WorkoutSession};
+use crate::models::{
+    CreateWorkoutLog, CreateWorkoutSession, Exercise, WorkoutLogWithExercise, WorkoutSession,
+};
 use crate::repositories::{ExerciseRepository, WorkoutRepository};
 
 #[derive(Clone)]
@@ -75,7 +77,10 @@ pub async fn list(
         .find_sessions_by_user_paginated(&auth_user.id, per_page, offset)
         .await?;
 
-    let total = state.workout_repo.count_sessions_by_user(&auth_user.id).await?;
+    let total = state
+        .workout_repo
+        .count_sessions_by_user(&auth_user.id)
+        .await?;
     let total_pages = (total + per_page - 1) / per_page;
 
     let template = WorkoutsListTemplate {
@@ -85,7 +90,12 @@ pub async fn list(
         total_pages,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
@@ -97,7 +107,12 @@ pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
         error: None,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn create(
@@ -130,7 +145,10 @@ pub async fn show(
     }
 
     let logs = state.workout_repo.find_logs_by_session(&id).await?;
-    let exercises = state.exercise_repo.find_available_for_user(&auth_user.id).await?;
+    let exercises = state
+        .exercise_repo
+        .find_available_for_user(&auth_user.id)
+        .await?;
 
     let template = ShowWorkoutTemplate {
         user: auth_user,
@@ -140,7 +158,12 @@ pub async fn show(
         error: None,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn edit_page(
@@ -164,7 +187,12 @@ pub async fn edit_page(
         error: None,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -192,7 +220,10 @@ pub async fn delete(
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
-    state.workout_repo.delete_session(&id, &auth_user.id).await?;
+    state
+        .workout_repo
+        .delete_session(&id, &auth_user.id)
+        .await?;
     Ok(Redirect::to("/workouts").into_response())
 }
 

@@ -64,25 +64,23 @@ impl WorkoutRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM workout_sessions WHERE id = ?")?;
-            let result = stmt
-                .query_row([&id], |row| WorkoutSession::from_row(row))
-                .optional()?;
+            let result = stmt.query_row([&id], WorkoutSession::from_row).optional()?;
             Ok(result)
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    #[allow(dead_code)]
     pub async fn find_sessions_by_user(&self, user_id: &str) -> Result<Vec<WorkoutSession>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-                "SELECT * FROM workout_sessions WHERE user_id = ? ORDER BY date DESC"
-            )?;
+            let mut stmt = conn
+                .prepare("SELECT * FROM workout_sessions WHERE user_id = ? ORDER BY date DESC")?;
             let sessions = stmt
-                .query_map([&user_id], |row| WorkoutSession::from_row(row))?
+                .query_map([&user_id], WorkoutSession::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(sessions)
         })
@@ -104,9 +102,7 @@ impl WorkoutRepository {
                 "SELECT * FROM workout_sessions WHERE user_id = ? ORDER BY date DESC LIMIT ? OFFSET ?"
             )?;
             let sessions = stmt
-                .query_map(rusqlite::params![user_id, limit, offset], |row| {
-                    WorkoutSession::from_row(row)
-                })?
+                .query_map(rusqlite::params![user_id, limit, offset], WorkoutSession::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(sessions)
         })
@@ -227,7 +223,10 @@ impl WorkoutRepository {
         Ok(log)
     }
 
-    pub async fn find_logs_by_session(&self, session_id: &str) -> Result<Vec<WorkoutLogWithExercise>> {
+    pub async fn find_logs_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<WorkoutLogWithExercise>> {
         let pool = self.pool.clone();
         let session_id = session_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -238,10 +237,10 @@ impl WorkoutRepository {
                  FROM workout_logs wl
                  JOIN exercises e ON wl.exercise_id = e.id
                  WHERE wl.session_id = ?
-                 ORDER BY wl.created_at, wl.set_number"
+                 ORDER BY wl.created_at, wl.set_number",
             )?;
             let logs = stmt
-                .query_map([&session_id], |row| WorkoutLogWithExercise::from_row(row))?
+                .query_map([&session_id], WorkoutLogWithExercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
@@ -249,15 +248,14 @@ impl WorkoutRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    #[allow(dead_code)]
     pub async fn find_log_by_id(&self, id: &str) -> Result<Option<WorkoutLog>> {
         let pool = self.pool.clone();
         let id = id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare("SELECT * FROM workout_logs WHERE id = ?")?;
-            let result = stmt
-                .query_row([&id], |row| WorkoutLog::from_row(row))
-                .optional()?;
+            let result = stmt.query_row([&id], WorkoutLog::from_row).optional()?;
             Ok(result)
         })
         .await
@@ -331,7 +329,7 @@ impl WorkoutRepository {
             let result = stmt
                 .query_row(
                     rusqlite::params![user_id, exercise_id, record_type],
-                    |row| PersonalRecord::from_row(row),
+                    PersonalRecord::from_row,
                 )
                 .optional()?;
             Ok(result)
@@ -395,10 +393,10 @@ impl WorkoutRepository {
                  FROM personal_records pr
                  JOIN exercises e ON pr.exercise_id = e.id
                  WHERE pr.user_id = ?
-                 ORDER BY pr.achieved_at DESC"
+                 ORDER BY pr.achieved_at DESC",
             )?;
             let prs = stmt
-                .query_map([&user_id], |row| PersonalRecordWithExercise::from_row(row))?
+                .query_map([&user_id], PersonalRecordWithExercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(prs)
         })
@@ -419,12 +417,13 @@ impl WorkoutRepository {
             let mut stmt = conn.prepare(
                 "SELECT * FROM personal_records
                  WHERE user_id = ? AND exercise_id = ?
-                 ORDER BY record_type"
+                 ORDER BY record_type",
             )?;
             let prs = stmt
-                .query_map(rusqlite::params![user_id, exercise_id], |row| {
-                    PersonalRecord::from_row(row)
-                })?
+                .query_map(
+                    rusqlite::params![user_id, exercise_id],
+                    PersonalRecord::from_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(prs)
         })
@@ -505,12 +504,13 @@ impl WorkoutRepository {
                  JOIN workout_sessions ws ON wl.session_id = ws.id
                  WHERE ws.user_id = ? AND wl.exercise_id = ?
                  ORDER BY ws.date DESC, wl.set_number
-                 LIMIT ?"
+                 LIMIT ?",
             )?;
             let logs = stmt
-                .query_map(rusqlite::params![user_id, exercise_id, limit], |row| {
-                    WorkoutLog::from_row(row)
-                })?
+                .query_map(
+                    rusqlite::params![user_id, exercise_id, limit],
+                    WorkoutLog::from_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })

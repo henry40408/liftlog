@@ -42,14 +42,23 @@ struct PrsTemplate {
     prs: Vec<PersonalRecordWithExercise>,
 }
 
-pub async fn index(
-    State(state): State<StatsState>,
-    auth_user: AuthUser,
-) -> Result<Response> {
-    let workouts_this_week = state.workout_repo.count_workouts_this_week(&auth_user.id).await?;
-    let workouts_this_month = state.workout_repo.count_workouts_this_month(&auth_user.id).await?;
-    let total_volume = state.workout_repo.get_total_volume_this_week(&auth_user.id).await?;
-    let total_workouts = state.workout_repo.count_sessions_by_user(&auth_user.id).await?;
+pub async fn index(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
+    let workouts_this_week = state
+        .workout_repo
+        .count_workouts_this_week(&auth_user.id)
+        .await?;
+    let workouts_this_month = state
+        .workout_repo
+        .count_workouts_this_month(&auth_user.id)
+        .await?;
+    let total_volume = state
+        .workout_repo
+        .get_total_volume_this_week(&auth_user.id)
+        .await?;
+    let total_workouts = state
+        .workout_repo
+        .count_sessions_by_user(&auth_user.id)
+        .await?;
     let prs = state.workout_repo.find_prs_by_user(&auth_user.id).await?;
 
     let template = StatsTemplate {
@@ -61,7 +70,12 @@ pub async fn index(
         prs,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn exercise_stats(
@@ -92,16 +106,26 @@ pub async fn exercise_stats(
         prs,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
-pub async fn prs_list(
-    State(state): State<StatsState>,
-    auth_user: AuthUser,
-) -> Result<Response> {
+pub async fn prs_list(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
     let prs = state.workout_repo.find_prs_by_user(&auth_user.id).await?;
 
-    let template = PrsTemplate { user: auth_user, prs };
+    let template = PrsTemplate {
+        user: auth_user,
+        prs,
+    };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }

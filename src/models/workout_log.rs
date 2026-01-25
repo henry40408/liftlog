@@ -36,6 +36,7 @@ impl FromSqliteRow for WorkoutLog {
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkoutLog {
     pub exercise_id: String,
+    #[allow(dead_code)]
     pub set_number: i32,
     pub reps: i32,
     pub weight: f64,

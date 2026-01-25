@@ -19,11 +19,20 @@ pub fn create_router(
         .route("/", get(dashboard::index))
         .with_state(dashboard_state)
         // Auth routes
-        .route("/auth/login", get(auth::login_page).post(auth::login_submit))
-        .route("/auth/setup", get(auth::setup_page).post(auth::setup_submit))
+        .route(
+            "/auth/login",
+            get(auth::login_page).post(auth::login_submit),
+        )
+        .route(
+            "/auth/setup",
+            get(auth::setup_page).post(auth::setup_submit),
+        )
         .route("/auth/logout", post(auth::logout))
         .route("/users", get(auth::users_list))
-        .route("/users/new", get(auth::new_user_page).post(auth::new_user_submit))
+        .route(
+            "/users/new",
+            get(auth::new_user_page).post(auth::new_user_submit),
+        )
         .with_state(auth_state)
         // Workout routes
         .route("/workouts", get(workouts::list))
@@ -34,7 +43,10 @@ pub fn create_router(
         .route("/workouts/:id", post(workouts::update))
         .route("/workouts/:id/delete", post(workouts::delete))
         .route("/workouts/:id/logs", post(workouts::add_log))
-        .route("/workouts/:id/logs/:log_id/delete", post(workouts::delete_log))
+        .route(
+            "/workouts/:id/logs/:log_id/delete",
+            post(workouts::delete_log),
+        )
         .with_state(workouts_state)
         // Exercise routes
         .route("/exercises", get(exercises::list))

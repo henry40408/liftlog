@@ -11,6 +11,7 @@ impl SessionKey {
         Self(Key::generate())
     }
 
+    #[allow(dead_code)]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         Key::try_from(bytes).ok().map(Self)
     }
