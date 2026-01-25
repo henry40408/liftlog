@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Personal Records - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Personal Records</h1>
+
+{% if prs.is_empty() %}
+<p>No personal records yet. Start lifting!</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Exercise</th>
+            <th>Type</th>
+            <th>Value</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pr in prs %}
+        <tr>
+            <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
+            <td>{{ pr.record_type }}</td>
+            <td>{{ pr.value }}</td>
+            <td>{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<p><a href="/stats">&larr; Back to Stats</a></p>
+{% endblock %}

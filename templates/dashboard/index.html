@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Dashboard</h1>
+
+<h2>This Week</h2>
+<ul>
+    <li>Workouts: {{ workouts_this_week }}</li>
+    <li>Total Volume: {{ total_volume }}</li>
+</ul>
+
+<h2>This Month</h2>
+<ul>
+    <li>Workouts: {{ workouts_this_month }}</li>
+</ul>
+
+<h2>Recent Workouts</h2>
+{% if recent_workouts.is_empty() %}
+<p>No workouts yet. <a href="/workouts/new">Start your first workout!</a></p>
+{% else %}
+<ul>
+    {% for w in recent_workouts %}
+    <li>
+        <a href="/workouts/{{ w.id }}">{{ w.date }}</a>
+        {% if let Some(notes) = w.notes %}
+        - {{ notes }}
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+<p><a href="/workouts">View all workouts &rarr;</a></p>
+{% endif %}
+
+<h2>Quick Actions</h2>
+<ul>
+    <li><a href="/workouts/new">+ New Workout</a></li>
+    <li><a href="/stats/prs">View Personal Records</a></li>
+</ul>
+{% endblock %}

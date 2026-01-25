@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Workout - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Edit Workout</h1>
+
+{% if let Some(err) = error %}
+<p style="color: red;">{{ err }}</p>
+{% endif %}
+
+<form method="post" action="/workouts/{{ workout.id }}">
+    <p>
+        <label>Date:<br>
+            <input type="date" name="date" value="{{ workout.date }}" required>
+        </label>
+    </p>
+    <p>
+        <label>Notes (optional):<br>
+            <textarea name="notes" rows="3" cols="40">{{ workout.notes.as_deref().unwrap_or("") }}</textarea>
+        </label>
+    </p>
+    <p>
+        <button type="submit">Save Changes</button>
+    </p>
+</form>
+
+<p><a href="/workouts/{{ workout.id }}">&larr; Back to Workout</a></p>
+{% endblock %}

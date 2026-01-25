@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Exercises - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Exercises</h1>
+
+<p><a href="/exercises/new">+ Add Custom Exercise</a></p>
+
+{% for cat in categories %}
+<h2>{{ cat.display_name }}</h2>
+<ul>
+    {% for ex in exercises %}
+    {% if ex.category == cat.name %}
+    <li>
+        <a href="/stats/exercise/{{ ex.id }}">{{ ex.name }}</a>
+        {% if let Some(equip) = ex.equipment %}
+        ({{ equip }})
+        {% endif %}
+        {% if !ex.is_default %}
+        [custom]
+        {% endif %}
+    </li>
+    {% endif %}
+    {% endfor %}
+</ul>
+{% endfor %}
+{% endblock %}

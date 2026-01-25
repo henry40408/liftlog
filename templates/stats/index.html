@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Stats - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Statistics</h1>
+
+<h2>Overview</h2>
+<ul>
+    <li>Total Workouts: {{ total_workouts }}</li>
+    <li>This Week: {{ workouts_this_week }}</li>
+    <li>This Month: {{ workouts_this_month }}</li>
+    <li>Volume This Week: {{ total_volume }}</li>
+</ul>
+
+<h2>Recent Personal Records</h2>
+{% if prs.is_empty() %}
+<p>No personal records yet. Start lifting!</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Exercise</th>
+            <th>Type</th>
+            <th>Value</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pr in prs %}
+        <tr>
+            <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
+            <td>{{ pr.record_type }}</td>
+            <td>{{ pr.value }}</td>
+            <td>{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<p><a href="/stats/prs">View all PRs &rarr;</a></p>
+{% endif %}
+{% endblock %}

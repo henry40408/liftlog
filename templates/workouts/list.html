@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Workouts - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Workouts</h1>
+
+<p><a href="/workouts/new">+ New Workout</a></p>
+
+{% if workouts.is_empty() %}
+<p>No workouts yet.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for w in workouts %}
+        <tr>
+            <td><a href="/workouts/{{ w.id }}">{{ w.date }}</a></td>
+            <td>{{ w.notes.as_deref().unwrap_or("-") }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<p>
+    Page {{ page }} of {{ total_pages }}
+    {% if page > 1 %}
+    | <a href="/workouts?page={{ page - 1 }}">&larr; Previous</a>
+    {% endif %}
+    {% if page < total_pages %}
+    | <a href="/workouts?page={{ page + 1 }}">Next &rarr;</a>
+    {% endif %}
+</p>
+{% endif %}
+{% endif %}
+{% endblock %}

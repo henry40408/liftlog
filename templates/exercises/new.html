@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}New Exercise - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Add Custom Exercise</h1>
+
+{% if let Some(err) = error %}
+<p style="color: red;">{{ err }}</p>
+{% endif %}
+
+<form method="post" action="/exercises">
+    <p>
+        <label>Name:<br>
+            <input type="text" name="name" required autofocus>
+        </label>
+    </p>
+    <p>
+        <label>Category:<br>
+            <select name="category" required>
+                {% for cat in categories %}
+                <option value="{{ cat.name }}">{{ cat.display_name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>Muscle Group:<br>
+            <input type="text" name="muscle_group" required placeholder="e.g., Biceps">
+        </label>
+    </p>
+    <p>
+        <label>Equipment (optional):<br>
+            <input type="text" name="equipment" placeholder="e.g., Barbell, Dumbbell">
+        </label>
+    </p>
+    <p>
+        <button type="submit">Add Exercise</button>
+    </p>
+</form>
+
+<p><a href="/exercises">&larr; Back to Exercises</a></p>
+{% endblock %}

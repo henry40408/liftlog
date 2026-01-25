@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}New User - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Add New User</h1>
+
+{% if let Some(err) = error %}
+<p style="color: red;">{{ err }}</p>
+{% endif %}
+
+<form method="post" action="/users/new">
+    <p>
+        <label>Username:<br>
+            <input type="text" name="username" required autofocus>
+        </label>
+    </p>
+    <p>
+        <label>Password (min 6 characters):<br>
+            <input type="password" name="password" required minlength="6">
+        </label>
+    </p>
+    <p>
+        <button type="submit">Create User</button>
+    </p>
+</form>
+
+<p><a href="/users">&larr; Back to Users</a></p>
+{% endblock %}

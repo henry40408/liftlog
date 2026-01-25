@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}{{ exercise.name }} Stats - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>{{ exercise.name }}</h1>
+<p>
+    Category: {{ exercise.category }} |
+    Muscle: {{ exercise.muscle_group }}
+    {% if let Some(equip) = exercise.equipment %}
+    | Equipment: {{ equip }}
+    {% endif %}
+</p>
+
+<h2>Personal Records</h2>
+{% if prs.is_empty() %}
+<p>No PRs for this exercise yet.</p>
+{% else %}
+<ul>
+    {% for pr in prs %}
+    <li>{{ pr.record_type }}: {{ pr.value }} ({{ pr.achieved_at.format("%Y-%m-%d") }})</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Recent History</h2>
+{% if history.is_empty() %}
+<p>No history for this exercise.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Set</th>
+            <th>Weight</th>
+            <th>Reps</th>
+            <th>RPE</th>
+            <th>PR</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for log in history %}
+        <tr>
+            <td>{{ log.set_number }}</td>
+            <td>{{ log.weight }}</td>
+            <td>{{ log.reps }}</td>
+            <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
+            <td>{% if log.is_pr %}*{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<p><a href="/exercises">&larr; Back to Exercises</a></p>
+{% endblock %}

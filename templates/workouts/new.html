@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}New Workout - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>New Workout</h1>
+
+{% if let Some(err) = error %}
+<p style="color: red;">{{ err }}</p>
+{% endif %}
+
+<form method="post" action="/workouts">
+    <p>
+        <label>Date:<br>
+            <input type="date" name="date" value="{{ today }}" required>
+        </label>
+    </p>
+    <p>
+        <label>Notes (optional):<br>
+            <textarea name="notes" rows="3" cols="40"></textarea>
+        </label>
+    </p>
+    <p>
+        <button type="submit">Create Workout</button>
+    </p>
+</form>
+
+<p><a href="/workouts">&larr; Back to Workouts</a></p>
+{% endblock %}

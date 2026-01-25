@@ -1,0 +1,12 @@
+<nav>
+    <a href="/">LiftLog</a> |
+    <a href="/workouts">Workouts</a> |
+    <a href="/exercises">Exercises</a> |
+    <a href="/stats">Stats</a> |
+    <a href="/users">Users</a> |
+    <span>{{ user.username }}</span>
+    <form action="/auth/logout" method="post" style="display:inline;">
+        <button type="submit">Logout</button>
+    </form>
+</nav>
+<hr>
