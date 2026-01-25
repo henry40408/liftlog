@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
-use crate::models::{FromSqliteRow, User};
+use crate::models::{FromSqliteRow, User, UserRole};
 
 #[derive(Clone)]
 pub struct UserRepository {
@@ -72,7 +72,7 @@ impl UserRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
-    pub async fn create(&self, username: &str, password: &str) -> Result<User> {
+    pub async fn create(&self, username: &str, password: &str, role: UserRole) -> Result<User> {
         let password_hash = hash_password(password)?;
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -83,6 +83,7 @@ impl UserRepository {
             id: id.clone(),
             username: username.clone(),
             password_hash,
+            role,
             created_at: now,
         };
         let user_clone = user.clone();
@@ -90,11 +91,12 @@ impl UserRepository {
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = pool.get()?;
             conn.execute(
-                "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
                 rusqlite::params![
                     user_clone.id,
                     user_clone.username,
                     user_clone.password_hash,
+                    user_clone.role.as_str(),
                     user_clone.created_at
                 ],
             )?;
@@ -121,13 +123,27 @@ impl UserRepository {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn delete(&self, id: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let rows = conn.execute("DELETE FROM users WHERE id = ?", [&id])?;
+            Ok(rows > 0)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    pub async fn update_role(&self, id: &str, role: UserRole) -> Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?",
+                rusqlite::params![role.as_str(), id],
+            )?;
             Ok(rows > 0)
         })
         .await

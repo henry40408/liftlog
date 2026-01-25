@@ -95,6 +95,15 @@ fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
 
     let conn = pool.get()?;
 
+    // Create migrations tracking table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS _migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
     let migrations_dir = PathBuf::from("migrations");
     let mut entries: Vec<_> = std::fs::read_dir(&migrations_dir)?
         .filter_map(|e| e.ok())
@@ -110,11 +119,29 @@ fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
 
     for entry in entries {
         let path = entry.path();
-        let filename = path.file_name().unwrap().to_string_lossy();
+        let filename = path.file_name().unwrap().to_string_lossy().to_string();
+
+        // Check if migration was already applied
+        let already_applied: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM _migrations WHERE name = ?",
+                [&filename],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if already_applied {
+            tracing::debug!("Skipping already applied migration: {}", filename);
+            continue;
+        }
+
         tracing::info!("Running migration: {}", filename);
 
         let sql = std::fs::read_to_string(&path)?;
         conn.execute_batch(&sql)?;
+
+        // Record that migration was applied
+        conn.execute("INSERT INTO _migrations (name) VALUES (?)", [&filename])?;
     }
 
     tracing::info!("Migrations completed");

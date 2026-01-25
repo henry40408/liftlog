@@ -33,6 +33,8 @@ pub fn create_router(
             "/users/new",
             get(auth::new_user_page).post(auth::new_user_submit),
         )
+        .route("/users/:id/delete", post(auth::delete_user))
+        .route("/users/:id/promote", post(auth::promote_user))
         .with_state(auth_state)
         // Workout routes
         .route("/workouts", get(workouts::list))
