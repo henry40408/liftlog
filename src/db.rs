@@ -7,6 +7,8 @@ pub type DbConnection = PooledConnection<SqliteConnectionManager>;
 
 pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
     let path = database_url.strip_prefix("sqlite:").unwrap_or(database_url);
+    // Remove query parameters (e.g., ?mode=rwc)
+    let path = path.split('?').next().unwrap_or(path);
 
     let manager = if path == ":memory:" {
         SqliteConnectionManager::memory()
