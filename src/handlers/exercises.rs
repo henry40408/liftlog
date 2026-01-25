@@ -31,11 +31,11 @@ struct NewExerciseTemplate {
     error: Option<String>,
 }
 
-pub async fn list(
-    State(state): State<ExercisesState>,
-    auth_user: AuthUser,
-) -> Result<Response> {
-    let exercises = state.exercise_repo.find_available_for_user(&auth_user.id).await?;
+pub async fn list(State(state): State<ExercisesState>, auth_user: AuthUser) -> Result<Response> {
+    let exercises = state
+        .exercise_repo
+        .find_available_for_user(&auth_user.id)
+        .await?;
 
     let template = ExercisesListTemplate {
         user: auth_user,
@@ -43,7 +43,12 @@ pub async fn list(
         categories: CATEGORIES,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
@@ -53,7 +58,12 @@ pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
         error: None,
     };
 
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }
 
 pub async fn create(
@@ -67,7 +77,12 @@ pub async fn create(
             categories: CATEGORIES,
             error: Some("Exercise name is required".to_string()),
         };
-        return Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response());
+        return Ok(Html(
+            template
+                .render()
+                .map_err(|e| AppError::Internal(e.to_string()))?,
+        )
+        .into_response());
     }
 
     state

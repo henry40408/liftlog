@@ -1,9 +1,10 @@
 use axum::{
     routing::{get, post},
-    Router,
+    Extension, Router,
 };
 
 use crate::handlers::{auth, dashboard, exercises, stats, workouts};
+use crate::session::SessionKey;
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -11,17 +12,27 @@ pub fn create_router(
     workouts_state: workouts::WorkoutsState,
     exercises_state: exercises::ExercisesState,
     stats_state: stats::StatsState,
+    session_key: SessionKey,
 ) -> Router {
     Router::new()
         // Dashboard
         .route("/", get(dashboard::index))
         .with_state(dashboard_state)
         // Auth routes
-        .route("/auth/login", get(auth::login_page).post(auth::login_submit))
-        .route("/auth/setup", get(auth::setup_page).post(auth::setup_submit))
+        .route(
+            "/auth/login",
+            get(auth::login_page).post(auth::login_submit),
+        )
+        .route(
+            "/auth/setup",
+            get(auth::setup_page).post(auth::setup_submit),
+        )
         .route("/auth/logout", post(auth::logout))
         .route("/users", get(auth::users_list))
-        .route("/users/new", get(auth::new_user_page).post(auth::new_user_submit))
+        .route(
+            "/users/new",
+            get(auth::new_user_page).post(auth::new_user_submit),
+        )
         .with_state(auth_state)
         // Workout routes
         .route("/workouts", get(workouts::list))
@@ -32,7 +43,10 @@ pub fn create_router(
         .route("/workouts/:id", post(workouts::update))
         .route("/workouts/:id/delete", post(workouts::delete))
         .route("/workouts/:id/logs", post(workouts::add_log))
-        .route("/workouts/:id/logs/:log_id/delete", post(workouts::delete_log))
+        .route(
+            "/workouts/:id/logs/:log_id/delete",
+            post(workouts::delete_log),
+        )
         .with_state(workouts_state)
         // Exercise routes
         .route("/exercises", get(exercises::list))
@@ -44,4 +58,6 @@ pub fn create_router(
         .route("/stats/exercise/:id", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
         .with_state(stats_state)
+        // Session key via Extension layer
+        .layer(Extension(session_key))
 }
