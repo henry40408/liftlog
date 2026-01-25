@@ -1,46 +1,46 @@
 -- Seed default exercises
 INSERT OR IGNORE INTO exercises (id, name, category, muscle_group, equipment, is_default, user_id) VALUES
--- Chest
-('ex-bench-press', 'Bench Press', 'chest', 'Pectoralis Major', 'Barbell', 1, NULL),
-('ex-incline-bench', 'Incline Bench Press', 'chest', 'Upper Chest', 'Barbell', 1, NULL),
-('ex-dumbbell-press', 'Dumbbell Press', 'chest', 'Pectoralis Major', 'Dumbbell', 1, NULL),
-('ex-chest-fly', 'Chest Fly', 'chest', 'Pectoralis Major', 'Dumbbell', 1, NULL),
-('ex-push-up', 'Push Up', 'chest', 'Pectoralis Major', 'Bodyweight', 1, NULL),
+-- 胸 (Chest)
+('ex-bench-press', '臥推', 'chest', '胸大肌', '槓鈴', 1, NULL),
+('ex-incline-bench', '上斜臥推', 'chest', '上胸', '槓鈴', 1, NULL),
+('ex-dumbbell-press', '啞鈴臥推', 'chest', '胸大肌', '啞鈴', 1, NULL),
+('ex-chest-fly', '飛鳥', 'chest', '胸大肌', '啞鈴', 1, NULL),
+('ex-push-up', '伏地挺身', 'chest', '胸大肌', '徒手', 1, NULL),
 
--- Back
-('ex-deadlift', 'Deadlift', 'back', 'Erector Spinae', 'Barbell', 1, NULL),
-('ex-barbell-row', 'Barbell Row', 'back', 'Latissimus Dorsi', 'Barbell', 1, NULL),
-('ex-pull-up', 'Pull Up', 'back', 'Latissimus Dorsi', 'Bodyweight', 1, NULL),
-('ex-lat-pulldown', 'Lat Pulldown', 'back', 'Latissimus Dorsi', 'Cable', 1, NULL),
-('ex-seated-row', 'Seated Row', 'back', 'Rhomboids', 'Cable', 1, NULL),
+-- 背 (Back)
+('ex-deadlift', '硬舉', 'back', '豎脊肌', '槓鈴', 1, NULL),
+('ex-barbell-row', '槓鈴划船', 'back', '闊背肌', '槓鈴', 1, NULL),
+('ex-pull-up', '引體向上', 'back', '闊背肌', '徒手', 1, NULL),
+('ex-lat-pulldown', '滑輪下拉', 'back', '闊背肌', '繩索', 1, NULL),
+('ex-seated-row', '坐姿划船', 'back', '菱形肌', '繩索', 1, NULL),
 
--- Legs
-('ex-squat', 'Squat', 'legs', 'Quadriceps', 'Barbell', 1, NULL),
-('ex-leg-press', 'Leg Press', 'legs', 'Quadriceps', 'Machine', 1, NULL),
-('ex-romanian-deadlift', 'Romanian Deadlift', 'legs', 'Hamstrings', 'Barbell', 1, NULL),
-('ex-leg-curl', 'Leg Curl', 'legs', 'Hamstrings', 'Machine', 1, NULL),
-('ex-leg-extension', 'Leg Extension', 'legs', 'Quadriceps', 'Machine', 1, NULL),
-('ex-calf-raise', 'Calf Raise', 'legs', 'Gastrocnemius', 'Machine', 1, NULL),
-('ex-lunges', 'Lunges', 'legs', 'Quadriceps', 'Dumbbell', 1, NULL),
+-- 腿 (Legs)
+('ex-squat', '深蹲', 'legs', '股四頭肌', '槓鈴', 1, NULL),
+('ex-leg-press', '腿推', 'legs', '股四頭肌', '機械', 1, NULL),
+('ex-romanian-deadlift', '羅馬尼亞硬舉', 'legs', '腿後肌群', '槓鈴', 1, NULL),
+('ex-leg-curl', '腿彎舉', 'legs', '腿後肌群', '機械', 1, NULL),
+('ex-leg-extension', '腿伸展', 'legs', '股四頭肌', '機械', 1, NULL),
+('ex-calf-raise', '提踵', 'legs', '腓腸肌', '機械', 1, NULL),
+('ex-lunges', '弓箭步', 'legs', '股四頭肌', '啞鈴', 1, NULL),
 
--- Shoulders
-('ex-overhead-press', 'Overhead Press', 'shoulders', 'Deltoids', 'Barbell', 1, NULL),
-('ex-lateral-raise', 'Lateral Raise', 'shoulders', 'Lateral Deltoid', 'Dumbbell', 1, NULL),
-('ex-front-raise', 'Front Raise', 'shoulders', 'Anterior Deltoid', 'Dumbbell', 1, NULL),
-('ex-rear-delt-fly', 'Rear Delt Fly', 'shoulders', 'Posterior Deltoid', 'Dumbbell', 1, NULL),
-('ex-face-pull', 'Face Pull', 'shoulders', 'Posterior Deltoid', 'Cable', 1, NULL),
+-- 肩 (Shoulders)
+('ex-overhead-press', '肩推', 'shoulders', '三角肌', '槓鈴', 1, NULL),
+('ex-lateral-raise', '側平舉', 'shoulders', '三角肌中束', '啞鈴', 1, NULL),
+('ex-front-raise', '前平舉', 'shoulders', '三角肌前束', '啞鈴', 1, NULL),
+('ex-rear-delt-fly', '反向飛鳥', 'shoulders', '三角肌後束', '啞鈴', 1, NULL),
+('ex-face-pull', '面拉', 'shoulders', '三角肌後束', '繩索', 1, NULL),
 
--- Arms
-('ex-barbell-curl', 'Barbell Curl', 'arms', 'Biceps', 'Barbell', 1, NULL),
-('ex-dumbbell-curl', 'Dumbbell Curl', 'arms', 'Biceps', 'Dumbbell', 1, NULL),
-('ex-hammer-curl', 'Hammer Curl', 'arms', 'Brachialis', 'Dumbbell', 1, NULL),
-('ex-tricep-pushdown', 'Tricep Pushdown', 'arms', 'Triceps', 'Cable', 1, NULL),
-('ex-skull-crusher', 'Skull Crusher', 'arms', 'Triceps', 'Barbell', 1, NULL),
-('ex-tricep-dip', 'Tricep Dip', 'arms', 'Triceps', 'Bodyweight', 1, NULL),
+-- 手臂 (Arms)
+('ex-barbell-curl', '槓鈴彎舉', 'arms', '二頭肌', '槓鈴', 1, NULL),
+('ex-dumbbell-curl', '啞鈴彎舉', 'arms', '二頭肌', '啞鈴', 1, NULL),
+('ex-hammer-curl', '錘式彎舉', 'arms', '肱肌', '啞鈴', 1, NULL),
+('ex-tricep-pushdown', '三頭肌下壓', 'arms', '三頭肌', '繩索', 1, NULL),
+('ex-skull-crusher', '碎顱者', 'arms', '三頭肌', '槓鈴', 1, NULL),
+('ex-tricep-dip', '雙槓撐體', 'arms', '三頭肌', '徒手', 1, NULL),
 
--- Core
-('ex-plank', 'Plank', 'core', 'Rectus Abdominis', 'Bodyweight', 1, NULL),
-('ex-crunch', 'Crunch', 'core', 'Rectus Abdominis', 'Bodyweight', 1, NULL),
-('ex-leg-raise', 'Leg Raise', 'core', 'Lower Abs', 'Bodyweight', 1, NULL),
-('ex-russian-twist', 'Russian Twist', 'core', 'Obliques', 'Bodyweight', 1, NULL),
-('ex-cable-crunch', 'Cable Crunch', 'core', 'Rectus Abdominis', 'Cable', 1, NULL);
+-- 核心 (Core)
+('ex-plank', '棒式', 'core', '腹直肌', '徒手', 1, NULL),
+('ex-crunch', '捲腹', 'core', '腹直肌', '徒手', 1, NULL),
+('ex-leg-raise', '抬腿', 'core', '下腹', '徒手', 1, NULL),
+('ex-russian-twist', '俄羅斯轉體', 'core', '腹斜肌', '徒手', 1, NULL),
+('ex-cable-crunch', '繩索捲腹', 'core', '腹直肌', '繩索', 1, NULL);
