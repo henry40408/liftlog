@@ -8,8 +8,8 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_workouts_list_requires_auth() {
-    let pool = common::setup_test_db().await;
-    let app = common::create_test_app(pool).await;
+    let pool = common::setup_test_db();
+    let app = common::create_test_app(pool);
 
     let response = app
         .oneshot(
@@ -31,8 +31,8 @@ async fn test_workouts_list_requires_auth() {
 
 #[tokio::test]
 async fn test_new_workout_requires_auth() {
-    let pool = common::setup_test_db().await;
-    let app = common::create_test_app(pool).await;
+    let pool = common::setup_test_db();
+    let app = common::create_test_app(pool);
 
     let response = app
         .oneshot(

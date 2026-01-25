@@ -8,8 +8,8 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_login_page_redirects_to_setup_when_no_users() {
-    let pool = common::setup_test_db().await;
-    let app = common::create_test_app(pool).await;
+    let pool = common::setup_test_db();
+    let app = common::create_test_app(pool);
 
     let response = app
         .oneshot(
@@ -30,8 +30,8 @@ async fn test_login_page_redirects_to_setup_when_no_users() {
 
 #[tokio::test]
 async fn test_setup_page_available_when_no_users() {
-    let pool = common::setup_test_db().await;
-    let app = common::create_test_app(pool).await;
+    let pool = common::setup_test_db();
+    let app = common::create_test_app(pool);
 
     let response = app
         .oneshot(
@@ -48,8 +48,8 @@ async fn test_setup_page_available_when_no_users() {
 
 #[tokio::test]
 async fn test_dashboard_requires_auth() {
-    let pool = common::setup_test_db().await;
-    let app = common::create_test_app(pool).await;
+    let pool = common::setup_test_db();
+    let app = common::create_test_app(pool);
 
     let response = app
         .oneshot(

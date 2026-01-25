@@ -7,7 +7,10 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] rusqlite::Error),
+
+    #[error("Pool error: {0}")]
+    Pool(#[from] r2d2::Error),
 
     #[error("Not found: {0}")]
     NotFound(String),
@@ -33,6 +36,10 @@ impl IntoResponse for AppError {
         let (status, message) = match &self {
             AppError::Database(e) => {
                 tracing::error!("Database error: {:?}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+            }
+            AppError::Pool(e) => {
+                tracing::error!("Pool error: {:?}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
             }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),

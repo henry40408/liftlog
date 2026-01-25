@@ -1,21 +1,22 @@
 use std::path::PathBuf;
-use sqlx::sqlite::SqlitePoolOptions;
 use tokio::net::TcpListener;
-use tower_sessions::{Expiry, SessionManagerLayer};
-use tower_sessions_sqlx_store::SqliteStore;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod config;
+mod db;
 mod error;
 mod handlers;
 mod middleware;
 mod models;
 mod repositories;
 mod routes;
+mod session;
 
 use config::Config;
+use db::DbPool;
 use handlers::{auth, dashboard, exercises, stats, workouts};
 use repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
+use session::SessionKey;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,21 +38,13 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Connecting to database: {}", config.database_url);
 
     // Create database pool
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect(&config.database_url)
-        .await?;
+    let pool = db::create_pool(&config.database_url)?;
 
     // Run migrations
-    run_migrations(&pool).await?;
+    run_migrations(&pool)?;
 
-    // Create session store
-    let session_store = SqliteStore::new(pool.clone());
-    session_store.migrate().await?;
-
-    let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(false)
-        .with_expiry(Expiry::OnInactivity(time::Duration::days(7)));
+    // Generate session key
+    let session_key = SessionKey::generate();
 
     // Create repositories
     let user_repo = UserRepository::new(pool.clone());
@@ -84,8 +77,8 @@ async fn main() -> anyhow::Result<()> {
         workouts_state,
         exercises_state,
         stats_state,
-    )
-    .layer(session_layer);
+        session_key,
+    );
 
     // Start server
     let addr = config.server_addr();
@@ -97,8 +90,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
+fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
     tracing::info!("Running migrations...");
+
+    let conn = pool.get()?;
 
     let migrations_dir = PathBuf::from("migrations");
     let mut entries: Vec<_> = std::fs::read_dir(&migrations_dir)?
@@ -114,7 +109,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         tracing::info!("Running migration: {}", filename);
 
         let sql = std::fs::read_to_string(&path)?;
-        sqlx::raw_sql(&sql).execute(pool).await?;
+        conn.execute_batch(&sql)?;
     }
 
     tracing::info!("Migrations completed");

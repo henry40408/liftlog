@@ -1,21 +1,21 @@
 use axum::Router;
-use sqlx::SqlitePool;
-use tower_sessions::{Expiry, SessionManagerLayer};
-use tower_sessions_sqlx_store::SqliteStore;
 use std::path::PathBuf;
 
-pub async fn setup_test_db() -> SqlitePool {
-    let pool = SqlitePool::connect("sqlite::memory:")
-        .await
-        .expect("Failed to create test database");
+use liftlog::db::{create_memory_pool, DbPool};
+use liftlog::session::SessionKey;
+
+pub fn setup_test_db() -> DbPool {
+    let pool = create_memory_pool().expect("Failed to create test database");
 
     // Run migrations
-    run_migrations(&pool).await.expect("Failed to run migrations");
+    run_migrations(&pool).expect("Failed to run migrations");
 
     pool
 }
 
-async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
+fn run_migrations(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+    let conn = pool.get()?;
+
     let migrations_dir = PathBuf::from("migrations");
     let mut entries: Vec<_> = std::fs::read_dir(&migrations_dir)?
         .filter_map(|e| e.ok())
@@ -27,23 +27,18 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Err
     for entry in entries {
         let path = entry.path();
         let sql = std::fs::read_to_string(&path)?;
-        sqlx::raw_sql(&sql).execute(pool).await?;
+        conn.execute_batch(&sql)?;
     }
 
     Ok(())
 }
 
-pub async fn create_test_app(pool: SqlitePool) -> Router {
+pub fn create_test_app(pool: DbPool) -> Router {
     use liftlog::handlers::{auth, dashboard, exercises, stats, workouts};
     use liftlog::repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
 
-    // Create session store
-    let session_store = SqliteStore::new(pool.clone());
-    session_store.migrate().await.expect("Failed to migrate sessions");
-
-    let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(false)
-        .with_expiry(Expiry::OnInactivity(time::Duration::days(7)));
+    // Generate session key for tests
+    let session_key = SessionKey::generate();
 
     // Create repositories
     let user_repo = UserRepository::new(pool.clone());
@@ -75,6 +70,6 @@ pub async fn create_test_app(pool: SqlitePool) -> Router {
         workouts_state,
         exercises_state,
         stats_state,
+        session_key,
     )
-    .layer(session_layer)
 }

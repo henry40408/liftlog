@@ -1,14 +1,28 @@
 use chrono::{DateTime, NaiveDate, Utc};
+use rusqlite::Row;
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+use super::FromSqliteRow;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkoutSession {
     pub id: String,
     pub user_id: String,
     pub date: NaiveDate,
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+impl FromSqliteRow for WorkoutSession {
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            user_id: row.get("user_id")?,
+            date: row.get("date")?,
+            notes: row.get("notes")?,
+            created_at: row.get("created_at")?,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]

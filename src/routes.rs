@@ -1,9 +1,10 @@
 use axum::{
     routing::{get, post},
-    Router,
+    Extension, Router,
 };
 
 use crate::handlers::{auth, dashboard, exercises, stats, workouts};
+use crate::session::SessionKey;
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -11,6 +12,7 @@ pub fn create_router(
     workouts_state: workouts::WorkoutsState,
     exercises_state: exercises::ExercisesState,
     stats_state: stats::StatsState,
+    session_key: SessionKey,
 ) -> Router {
     Router::new()
         // Dashboard
@@ -44,4 +46,6 @@ pub fn create_router(
         .route("/stats/exercise/:id", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
         .with_state(stats_state)
+        // Session key via Extension layer
+        .layer(Extension(session_key))
 }

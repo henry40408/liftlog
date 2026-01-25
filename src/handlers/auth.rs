@@ -1,15 +1,17 @@
 use askama::Template;
 use axum::{
     extract::State,
+    http::HeaderMap,
     response::{Html, IntoResponse, Redirect, Response},
-    Form,
+    Extension, Form,
 };
-use tower_sessions::Session;
+use axum_extra::extract::cookie::SignedCookieJar;
 
 use crate::error::{AppError, Result};
 use crate::middleware::{AuthUser, auth::OptionalAuthUser};
 use crate::models::{CreateUser, LoginCredentials, User};
 use crate::repositories::UserRepository;
+use crate::session::SessionKey;
 
 #[derive(Clone)]
 pub struct AuthState {
@@ -65,9 +67,12 @@ pub async fn login_page(
 
 pub async fn login_submit(
     State(state): State<AuthState>,
-    session: Session,
+    Extension(key): Extension<SessionKey>,
+    headers: HeaderMap,
     Form(credentials): Form<LoginCredentials>,
 ) -> Result<Response> {
+    let jar = SignedCookieJar::from_headers(&headers, key.0);
+
     let user = state
         .user_repo
         .verify_password(&credentials.username, &credentials.password)
@@ -75,16 +80,14 @@ pub async fn login_submit(
 
     match user {
         Some(user) => {
-            AuthUser::login(&session, &user)
-                .await
-                .map_err(|e| AppError::Internal(e.to_string()))?;
-            Ok(Redirect::to("/").into_response())
+            let jar = AuthUser::login(jar, &user);
+            Ok((jar, Redirect::to("/")).into_response())
         }
         None => {
             let template = LoginTemplate {
                 error: Some("Invalid username or password".to_string()),
             };
-            Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+            Ok((jar, Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?)).into_response())
         }
     }
 }
@@ -104,13 +107,16 @@ pub async fn setup_page(
 
 pub async fn setup_submit(
     State(state): State<AuthState>,
-    session: Session,
+    Extension(key): Extension<SessionKey>,
+    headers: HeaderMap,
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
+    let jar = SignedCookieJar::from_headers(&headers, key.0);
+
     // Only allow setup if no users exist
     let user_count = state.user_repo.count().await?;
     if user_count > 0 {
-        return Ok(Redirect::to("/auth/login").into_response());
+        return Ok((jar, Redirect::to("/auth/login")).into_response());
     }
 
     // Validate input
@@ -118,32 +124,32 @@ pub async fn setup_submit(
         let template = SetupTemplate {
             error: Some("Username is required".to_string()),
         };
-        return Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response());
+        return Ok((jar, Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?)).into_response());
     }
 
     if form.password.len() < 6 {
         let template = SetupTemplate {
             error: Some("Password must be at least 6 characters".to_string()),
         };
-        return Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response());
+        return Ok((jar, Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?)).into_response());
     }
 
     // Create the first user (admin)
     let user = state.user_repo.create(&form.username, &form.password).await?;
 
     // Auto login
-    AuthUser::login(&session, &user)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let jar = AuthUser::login(jar, &user);
 
-    Ok(Redirect::to("/").into_response())
+    Ok((jar, Redirect::to("/")).into_response())
 }
 
-pub async fn logout(session: Session) -> Result<Response> {
-    AuthUser::logout(&session)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Redirect::to("/auth/login").into_response())
+pub async fn logout(
+    Extension(key): Extension<SessionKey>,
+    headers: HeaderMap,
+) -> Response {
+    let jar = SignedCookieJar::from_headers(&headers, key.0);
+    let jar = AuthUser::logout(jar);
+    (jar, Redirect::to("/auth/login")).into_response()
 }
 
 pub async fn new_user_page(auth_user: AuthUser) -> Result<Response> {
