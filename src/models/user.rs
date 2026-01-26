@@ -65,3 +65,34 @@ pub struct LoginCredentials {
     pub username: String,
     pub password: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_role_as_str() {
+        assert_eq!(UserRole::Admin.as_str(), "admin");
+        assert_eq!(UserRole::User.as_str(), "user");
+    }
+
+    #[test]
+    fn test_user_role_parse() {
+        assert_eq!(UserRole::parse("admin"), UserRole::Admin);
+        assert_eq!(UserRole::parse("user"), UserRole::User);
+        assert_eq!(UserRole::parse("unknown"), UserRole::User);
+        assert_eq!(UserRole::parse(""), UserRole::User);
+    }
+
+    #[test]
+    fn test_user_role_is_admin() {
+        assert!(UserRole::Admin.is_admin());
+        assert!(!UserRole::User.is_admin());
+    }
+
+    #[test]
+    fn test_user_role_default() {
+        let default_role: UserRole = Default::default();
+        assert_eq!(default_role, UserRole::User);
+    }
+}

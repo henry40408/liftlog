@@ -518,3 +518,387 @@ impl WorkoutRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::create_memory_pool;
+    use std::path::PathBuf;
+
+    fn setup_test_db() -> DbPool {
+        let pool = create_memory_pool().expect("Failed to create test database");
+        run_migrations(&pool).expect("Failed to run migrations");
+        pool
+    }
+
+    fn run_migrations(pool: &DbPool) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let conn = pool.get()?;
+        let migrations_dir = PathBuf::from("migrations");
+        let mut entries: Vec<_> = std::fs::read_dir(&migrations_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext == "sql")
+                    .unwrap_or(false)
+            })
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let sql = std::fs::read_to_string(&path)?;
+            conn.execute_batch(&sql)?;
+        }
+        Ok(())
+    }
+
+    fn create_test_user(pool: &DbPool, user_id: &str) {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+            rusqlite::params![user_id, format!("user_{}", user_id), "hash", "user"],
+        ).unwrap();
+    }
+
+    // Workout Session Tests
+
+    #[tokio::test]
+    async fn test_create_session() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, Some("Leg day")).await.unwrap();
+
+        assert_eq!(session.user_id, "user1");
+        assert_eq!(session.date, date);
+        assert_eq!(session.notes, Some("Leg day".to_string()));
+        assert!(!session.id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_find_session_by_id_exists() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let created = repo.create_session("user1", date, None).await.unwrap();
+        let found = repo.find_session_by_id(&created.id).await.unwrap();
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, created.id);
+    }
+
+    #[tokio::test]
+    async fn test_find_session_by_id_not_exists() {
+        let pool = setup_test_db();
+        let repo = WorkoutRepository::new(pool);
+
+        let found = repo.find_session_by_id("nonexistent").await.unwrap();
+
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_sessions_by_user_ordered() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date1 = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let date3 = NaiveDate::from_ymd_opt(2024, 1, 12).unwrap();
+
+        repo.create_session("user1", date1, None).await.unwrap();
+        repo.create_session("user1", date2, None).await.unwrap();
+        repo.create_session("user1", date3, None).await.unwrap();
+
+        let sessions = repo.find_sessions_by_user("user1").await.unwrap();
+
+        assert_eq!(sessions.len(), 3);
+        // Should be ordered by date DESC
+        assert_eq!(sessions[0].date, date2);
+        assert_eq!(sessions[1].date, date3);
+        assert_eq!(sessions[2].date, date1);
+    }
+
+    #[tokio::test]
+    async fn test_count_sessions_by_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        repo.create_session("user1", date, None).await.unwrap();
+        repo.create_session("user1", date, None).await.unwrap();
+        repo.create_session("user2", date, None).await.unwrap();
+
+        let count = repo.count_sessions_by_user("user1").await.unwrap();
+
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_success() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let deleted = repo.delete_session(&session.id, "user1").await.unwrap();
+
+        assert!(deleted);
+        let found = repo.find_session_by_id(&session.id).await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_wrong_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let deleted = repo.delete_session(&session.id, "user2").await.unwrap();
+
+        assert!(!deleted);
+    }
+
+    // Workout Log Tests
+
+    #[tokio::test]
+    async fn test_create_log() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        let log = repo
+            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, Some(8))
+            .await
+            .unwrap();
+
+        assert_eq!(log.session_id, session.id);
+        assert_eq!(log.exercise_id, "ex-bench-press");
+        assert_eq!(log.set_number, 1);
+        assert_eq!(log.reps, 10);
+        assert_eq!(log.weight, 100.0);
+        assert_eq!(log.rpe, Some(8));
+        assert!(!log.is_pr);
+    }
+
+    #[tokio::test]
+    async fn test_find_logs_by_session() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 105.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-squat", 1, 5, 120.0, None)
+            .await
+            .unwrap();
+
+        let logs = repo.find_logs_by_session(&session.id).await.unwrap();
+
+        assert_eq!(logs.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_delete_log_success() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let log = repo
+            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+
+        let deleted = repo.delete_log(&log.id, &session.id).await.unwrap();
+
+        assert!(deleted);
+        let found = repo.find_log_by_id(&log.id).await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_next_set_number() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // First set should be 1
+        let next = repo
+            .get_next_set_number(&session.id, "ex-bench-press")
+            .await
+            .unwrap();
+        assert_eq!(next, 1);
+
+        // After creating a log, next should be 2
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        let next = repo
+            .get_next_set_number(&session.id, "ex-bench-press")
+            .await
+            .unwrap();
+        assert_eq!(next, 2);
+    }
+
+    // Personal Record Tests
+
+    #[tokio::test]
+    async fn test_upsert_pr_insert() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let pr = repo
+            .upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
+            .await
+            .unwrap();
+
+        assert_eq!(pr.user_id, "user1");
+        assert_eq!(pr.exercise_id, "ex-bench-press");
+        assert_eq!(pr.record_type, "1rm");
+        assert_eq!(pr.value, 100.0);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_pr_update() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        repo.upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
+            .await
+            .unwrap();
+        let updated = repo
+            .upsert_pr("user1", "ex-bench-press", "1rm", 110.0)
+            .await
+            .unwrap();
+
+        assert_eq!(updated.value, 110.0);
+
+        // Verify only one PR exists
+        let found = repo
+            .find_pr("user1", "ex-bench-press", "1rm")
+            .await
+            .unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().value, 110.0);
+    }
+
+    #[tokio::test]
+    async fn test_find_prs_by_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        repo.upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
+            .await
+            .unwrap();
+        repo.upsert_pr("user1", "ex-squat", "1rm", 150.0)
+            .await
+            .unwrap();
+
+        let prs = repo.find_prs_by_user("user1").await.unwrap();
+
+        assert_eq!(prs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_mark_as_pr() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let log = repo
+            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+
+        assert!(!log.is_pr);
+
+        let marked = repo.mark_as_pr(&log.id).await.unwrap();
+        assert!(marked);
+
+        let found = repo.find_log_by_id(&log.id).await.unwrap().unwrap();
+        assert!(found.is_pr);
+    }
+
+    #[tokio::test]
+    async fn test_update_session() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        let new_date = NaiveDate::from_ymd_opt(2024, 1, 20).unwrap();
+        let updated = repo
+            .update_session(&session.id, "user1", Some(new_date), Some("Updated notes"))
+            .await
+            .unwrap();
+
+        assert!(updated);
+
+        let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(found.date, new_date);
+        assert_eq!(found.notes, Some("Updated notes".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_find_sessions_by_user_paginated() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        for i in 1..=5 {
+            let date = NaiveDate::from_ymd_opt(2024, 1, i).unwrap();
+            repo.create_session("user1", date, None).await.unwrap();
+        }
+
+        let page1 = repo
+            .find_sessions_by_user_paginated("user1", 2, 0)
+            .await
+            .unwrap();
+        assert_eq!(page1.len(), 2);
+
+        let page2 = repo
+            .find_sessions_by_user_paginated("user1", 2, 2)
+            .await
+            .unwrap();
+        assert_eq!(page2.len(), 2);
+
+        let page3 = repo
+            .find_sessions_by_user_paginated("user1", 2, 4)
+            .await
+            .unwrap();
+        assert_eq!(page3.len(), 1);
+    }
+}
