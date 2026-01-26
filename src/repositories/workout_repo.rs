@@ -569,7 +569,10 @@ mod tests {
         let repo = WorkoutRepository::new(pool);
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
-        let session = repo.create_session("user1", date, Some("Leg day")).await.unwrap();
+        let session = repo
+            .create_session("user1", date, Some("Leg day"))
+            .await
+            .unwrap();
 
         assert_eq!(session.user_id, "user1");
         assert_eq!(session.date, date);

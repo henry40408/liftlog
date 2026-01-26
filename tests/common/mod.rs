@@ -95,7 +95,12 @@ pub fn create_test_app_with_key(pool: DbPool) -> TestApp {
     }
 }
 
-pub async fn create_test_user(pool: &DbPool, username: &str, password: &str, role: UserRole) -> User {
+pub async fn create_test_user(
+    pool: &DbPool,
+    username: &str,
+    password: &str,
+    role: UserRole,
+) -> User {
     let user_repo = UserRepository::new(pool.clone());
     user_repo.create(username, password, role).await.unwrap()
 }

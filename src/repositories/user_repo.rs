@@ -215,7 +215,10 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        let user = repo.create("testuser", "password123", UserRole::User).await.unwrap();
+        let user = repo
+            .create("testuser", "password123", UserRole::User)
+            .await
+            .unwrap();
 
         assert_eq!(user.username, "testuser");
         assert_eq!(user.role, UserRole::User);
@@ -227,7 +230,10 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        let user = repo.create("admin", "adminpass", UserRole::Admin).await.unwrap();
+        let user = repo
+            .create("admin", "adminpass", UserRole::Admin)
+            .await
+            .unwrap();
 
         assert_eq!(user.username, "admin");
         assert_eq!(user.role, UserRole::Admin);
@@ -238,7 +244,10 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        let created = repo.create("testuser", "password", UserRole::User).await.unwrap();
+        let created = repo
+            .create("testuser", "password", UserRole::User)
+            .await
+            .unwrap();
         let found = repo.find_by_id(&created.id).await.unwrap();
 
         assert!(found.is_some());
@@ -262,7 +271,9 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        repo.create("findme", "password", UserRole::User).await.unwrap();
+        repo.create("findme", "password", UserRole::User)
+            .await
+            .unwrap();
         let found = repo.find_by_username("findme").await.unwrap();
 
         assert!(found.is_some());
@@ -286,7 +297,9 @@ mod tests {
 
         repo.create("user1", "pass1", UserRole::User).await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        repo.create("user2", "pass2", UserRole::Admin).await.unwrap();
+        repo.create("user2", "pass2", UserRole::Admin)
+            .await
+            .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         repo.create("user3", "pass3", UserRole::User).await.unwrap();
 
@@ -304,8 +317,13 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        repo.create("verifyuser", "correctpass", UserRole::User).await.unwrap();
-        let result = repo.verify_password("verifyuser", "correctpass").await.unwrap();
+        repo.create("verifyuser", "correctpass", UserRole::User)
+            .await
+            .unwrap();
+        let result = repo
+            .verify_password("verifyuser", "correctpass")
+            .await
+            .unwrap();
 
         assert!(result.is_some());
         assert_eq!(result.unwrap().username, "verifyuser");
@@ -316,8 +334,13 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        repo.create("verifyuser2", "correctpass", UserRole::User).await.unwrap();
-        let result = repo.verify_password("verifyuser2", "wrongpass").await.unwrap();
+        repo.create("verifyuser2", "correctpass", UserRole::User)
+            .await
+            .unwrap();
+        let result = repo
+            .verify_password("verifyuser2", "wrongpass")
+            .await
+            .unwrap();
 
         assert!(result.is_none());
     }
@@ -337,7 +360,10 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        let user = repo.create("deleteuser", "pass", UserRole::User).await.unwrap();
+        let user = repo
+            .create("deleteuser", "pass", UserRole::User)
+            .await
+            .unwrap();
         let deleted = repo.delete(&user.id).await.unwrap();
 
         assert!(deleted);
@@ -360,7 +386,10 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        let user = repo.create("roleuser", "pass", UserRole::User).await.unwrap();
+        let user = repo
+            .create("roleuser", "pass", UserRole::User)
+            .await
+            .unwrap();
         assert_eq!(user.role, UserRole::User);
 
         let updated = repo.update_role(&user.id, UserRole::Admin).await.unwrap();
@@ -375,7 +404,10 @@ mod tests {
         let pool = setup_test_db();
         let repo = UserRepository::new(pool);
 
-        let updated = repo.update_role("nonexistent", UserRole::Admin).await.unwrap();
+        let updated = repo
+            .update_role("nonexistent", UserRole::Admin)
+            .await
+            .unwrap();
 
         assert!(!updated);
     }

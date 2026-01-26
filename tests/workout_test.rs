@@ -74,7 +74,12 @@ async fn test_create_workout_authenticated() {
 
     // Should redirect to the workout page
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    let location = response.headers().get("location").unwrap().to_str().unwrap();
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(location.starts_with("/workouts/"));
 
     // Verify workout was created in database
