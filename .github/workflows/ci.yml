@@ -44,8 +44,11 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo nextest run --verbose
 
   coverage:
     runs-on: ubuntu-latest
