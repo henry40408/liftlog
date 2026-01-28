@@ -6,7 +6,7 @@
         <li><a href="/stats">[Stats]</a></li>
         <li><a href="/users">[Users]</a></li>
         <li class="ml-auto">
-            <span class="muted">{{ user.username }}</span>
+            <span class="muted">{{ user.username }}{% if user.is_admin() %} <strong>[admin]</strong>{% endif %}</span>
             <form action="/auth/logout" method="post" style="display:inline;">
                 <button type="submit" style="background:none;color:#111;border:none;padding:0;cursor:pointer;">[Sign Out]</button>
             </form>

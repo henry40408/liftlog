@@ -1,6 +1,8 @@
 use axum_extra::extract::cookie::{Cookie, Key, SignedCookieJar};
 use serde::{Deserialize, Serialize};
 
+use crate::models::UserRole;
+
 pub const SESSION_COOKIE_NAME: &str = "session";
 
 #[derive(Clone)]
@@ -21,11 +23,21 @@ impl SessionKey {
 pub struct SessionData {
     pub user_id: String,
     pub username: String,
+    pub role: UserRole,
 }
 
 impl SessionData {
-    pub fn new(user_id: String, username: String) -> Self {
-        Self { user_id, username }
+    pub fn new(user_id: String, username: String, role: UserRole) -> Self {
+        Self {
+            user_id,
+            username,
+            role,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_admin(&self) -> bool {
+        self.role.is_admin()
     }
 
     pub fn to_cookie_value(&self) -> String {
