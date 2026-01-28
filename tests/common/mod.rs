@@ -1,43 +1,15 @@
 use axum::Router;
-use std::path::PathBuf;
 
 use liftlog::db::{create_memory_pool, DbPool};
+use liftlog::migrations::run_migrations_for_tests;
 use liftlog::models::{User, UserRole};
 use liftlog::repositories::UserRepository;
 use liftlog::session::SessionKey;
 
 pub fn setup_test_db() -> DbPool {
     let pool = create_memory_pool().expect("Failed to create test database");
-
-    // Run migrations
-    run_migrations(&pool).expect("Failed to run migrations");
-
+    run_migrations_for_tests(&pool).expect("Failed to run migrations");
     pool
-}
-
-fn run_migrations(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
-    let conn = pool.get()?;
-
-    let migrations_dir = PathBuf::from("migrations");
-    let mut entries: Vec<_> = std::fs::read_dir(&migrations_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "sql")
-                .unwrap_or(false)
-        })
-        .collect();
-
-    entries.sort_by_key(|e| e.file_name());
-
-    for entry in entries {
-        let path = entry.path();
-        let sql = std::fs::read_to_string(&path)?;
-        conn.execute_batch(&sql)?;
-    }
-
-    Ok(())
 }
 
 pub struct TestApp {
