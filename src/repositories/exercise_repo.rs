@@ -98,8 +98,6 @@ impl ExerciseRepository {
         &self,
         name: &str,
         category: &str,
-        muscle_group: &str,
-        equipment: Option<&str>,
         user_id: &str,
     ) -> Result<Exercise> {
         let id = Uuid::new_v4().to_string();
@@ -107,8 +105,6 @@ impl ExerciseRepository {
             id: id.clone(),
             name: name.to_string(),
             category: category.to_string(),
-            muscle_group: muscle_group.to_string(),
-            equipment: equipment.map(|s| s.to_string()),
             user_id: user_id.to_string(),
         };
         let exercise_clone = exercise.clone();
@@ -117,14 +113,12 @@ impl ExerciseRepository {
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = pool.get()?;
             conn.execute(
-                "INSERT INTO exercises (id, name, category, muscle_group, equipment, user_id)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO exercises (id, name, category, user_id)
+                 VALUES (?, ?, ?, ?)",
                 rusqlite::params![
                     exercise_clone.id,
                     exercise_clone.name,
                     exercise_clone.category,
-                    exercise_clone.muscle_group,
-                    exercise_clone.equipment,
                     exercise_clone.user_id
                 ],
             )?;

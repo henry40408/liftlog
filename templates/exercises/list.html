@@ -15,7 +15,6 @@
     <thead>
         <tr>
             <th>Name</th>
-            <th>Equipment</th>
         </tr>
     </thead>
     <tbody>
@@ -23,7 +22,6 @@
         {% if ex.category == cat.name %}
         <tr>
             <td><a href="/stats/exercise/{{ ex.id }}">{{ ex.name }}</a></td>
-            <td class="muted">{% match ex.equipment %}{% when Some with (e) %}{{ e }}{% when None %}-{% endmatch %}</td>
         </tr>
         {% endif %}
         {% endfor %}

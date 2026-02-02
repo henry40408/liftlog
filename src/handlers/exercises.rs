@@ -90,8 +90,6 @@ pub async fn create(
         .create(
             &form.name,
             &form.category,
-            &form.muscle_group,
-            form.equipment.as_deref(),
             &auth_user.id,
         )
         .await?;

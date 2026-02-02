@@ -542,9 +542,9 @@ mod tests {
     fn create_test_exercise(pool: &DbPool, exercise_id: &str, user_id: &str) {
         let conn = pool.get().unwrap();
         conn.execute(
-            "INSERT INTO exercises (id, name, category, muscle_group, equipment, user_id)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            rusqlite::params![exercise_id, "Test Exercise", "chest", "pecs", "barbell", user_id],
+            "INSERT INTO exercises (id, name, category, user_id)
+             VALUES (?, ?, ?, ?)",
+            rusqlite::params![exercise_id, "Test Exercise", "chest", user_id],
         ).unwrap();
     }
 

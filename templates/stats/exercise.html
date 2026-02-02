@@ -8,13 +8,7 @@
 <h1>{{ exercise.name }}</h1>
 
 <p class="muted">
-    Category: {{ exercise.category }} |
-    Muscle: {{ exercise.muscle_group }}
-    {% match exercise.equipment %}
-    {% when Some with (equip) %}
-    | Equipment: {{ equip }}
-    {% when None %}
-    {% endmatch %}
+    Category: {{ exercise.category }}
 </p>
 
 <h2>Personal Records</h2>

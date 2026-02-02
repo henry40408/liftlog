@@ -8,8 +8,6 @@ pub struct Exercise {
     pub id: String,
     pub name: String,
     pub category: String,
-    pub muscle_group: String,
-    pub equipment: Option<String>,
     pub user_id: String,
 }
 
@@ -19,8 +17,6 @@ impl FromSqliteRow for Exercise {
             id: row.get("id")?,
             name: row.get("name")?,
             category: row.get("category")?,
-            muscle_group: row.get("muscle_group")?,
-            equipment: row.get("equipment")?,
             user_id: row.get("user_id")?,
         })
     }
@@ -30,8 +26,6 @@ impl FromSqliteRow for Exercise {
 pub struct CreateExercise {
     pub name: String,
     pub category: String,
-    pub muscle_group: String,
-    pub equipment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
