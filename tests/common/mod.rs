@@ -101,3 +101,40 @@ pub fn extract_cookie_header(set_cookie: &str) -> String {
     // Extract just the cookie name=value part for use in Cookie header
     set_cookie.split(';').next().unwrap_or("").to_string()
 }
+
+// Test data creation helpers
+pub async fn create_test_exercise(
+    pool: &DbPool,
+    user_id: &str,
+    name: &str,
+    category: &str,
+) -> liftlog::models::Exercise {
+    let exercise_repo = liftlog::repositories::ExerciseRepository::new(pool.clone());
+    exercise_repo.create(name, category, user_id).await.unwrap()
+}
+
+pub async fn create_test_workout(
+    pool: &DbPool,
+    user_id: &str,
+    date: chrono::NaiveDate,
+    notes: Option<&str>,
+) -> liftlog::models::WorkoutSession {
+    let workout_repo = liftlog::repositories::WorkoutRepository::new(pool.clone());
+    workout_repo.create_session(user_id, date, notes).await.unwrap()
+}
+
+pub async fn create_test_log(
+    pool: &DbPool,
+    session_id: &str,
+    exercise_id: &str,
+    set_number: i32,
+    reps: i32,
+    weight: f64,
+    rpe: Option<i32>,
+) -> liftlog::models::WorkoutLog {
+    let workout_repo = liftlog::repositories::WorkoutRepository::new(pool.clone());
+    workout_repo
+        .create_log(session_id, exercise_id, set_number, reps, weight, rpe)
+        .await
+        .unwrap()
+}

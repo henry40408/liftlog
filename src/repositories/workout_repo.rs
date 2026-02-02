@@ -966,4 +966,50 @@ mod tests {
             .unwrap();
         assert_eq!(page3.len(), 1);
     }
+
+    // Edge case tests for statistics
+
+    #[tokio::test]
+    async fn test_count_workouts_this_week_empty() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let count = repo.count_workouts_this_week("user1").await.unwrap();
+
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_count_workouts_this_month_empty() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let count = repo.count_workouts_this_month("user1").await.unwrap();
+
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_total_volume_this_week_empty() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let volume = repo.get_total_volume_this_week("user1").await.unwrap();
+
+        assert_eq!(volume, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_get_all_prs_by_user_empty() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let prs = repo.get_all_prs_by_user("user1").await.unwrap();
+
+        assert!(prs.is_empty());
+    }
 }

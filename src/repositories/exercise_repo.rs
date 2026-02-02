@@ -164,3 +164,151 @@ impl ExerciseRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::create_memory_pool;
+    use crate::migrations::run_migrations_for_tests;
+
+    fn setup_test_db() -> DbPool {
+        let pool = create_memory_pool().expect("Failed to create test database");
+        run_migrations_for_tests(&pool).expect("Failed to run migrations");
+        pool
+    }
+
+    fn create_test_user(pool: &DbPool, user_id: &str) {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+            rusqlite::params![user_id, format!("user_{}", user_id), "hash", "user"],
+        ).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_create_exercise() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = ExerciseRepository::new(pool);
+
+        let exercise = repo.create("Bench Press", "chest", "user1").await.unwrap();
+
+        assert_eq!(exercise.name, "Bench Press");
+        assert_eq!(exercise.category, "chest");
+        assert_eq!(exercise.user_id, "user1");
+        assert!(!exercise.id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_find_by_id_exists() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = ExerciseRepository::new(pool);
+
+        let created = repo.create("Bench Press", "chest", "user1").await.unwrap();
+        let found = repo.find_by_id(&created.id).await.unwrap();
+
+        assert!(found.is_some());
+        let found = found.unwrap();
+        assert_eq!(found.id, created.id);
+        assert_eq!(found.name, "Bench Press");
+    }
+
+    #[tokio::test]
+    async fn test_find_by_id_not_exists() {
+        let pool = setup_test_db();
+        let repo = ExerciseRepository::new(pool);
+
+        let found = repo.find_by_id("nonexistent").await.unwrap();
+
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_available_for_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = ExerciseRepository::new(pool);
+
+        repo.create("Bench Press", "chest", "user1").await.unwrap();
+        repo.create("Squat", "legs", "user1").await.unwrap();
+        repo.create("Deadlift", "back", "user2").await.unwrap();
+
+        let user1_exercises = repo.find_available_for_user("user1").await.unwrap();
+        let user2_exercises = repo.find_available_for_user("user2").await.unwrap();
+
+        assert_eq!(user1_exercises.len(), 2);
+        assert_eq!(user2_exercises.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_update_success() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = ExerciseRepository::new(pool);
+
+        let exercise = repo.create("Bench Press", "chest", "user1").await.unwrap();
+        let updated = repo
+            .update(&exercise.id, "user1", "Incline Bench", "chest")
+            .await
+            .unwrap();
+
+        assert!(updated);
+
+        let found = repo.find_by_id(&exercise.id).await.unwrap().unwrap();
+        assert_eq!(found.name, "Incline Bench");
+    }
+
+    #[tokio::test]
+    async fn test_update_wrong_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = ExerciseRepository::new(pool);
+
+        let exercise = repo.create("Bench Press", "chest", "user1").await.unwrap();
+        let updated = repo
+            .update(&exercise.id, "user2", "Hacked", "chest")
+            .await
+            .unwrap();
+
+        assert!(!updated);
+
+        // Verify exercise was not modified
+        let found = repo.find_by_id(&exercise.id).await.unwrap().unwrap();
+        assert_eq!(found.name, "Bench Press");
+    }
+
+    #[tokio::test]
+    async fn test_delete_success() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = ExerciseRepository::new(pool);
+
+        let exercise = repo.create("Bench Press", "chest", "user1").await.unwrap();
+        let deleted = repo.delete(&exercise.id, "user1").await.unwrap();
+
+        assert!(deleted);
+
+        let found = repo.find_by_id(&exercise.id).await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_wrong_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = ExerciseRepository::new(pool);
+
+        let exercise = repo.create("Bench Press", "chest", "user1").await.unwrap();
+        let deleted = repo.delete(&exercise.id, "user2").await.unwrap();
+
+        assert!(!deleted);
+
+        // Verify exercise was not deleted
+        let found = repo.find_by_id(&exercise.id).await.unwrap();
+        assert!(found.is_some());
+    }
+}
