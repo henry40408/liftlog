@@ -3,7 +3,7 @@ use axum::{
     Extension, Router,
 };
 
-use crate::handlers::{auth, dashboard, exercises, stats, workouts};
+use crate::handlers::{auth, dashboard, exercises, settings, stats, workouts};
 use crate::session::SessionKey;
 
 pub fn create_router(
@@ -71,6 +71,8 @@ pub fn create_router(
         .route("/stats/exercise/:id", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
         .with_state(stats_state)
+        // Settings routes
+        .route("/settings", get(settings::index))
         // Session key via Extension layer
         .layer(Extension(session_key))
 }

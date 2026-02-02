@@ -11,6 +11,7 @@ mod models;
 mod repositories;
 mod routes;
 mod session;
+mod version;
 
 use config::Config;
 use handlers::{auth, dashboard, exercises, stats, workouts};
