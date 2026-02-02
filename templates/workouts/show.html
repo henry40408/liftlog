@@ -52,6 +52,7 @@
             <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
             <td>{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</td>
             <td>
+                <button type="button" class="btn-small btn-inline" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">[Clone]</button>
                 <form action="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete" method="post" style="display:inline;"
                       onsubmit="return confirm('Delete this set?');">
                     <button type="submit" class="btn-small btn-inline">[x]</button>
@@ -92,4 +93,18 @@
 <div class="link">
     &larr; <a href="/workouts">[Back to Workouts]</a>
 </div>
+
+<script>
+function cloneSet(exerciseId, weight, reps, rpe) {
+    document.getElementById('exercise_id').value = exerciseId;
+    document.getElementById('weight').value = weight;
+    document.getElementById('reps').value = reps;
+    if (rpe !== null) {
+        document.getElementById('rpe').value = rpe;
+    } else {
+        document.getElementById('rpe').value = '';
+    }
+    document.getElementById('exercise_id').scrollIntoView({ behavior: 'smooth' });
+}
+</script>
 {% endblock %}
