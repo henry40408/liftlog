@@ -14,8 +14,7 @@
     <thead>
         <tr>
             <th>Exercise</th>
-            <th>Type</th>
-            <th>Value</th>
+            <th>Max Weight</th>
             <th>Date</th>
         </tr>
     </thead>
@@ -23,7 +22,6 @@
         {% for pr in prs %}
         <tr>
             <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
-            <td>{{ pr.record_type }}</td>
             <td>{{ pr.value }}</td>
             <td class="muted">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
         </tr>

@@ -6,7 +6,7 @@ use axum::{
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
-use crate::models::{Exercise, PersonalRecordWithExercise, WorkoutLog};
+use crate::models::{DynamicPR, Exercise, WorkoutLogWithExercise};
 use crate::repositories::{ExerciseRepository, WorkoutRepository};
 
 #[derive(Clone)]
@@ -23,7 +23,7 @@ struct StatsTemplate {
     workouts_this_month: i64,
     total_volume: f64,
     total_workouts: i64,
-    prs: Vec<PersonalRecordWithExercise>,
+    prs: Vec<DynamicPR>,
 }
 
 #[derive(Template)]
@@ -31,15 +31,15 @@ struct StatsTemplate {
 struct ExerciseStatsTemplate {
     user: AuthUser,
     exercise: Exercise,
-    history: Vec<WorkoutLog>,
-    prs: Vec<crate::models::PersonalRecord>,
+    history: Vec<WorkoutLogWithExercise>,
+    pr: Option<DynamicPR>,
 }
 
 #[derive(Template)]
 #[template(path = "stats/prs.html")]
 struct PrsTemplate {
     user: AuthUser,
-    prs: Vec<PersonalRecordWithExercise>,
+    prs: Vec<DynamicPR>,
 }
 
 pub async fn index(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
@@ -59,7 +59,10 @@ pub async fn index(State(state): State<StatsState>, auth_user: AuthUser) -> Resu
         .workout_repo
         .count_sessions_by_user(&auth_user.id)
         .await?;
-    let prs = state.workout_repo.find_prs_by_user(&auth_user.id).await?;
+    let prs = state
+        .workout_repo
+        .get_all_prs_by_user(&auth_user.id)
+        .await?;
 
     let template = StatsTemplate {
         user: auth_user,
@@ -91,19 +94,19 @@ pub async fn exercise_stats(
 
     let history = state
         .workout_repo
-        .get_exercise_history(&auth_user.id, &exercise_id, 50)
+        .get_exercise_history_with_pr(&auth_user.id, &exercise_id, 50)
         .await?;
 
-    let prs = state
+    let pr = state
         .workout_repo
-        .find_prs_by_exercise(&auth_user.id, &exercise_id)
+        .get_max_weight_for_exercise(&auth_user.id, &exercise_id)
         .await?;
 
     let template = ExerciseStatsTemplate {
         user: auth_user,
         exercise,
         history,
-        prs,
+        pr,
     };
 
     Ok(Html(
@@ -115,7 +118,10 @@ pub async fn exercise_stats(
 }
 
 pub async fn prs_list(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
-    let prs = state.workout_repo.find_prs_by_user(&auth_user.id).await?;
+    let prs = state
+        .workout_repo
+        .get_all_prs_by_user(&auth_user.id)
+        .await?;
 
     let template = PrsTemplate {
         user: auth_user,

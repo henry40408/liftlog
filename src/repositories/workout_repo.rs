@@ -5,8 +5,7 @@ use uuid::Uuid;
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
 use crate::models::{
-    FromSqliteRow, PersonalRecord, PersonalRecordWithExercise, WorkoutLog, WorkoutLogWithExercise,
-    WorkoutSession,
+    DynamicPR, FromSqliteRow, WorkoutLog, WorkoutLogWithExercise, WorkoutSession,
 };
 
 #[derive(Clone)]
@@ -193,7 +192,6 @@ impl WorkoutRepository {
             reps,
             weight,
             rpe,
-            is_pr: false,
             created_at: now,
         };
         let log_clone = log.clone();
@@ -202,8 +200,8 @@ impl WorkoutRepository {
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = pool.get()?;
             conn.execute(
-                "INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight, rpe, is_pr, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                "INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight, rpe, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     log_clone.id,
                     log_clone.session_id,
@@ -223,24 +221,32 @@ impl WorkoutRepository {
         Ok(log)
     }
 
-    pub async fn find_logs_by_session(
+    /// Find logs by session with dynamically computed is_pr
+    pub async fn find_logs_by_session_with_pr(
         &self,
         session_id: &str,
+        user_id: &str,
     ) -> Result<Vec<WorkoutLogWithExercise>> {
         let pool = self.pool.clone();
         let session_id = session_id.to_string();
+        let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
                 "SELECT wl.id, wl.session_id, wl.exercise_id, e.name as exercise_name,
-                        wl.set_number, wl.reps, wl.weight, wl.rpe, wl.is_pr
+                        wl.set_number, wl.reps, wl.weight, wl.rpe,
+                        CASE WHEN wl.weight = (
+                            SELECT MAX(wl2.weight) FROM workout_logs wl2
+                            JOIN workout_sessions ws2 ON wl2.session_id = ws2.id
+                            WHERE ws2.user_id = ? AND wl2.exercise_id = wl.exercise_id
+                        ) THEN 1 ELSE 0 END as is_pr
                  FROM workout_logs wl
                  JOIN exercises e ON wl.exercise_id = e.id
                  WHERE wl.session_id = ?
                  ORDER BY wl.created_at, wl.set_number",
             )?;
             let logs = stmt
-                .query_map([&session_id], WorkoutLogWithExercise::from_row)?
+                .query_map(rusqlite::params![user_id, session_id], WorkoutLogWithExercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
@@ -278,18 +284,6 @@ impl WorkoutRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
-    pub async fn mark_as_pr(&self, id: &str) -> Result<bool> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let rows = conn.execute("UPDATE workout_logs SET is_pr = 1 WHERE id = ?", [&id])?;
-            Ok(rows > 0)
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-    }
-
     pub async fn get_next_set_number(&self, session_id: &str, exercise_id: &str) -> Result<i32> {
         let pool = self.pool.clone();
         let session_id = session_id.to_string();
@@ -310,122 +304,61 @@ impl WorkoutRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
-    // Personal Records
-    pub async fn find_pr(
-        &self,
-        user_id: &str,
-        exercise_id: &str,
-        record_type: &str,
-    ) -> Result<Option<PersonalRecord>> {
+    // Dynamic Personal Records
+
+    /// Get all PRs for a user (one per exercise, max weight)
+    pub async fn get_all_prs_by_user(&self, user_id: &str) -> Result<Vec<DynamicPR>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
-        let exercise_id = exercise_id.to_string();
-        let record_type = record_type.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
-                "SELECT * FROM personal_records WHERE user_id = ? AND exercise_id = ? AND record_type = ?"
+                "SELECT wl.exercise_id, e.name as exercise_name,
+                        MAX(wl.weight) as value,
+                        (SELECT wl3.created_at FROM workout_logs wl3
+                         JOIN workout_sessions ws3 ON wl3.session_id = ws3.id
+                         WHERE ws3.user_id = ? AND wl3.exercise_id = wl.exercise_id
+                         ORDER BY wl3.weight DESC, wl3.created_at DESC LIMIT 1) as achieved_at
+                 FROM workout_logs wl
+                 JOIN workout_sessions ws ON wl.session_id = ws.id
+                 JOIN exercises e ON wl.exercise_id = e.id
+                 WHERE ws.user_id = ?
+                 GROUP BY wl.exercise_id
+                 ORDER BY achieved_at DESC",
+            )?;
+            let prs = stmt
+                .query_map(rusqlite::params![user_id, user_id], DynamicPR::from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(prs)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    /// Get the max weight PR for a specific exercise
+    pub async fn get_max_weight_for_exercise(
+        &self,
+        user_id: &str,
+        exercise_id: &str,
+    ) -> Result<Option<DynamicPR>> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+        let exercise_id = exercise_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare(
+                "SELECT wl.exercise_id, e.name as exercise_name,
+                        MAX(wl.weight) as value, wl.created_at as achieved_at
+                 FROM workout_logs wl
+                 JOIN workout_sessions ws ON wl.session_id = ws.id
+                 JOIN exercises e ON wl.exercise_id = e.id
+                 WHERE ws.user_id = ? AND wl.exercise_id = ?
+                 GROUP BY wl.exercise_id",
             )?;
             let result = stmt
-                .query_row(
-                    rusqlite::params![user_id, exercise_id, record_type],
-                    PersonalRecord::from_row,
-                )
+                .query_row(rusqlite::params![user_id, exercise_id], DynamicPR::from_row)
                 .optional()?;
             Ok(result)
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-    }
-
-    pub async fn upsert_pr(
-        &self,
-        user_id: &str,
-        exercise_id: &str,
-        record_type: &str,
-        value: f64,
-    ) -> Result<PersonalRecord> {
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now();
-        let pr = PersonalRecord {
-            id: id.clone(),
-            user_id: user_id.to_string(),
-            exercise_id: exercise_id.to_string(),
-            record_type: record_type.to_string(),
-            value,
-            achieved_at: now,
-        };
-        let pr_clone = pr.clone();
-
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let conn = pool.get()?;
-            conn.execute(
-                "INSERT INTO personal_records (id, user_id, exercise_id, record_type, value, achieved_at)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(user_id, exercise_id, record_type)
-                 DO UPDATE SET value = excluded.value, achieved_at = excluded.achieved_at",
-                rusqlite::params![
-                    pr_clone.id,
-                    pr_clone.user_id,
-                    pr_clone.exercise_id,
-                    pr_clone.record_type,
-                    pr_clone.value,
-                    pr_clone.achieved_at
-                ],
-            )?;
-            Ok(())
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))??;
-
-        Ok(pr)
-    }
-
-    pub async fn find_prs_by_user(&self, user_id: &str) -> Result<Vec<PersonalRecordWithExercise>> {
-        let pool = self.pool.clone();
-        let user_id = user_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-                "SELECT pr.id, pr.user_id, pr.exercise_id, e.name as exercise_name,
-                        pr.record_type, pr.value, pr.achieved_at
-                 FROM personal_records pr
-                 JOIN exercises e ON pr.exercise_id = e.id
-                 WHERE pr.user_id = ?
-                 ORDER BY pr.achieved_at DESC",
-            )?;
-            let prs = stmt
-                .query_map([&user_id], PersonalRecordWithExercise::from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(prs)
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-    }
-
-    pub async fn find_prs_by_exercise(
-        &self,
-        user_id: &str,
-        exercise_id: &str,
-    ) -> Result<Vec<PersonalRecord>> {
-        let pool = self.pool.clone();
-        let user_id = user_id.to_string();
-        let exercise_id = exercise_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-                "SELECT * FROM personal_records
-                 WHERE user_id = ? AND exercise_id = ?
-                 ORDER BY record_type",
-            )?;
-            let prs = stmt
-                .query_map(
-                    rusqlite::params![user_id, exercise_id],
-                    PersonalRecord::from_row,
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(prs)
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -488,28 +421,37 @@ impl WorkoutRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
-    pub async fn get_exercise_history(
+    /// Get exercise history with dynamically computed is_pr
+    pub async fn get_exercise_history_with_pr(
         &self,
         user_id: &str,
         exercise_id: &str,
         limit: i64,
-    ) -> Result<Vec<WorkoutLog>> {
+    ) -> Result<Vec<WorkoutLogWithExercise>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         let exercise_id = exercise_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
-                "SELECT wl.* FROM workout_logs wl
+                "SELECT wl.id, wl.session_id, wl.exercise_id, e.name as exercise_name,
+                        wl.set_number, wl.reps, wl.weight, wl.rpe,
+                        CASE WHEN wl.weight = (
+                            SELECT MAX(wl2.weight) FROM workout_logs wl2
+                            JOIN workout_sessions ws2 ON wl2.session_id = ws2.id
+                            WHERE ws2.user_id = ? AND wl2.exercise_id = wl.exercise_id
+                        ) THEN 1 ELSE 0 END as is_pr
+                 FROM workout_logs wl
                  JOIN workout_sessions ws ON wl.session_id = ws.id
+                 JOIN exercises e ON wl.exercise_id = e.id
                  WHERE ws.user_id = ? AND wl.exercise_id = ?
                  ORDER BY ws.date DESC, wl.set_number
                  LIMIT ?",
             )?;
             let logs = stmt
                 .query_map(
-                    rusqlite::params![user_id, exercise_id, limit],
-                    WorkoutLog::from_row,
+                    rusqlite::params![user_id, user_id, exercise_id, limit],
+                    WorkoutLogWithExercise::from_row,
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
@@ -684,11 +626,10 @@ mod tests {
         assert_eq!(log.reps, 10);
         assert_eq!(log.weight, 100.0);
         assert_eq!(log.rpe, Some(8));
-        assert!(!log.is_pr);
     }
 
     #[tokio::test]
-    async fn test_find_logs_by_session() {
+    async fn test_find_logs_by_session_with_pr() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
         create_test_exercise(&pool, "ex-bench-press", "user1");
@@ -708,9 +649,16 @@ mod tests {
             .await
             .unwrap();
 
-        let logs = repo.find_logs_by_session(&session.id).await.unwrap();
+        let logs = repo
+            .find_logs_by_session_with_pr(&session.id, "user1")
+            .await
+            .unwrap();
 
         assert_eq!(logs.len(), 3);
+        // 105.0 is PR for bench press, 120.0 is PR for squat
+        assert!(!logs[0].is_pr); // 100.0 bench
+        assert!(logs[1].is_pr); // 105.0 bench - PR
+        assert!(logs[2].is_pr); // 120.0 squat - PR
     }
 
     #[tokio::test]
@@ -762,74 +710,43 @@ mod tests {
         assert_eq!(next, 2);
     }
 
-    // Personal Record Tests
+    // Dynamic Personal Record Tests
 
     #[tokio::test]
-    async fn test_upsert_pr_insert() {
-        let pool = setup_test_db();
-        create_test_user(&pool, "user1");
-        create_test_exercise(&pool, "ex-bench-press", "user1");
-        let repo = WorkoutRepository::new(pool);
-
-        let pr = repo
-            .upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
-            .await
-            .unwrap();
-
-        assert_eq!(pr.user_id, "user1");
-        assert_eq!(pr.exercise_id, "ex-bench-press");
-        assert_eq!(pr.record_type, "1rm");
-        assert_eq!(pr.value, 100.0);
-    }
-
-    #[tokio::test]
-    async fn test_upsert_pr_update() {
-        let pool = setup_test_db();
-        create_test_user(&pool, "user1");
-        create_test_exercise(&pool, "ex-bench-press", "user1");
-        let repo = WorkoutRepository::new(pool);
-
-        repo.upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
-            .await
-            .unwrap();
-        let updated = repo
-            .upsert_pr("user1", "ex-bench-press", "1rm", 110.0)
-            .await
-            .unwrap();
-
-        assert_eq!(updated.value, 110.0);
-
-        // Verify only one PR exists
-        let found = repo
-            .find_pr("user1", "ex-bench-press", "1rm")
-            .await
-            .unwrap();
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().value, 110.0);
-    }
-
-    #[tokio::test]
-    async fn test_find_prs_by_user() {
+    async fn test_get_all_prs_by_user() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
         create_test_exercise(&pool, "ex-bench-press", "user1");
         create_test_exercise(&pool, "ex-squat", "user1");
         let repo = WorkoutRepository::new(pool);
 
-        repo.upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
             .await
             .unwrap();
-        repo.upsert_pr("user1", "ex-squat", "1rm", 150.0)
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
             .await
             .unwrap();
 
-        let prs = repo.find_prs_by_user("user1").await.unwrap();
+        let prs = repo.get_all_prs_by_user("user1").await.unwrap();
 
         assert_eq!(prs.len(), 2);
+        // Find each exercise's PR
+        let bench_pr = prs.iter().find(|p| p.exercise_id == "ex-bench-press");
+        let squat_pr = prs.iter().find(|p| p.exercise_id == "ex-squat");
+        assert!(bench_pr.is_some());
+        assert!(squat_pr.is_some());
+        assert_eq!(bench_pr.unwrap().value, 110.0);
+        assert_eq!(squat_pr.unwrap().value, 150.0);
     }
 
     #[tokio::test]
-    async fn test_mark_as_pr() {
+    async fn test_get_max_weight_for_exercise() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
         create_test_exercise(&pool, "ex-bench-press", "user1");
@@ -837,18 +754,87 @@ mod tests {
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
-        let log = repo
-            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, None)
             .await
             .unwrap();
 
-        assert!(!log.is_pr);
+        let pr = repo
+            .get_max_weight_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
 
-        let marked = repo.mark_as_pr(&log.id).await.unwrap();
-        assert!(marked);
+        assert!(pr.is_some());
+        assert_eq!(pr.unwrap().value, 110.0);
+    }
 
-        let found = repo.find_log_by_id(&log.id).await.unwrap().unwrap();
-        assert!(found.is_pr);
+    #[tokio::test]
+    async fn test_dynamic_pr_updates_when_heavier_set_added() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // First set
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+
+        let logs = repo
+            .find_logs_by_session_with_pr(&session.id, "user1")
+            .await
+            .unwrap();
+        assert!(logs[0].is_pr); // 100.0 is the only set, so it's PR
+
+        // Add heavier set
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+
+        let logs = repo
+            .find_logs_by_session_with_pr(&session.id, "user1")
+            .await
+            .unwrap();
+        assert!(!logs[0].is_pr); // 100.0 is no longer PR
+        assert!(logs[1].is_pr); // 110.0 is now PR
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_pr_updates_when_pr_deleted() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        let heavy_log = repo
+            .create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+
+        // Delete the PR set
+        repo.delete_log(&heavy_log.id, &session.id).await.unwrap();
+
+        let logs = repo
+            .find_logs_by_session_with_pr(&session.id, "user1")
+            .await
+            .unwrap();
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].is_pr); // 100.0 becomes PR again
     }
 
     #[tokio::test]

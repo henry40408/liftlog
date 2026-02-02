@@ -144,7 +144,10 @@ pub async fn show(
         return Err(AppError::NotFound("Workout not found".to_string()));
     }
 
-    let logs = state.workout_repo.find_logs_by_session(&id).await?;
+    let logs = state
+        .workout_repo
+        .find_logs_by_session_with_pr(&id, &auth_user.id)
+        .await?;
     let exercises = state
         .exercise_repo
         .find_available_for_user(&auth_user.id)
@@ -251,8 +254,8 @@ pub async fn add_log(
         .get_next_set_number(&session_id, &form.exercise_id)
         .await?;
 
-    // Create the log
-    let log = state
+    // Create the log (PR is computed dynamically)
+    state
         .workout_repo
         .create_log(
             &session_id,
@@ -263,25 +266,6 @@ pub async fn add_log(
             form.rpe,
         )
         .await?;
-
-    // Check for PR
-    let current_pr = state
-        .workout_repo
-        .find_pr(&auth_user.id, &form.exercise_id, "max_weight")
-        .await?;
-
-    let is_new_pr = match current_pr {
-        Some(pr) => form.weight > pr.value,
-        None => true,
-    };
-
-    if is_new_pr {
-        state
-            .workout_repo
-            .upsert_pr(&auth_user.id, &form.exercise_id, "max_weight", form.weight)
-            .await?;
-        state.workout_repo.mark_as_pr(&log.id).await?;
-    }
 
     Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
 }

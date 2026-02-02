@@ -27,7 +27,6 @@ pub struct WorkoutLog {
     pub reps: i32,
     pub weight: f64,
     pub rpe: Option<i32>,
-    pub is_pr: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -41,7 +40,6 @@ impl FromSqliteRow for WorkoutLog {
             reps: row.get("reps")?,
             weight: row.get("weight")?,
             rpe: row.get("rpe")?,
-            is_pr: row.get("is_pr")?,
             created_at: row.get("created_at")?,
         })
     }

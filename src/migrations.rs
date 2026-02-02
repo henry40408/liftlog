@@ -24,10 +24,6 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/004_create_workout_logs.sql"),
     ),
     (
-        "005_create_personal_records.sql",
-        include_str!("../migrations/005_create_personal_records.sql"),
-    ),
-    (
         "007_add_user_role.sql",
         include_str!("../migrations/007_add_user_role.sql"),
     ),
