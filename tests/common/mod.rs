@@ -120,7 +120,10 @@ pub async fn create_test_workout(
     notes: Option<&str>,
 ) -> liftlog::models::WorkoutSession {
     let workout_repo = liftlog::repositories::WorkoutRepository::new(pool.clone());
-    workout_repo.create_session(user_id, date, notes).await.unwrap()
+    workout_repo
+        .create_session(user_id, date, notes)
+        .await
+        .unwrap()
 }
 
 pub async fn create_test_log(

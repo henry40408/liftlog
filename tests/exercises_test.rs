@@ -100,7 +100,10 @@ async fn test_create_exercise_success() {
 
     // Verify exercise was created
     let exercise_repo = ExerciseRepository::new(pool);
-    let exercises = exercise_repo.find_available_for_user(&user.id).await.unwrap();
+    let exercises = exercise_repo
+        .find_available_for_user(&user.id)
+        .await
+        .unwrap();
     assert_eq!(exercises.len(), 1);
     assert_eq!(exercises[0].name, "Bench Press");
     assert_eq!(exercises[0].category, "chest");
@@ -201,7 +204,11 @@ async fn test_update_exercise_success() {
 
     // Verify exercise was updated
     let exercise_repo = ExerciseRepository::new(pool);
-    let updated = exercise_repo.find_by_id(&exercise.id).await.unwrap().unwrap();
+    let updated = exercise_repo
+        .find_by_id(&exercise.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(updated.name, "Incline Bench Press");
 }
 
@@ -301,7 +308,11 @@ async fn test_cannot_update_others_exercise() {
 
     // Verify exercise was NOT updated
     let exercise_repo = ExerciseRepository::new(pool);
-    let found = exercise_repo.find_by_id(&exercise.id).await.unwrap().unwrap();
+    let found = exercise_repo
+        .find_by_id(&exercise.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(found.name, "Bench Press");
 }
 
@@ -485,6 +496,10 @@ async fn test_update_exercise_empty_name_rejected() {
 
     // Verify exercise was NOT updated
     let exercise_repo = ExerciseRepository::new(pool);
-    let found = exercise_repo.find_by_id(&exercise.id).await.unwrap().unwrap();
+    let found = exercise_repo
+        .find_by_id(&exercise.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(found.name, "Bench Press");
 }

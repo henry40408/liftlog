@@ -437,8 +437,15 @@ async fn test_update_workout_success() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
     // Verify workout was updated
-    let updated = workout_repo.find_session_by_id(&workout.id).await.unwrap().unwrap();
-    assert_eq!(updated.date, chrono::NaiveDate::from_ymd_opt(2024, 1, 20).unwrap());
+    let updated = workout_repo
+        .find_session_by_id(&workout.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        updated.date,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 20).unwrap()
+    );
     assert_eq!(updated.notes, Some("Updated notes".to_string()));
 }
 
@@ -679,7 +686,8 @@ async fn test_edit_log_page_renders() {
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, Some(8)).await;
+    let log =
+        common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, Some(8)).await;
 
     let response = test_app
         .router
