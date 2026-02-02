@@ -10,8 +10,7 @@ pub struct Exercise {
     pub category: String,
     pub muscle_group: String,
     pub equipment: Option<String>,
-    pub is_default: bool,
-    pub user_id: Option<String>,
+    pub user_id: String,
 }
 
 impl FromSqliteRow for Exercise {
@@ -22,7 +21,6 @@ impl FromSqliteRow for Exercise {
             category: row.get("category")?,
             muscle_group: row.get("muscle_group")?,
             equipment: row.get("equipment")?,
-            is_default: row.get("is_default")?,
             user_id: row.get("user_id")?,
         })
     }

@@ -5,8 +5,7 @@ CREATE TABLE IF NOT EXISTS exercises (
     category TEXT NOT NULL,
     muscle_group TEXT NOT NULL,
     equipment TEXT,
-    is_default BOOLEAN NOT NULL DEFAULT 0,
-    user_id TEXT,
+    user_id TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

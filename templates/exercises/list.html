@@ -7,7 +7,7 @@
 
 <h1>Exercises</h1>
 
-<p><a href="/exercises/new">[+ Add Custom Exercise]</a></p>
+<p><a href="/exercises/new">[+ Add Exercise]</a></p>
 
 {% for cat in categories %}
 <h2>{{ cat.display_name }}</h2>
@@ -16,7 +16,6 @@
         <tr>
             <th>Name</th>
             <th>Equipment</th>
-            <th>Type</th>
         </tr>
     </thead>
     <tbody>
@@ -25,7 +24,6 @@
         <tr>
             <td><a href="/stats/exercise/{{ ex.id }}">{{ ex.name }}</a></td>
             <td class="muted">{% match ex.equipment %}{% when Some with (e) %}{{ e }}{% when None %}-{% endmatch %}</td>
-            <td class="muted">{% if ex.is_default %}default{% else %}custom{% endif %}</td>
         </tr>
         {% endif %}
         {% endfor %}

@@ -539,6 +539,15 @@ mod tests {
         ).unwrap();
     }
 
+    fn create_test_exercise(pool: &DbPool, exercise_id: &str, user_id: &str) {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO exercises (id, name, category, muscle_group, equipment, user_id)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            rusqlite::params![exercise_id, "Test Exercise", "chest", "pecs", "barbell", user_id],
+        ).unwrap();
+    }
+
     // Workout Session Tests
 
     #[tokio::test]
@@ -658,6 +667,7 @@ mod tests {
     async fn test_create_log() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
         let repo = WorkoutRepository::new(pool);
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -681,6 +691,8 @@ mod tests {
     async fn test_find_logs_by_session() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        create_test_exercise(&pool, "ex-squat", "user1");
         let repo = WorkoutRepository::new(pool);
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -705,6 +717,7 @@ mod tests {
     async fn test_delete_log_success() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
         let repo = WorkoutRepository::new(pool);
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -725,6 +738,7 @@ mod tests {
     async fn test_get_next_set_number() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
         let repo = WorkoutRepository::new(pool);
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -754,6 +768,7 @@ mod tests {
     async fn test_upsert_pr_insert() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
         let repo = WorkoutRepository::new(pool);
 
         let pr = repo
@@ -771,6 +786,7 @@ mod tests {
     async fn test_upsert_pr_update() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
         let repo = WorkoutRepository::new(pool);
 
         repo.upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
@@ -796,6 +812,8 @@ mod tests {
     async fn test_find_prs_by_user() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        create_test_exercise(&pool, "ex-squat", "user1");
         let repo = WorkoutRepository::new(pool);
 
         repo.upsert_pr("user1", "ex-bench-press", "1rm", 100.0)
@@ -814,6 +832,7 @@ mod tests {
     async fn test_mark_as_pr() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
         let repo = WorkoutRepository::new(pool);
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();

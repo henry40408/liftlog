@@ -66,7 +66,7 @@ impl ExerciseRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
-                "SELECT * FROM exercises WHERE is_default = 1 OR user_id = ? ORDER BY category, name"
+                "SELECT * FROM exercises WHERE user_id = ? ORDER BY category, name"
             )?;
             let exercises = stmt
                 .query_map([&user_id], Exercise::from_row)?
@@ -109,8 +109,7 @@ impl ExerciseRepository {
             category: category.to_string(),
             muscle_group: muscle_group.to_string(),
             equipment: equipment.map(|s| s.to_string()),
-            is_default: false,
-            user_id: Some(user_id.to_string()),
+            user_id: user_id.to_string(),
         };
         let exercise_clone = exercise.clone();
 
@@ -118,8 +117,8 @@ impl ExerciseRepository {
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = pool.get()?;
             conn.execute(
-                "INSERT INTO exercises (id, name, category, muscle_group, equipment, is_default, user_id)
-                 VALUES (?, ?, ?, ?, ?, 0, ?)",
+                "INSERT INTO exercises (id, name, category, muscle_group, equipment, user_id)
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     exercise_clone.id,
                     exercise_clone.name,
@@ -145,7 +144,7 @@ impl ExerciseRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let rows = conn.execute(
-                "DELETE FROM exercises WHERE id = ? AND user_id = ? AND is_default = 0",
+                "DELETE FROM exercises WHERE id = ? AND user_id = ?",
                 rusqlite::params![id, user_id],
             )?;
             Ok(rows > 0)
