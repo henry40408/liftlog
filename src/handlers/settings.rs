@@ -17,5 +17,10 @@ pub async fn index(auth_user: AuthUser) -> Result<Response> {
         user: auth_user,
         git_version: GIT_VERSION,
     };
-    Ok(Html(template.render().map_err(|e| AppError::Internal(e.to_string()))?).into_response())
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }

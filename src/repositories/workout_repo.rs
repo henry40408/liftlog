@@ -4,9 +4,7 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
-use crate::models::{
-    DynamicPR, FromSqliteRow, WorkoutLog, WorkoutLogWithExercise, WorkoutSession,
-};
+use crate::models::{DynamicPR, FromSqliteRow, WorkoutLog, WorkoutLogWithExercise, WorkoutSession};
 
 #[derive(Clone)]
 pub struct WorkoutRepository {
@@ -246,7 +244,10 @@ impl WorkoutRepository {
                  ORDER BY wl.created_at, wl.set_number",
             )?;
             let logs = stmt
-                .query_map(rusqlite::params![user_id, session_id], WorkoutLogWithExercise::from_row)?
+                .query_map(
+                    rusqlite::params![user_id, session_id],
+                    WorkoutLogWithExercise::from_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
@@ -510,7 +511,8 @@ mod tests {
             "INSERT INTO exercises (id, name, category, user_id)
              VALUES (?, ?, ?, ?)",
             rusqlite::params![exercise_id, "Test Exercise", "chest", user_id],
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Workout Session Tests

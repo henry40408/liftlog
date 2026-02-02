@@ -65,9 +65,8 @@ impl ExerciseRepository {
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-                "SELECT * FROM exercises WHERE user_id = ? ORDER BY category, name"
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM exercises WHERE user_id = ? ORDER BY category, name")?;
             let exercises = stmt
                 .query_map([&user_id], Exercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -94,12 +93,7 @@ impl ExerciseRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
-    pub async fn create(
-        &self,
-        name: &str,
-        category: &str,
-        user_id: &str,
-    ) -> Result<Exercise> {
+    pub async fn create(&self, name: &str, category: &str, user_id: &str) -> Result<Exercise> {
         let id = Uuid::new_v4().to_string();
         let exercise = Exercise {
             id: id.clone(),
