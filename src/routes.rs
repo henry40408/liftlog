@@ -49,6 +49,14 @@ pub fn create_router(
             "/workouts/:id/logs/:log_id/delete",
             post(workouts::delete_log),
         )
+        .route(
+            "/workouts/:id/logs/:log_id/edit",
+            get(workouts::edit_log_page),
+        )
+        .route(
+            "/workouts/:id/logs/:log_id",
+            post(workouts::update_log),
+        )
         .with_state(workouts_state)
         // Exercise routes
         .route("/exercises", get(exercises::list))

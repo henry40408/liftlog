@@ -284,6 +284,29 @@ impl WorkoutRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
+    pub async fn update_log(
+        &self,
+        id: &str,
+        session_id: &str,
+        reps: i32,
+        weight: f64,
+        rpe: Option<i32>,
+    ) -> Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE workout_logs SET reps = ?, weight = ?, rpe = ? WHERE id = ? AND session_id = ?",
+                rusqlite::params![reps, weight, rpe, id, session_id],
+            )?;
+            Ok(rows > 0)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
     pub async fn get_next_set_number(&self, session_id: &str, exercise_id: &str) -> Result<i32> {
         let pool = self.pool.clone();
         let session_id = session_id.to_string();
@@ -680,6 +703,59 @@ mod tests {
         assert!(deleted);
         let found = repo.find_log_by_id(&log.id).await.unwrap();
         assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_log_success() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let log = repo
+            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, Some(7))
+            .await
+            .unwrap();
+
+        let updated = repo
+            .update_log(&log.id, &session.id, 12, 110.0, Some(8))
+            .await
+            .unwrap();
+
+        assert!(updated);
+        let found = repo.find_log_by_id(&log.id).await.unwrap().unwrap();
+        assert_eq!(found.reps, 12);
+        assert_eq!(found.weight, 110.0);
+        assert_eq!(found.rpe, Some(8));
+    }
+
+    #[tokio::test]
+    async fn test_update_log_wrong_session() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let log = repo
+            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+
+        // Try to update with wrong session_id
+        let updated = repo
+            .update_log(&log.id, "wrong-session", 12, 110.0, Some(8))
+            .await
+            .unwrap();
+
+        assert!(!updated);
+        // Verify log was not modified
+        let found = repo.find_log_by_id(&log.id).await.unwrap().unwrap();
+        assert_eq!(found.reps, 10);
+        assert_eq!(found.weight, 100.0);
     }
 
     #[tokio::test]

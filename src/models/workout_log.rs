@@ -54,6 +54,14 @@ pub struct CreateWorkoutLog {
     pub rpe: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkoutLog {
+    pub reps: i32,
+    pub weight: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_i32")]
+    pub rpe: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkoutLogWithExercise {
     pub id: String,

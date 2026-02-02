@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Set - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Edit Set</h1>
+
+{% if let Some(err) = error %}
+<div class="error">{{ err }}</div>
+{% endif %}
+
+<form method="post" action="/workouts/{{ workout.id }}/logs/{{ log.id }}">
+    <div class="form-group">
+        <label>Exercise</label>
+        <input type="text" value="{{ exercise_name }}" disabled>
+    </div>
+    <div class="form-group">
+        <label>Set Number</label>
+        <input type="text" value="{{ log.set_number }}" disabled>
+    </div>
+    <div class="form-group">
+        <label for="weight">Weight</label>
+        <input type="number" id="weight" name="weight" step="0.5" min="0" value="{{ log.weight }}" required>
+    </div>
+    <div class="form-group">
+        <label for="reps">Reps</label>
+        <input type="number" id="reps" name="reps" min="1" value="{{ log.reps }}" required>
+    </div>
+    <div class="form-group">
+        <label for="rpe">RPE (1-10, optional)</label>
+        <input type="number" id="rpe" name="rpe" min="1" max="10" value="{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}{% endmatch %}">
+    </div>
+    <button type="submit">[Save Changes]</button>
+</form>
+
+<div class="link">
+    &larr; <a href="/workouts/{{ workout.id }}">[Back to Workout]</a>
+</div>
+{% endblock %}
