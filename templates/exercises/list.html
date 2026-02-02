@@ -15,6 +15,7 @@
     <thead>
         <tr>
             <th>Name</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -22,6 +23,12 @@
         {% if ex.category == cat.name %}
         <tr>
             <td><a href="/stats/exercise/{{ ex.id }}">{{ ex.name }}</a></td>
+            <td>
+                <a href="/exercises/{{ ex.id }}/edit">[Edit]</a>
+                <form method="post" action="/exercises/{{ ex.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this exercise?');">
+                    <button type="submit">[Delete]</button>
+                </form>
+            </td>
         </tr>
         {% endif %}
         {% endfor %}

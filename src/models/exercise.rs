@@ -28,6 +28,12 @@ pub struct CreateExercise {
     pub category: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateExercise {
+    pub name: String,
+    pub category: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExerciseCategory {
     pub name: &'static str,

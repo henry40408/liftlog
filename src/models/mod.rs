@@ -5,7 +5,7 @@ pub mod user;
 pub mod workout_log;
 pub mod workout_session;
 
-pub use exercise::{CreateExercise, Exercise};
+pub use exercise::{CreateExercise, Exercise, UpdateExercise};
 pub use from_row::FromSqliteRow;
 pub use personal_record::{PersonalRecord, PersonalRecordWithExercise};
 pub use user::{CreateUser, LoginCredentials, User, UserRole};

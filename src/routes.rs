@@ -54,6 +54,9 @@ pub fn create_router(
         .route("/exercises", get(exercises::list))
         .route("/exercises/new", get(exercises::new_page))
         .route("/exercises", post(exercises::create))
+        .route("/exercises/:id/edit", get(exercises::edit_page))
+        .route("/exercises/:id", post(exercises::update))
+        .route("/exercises/:id/delete", post(exercises::delete))
         .with_state(exercises_state)
         // Stats routes
         .route("/stats", get(stats::index))

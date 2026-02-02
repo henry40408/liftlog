@@ -130,7 +130,30 @@ impl ExerciseRepository {
         Ok(exercise)
     }
 
-    #[allow(dead_code)]
+    pub async fn update(
+        &self,
+        id: &str,
+        user_id: &str,
+        name: &str,
+        category: &str,
+    ) -> Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        let user_id = user_id.to_string();
+        let name = name.to_string();
+        let category = category.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE exercises SET name = ?, category = ? WHERE id = ? AND user_id = ?",
+                rusqlite::params![name, category, id, user_id],
+            )?;
+            Ok(rows > 0)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
     pub async fn delete(&self, id: &str, user_id: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();
