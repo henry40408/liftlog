@@ -8,38 +8,29 @@
 <h1>{{ exercise.name }}</h1>
 
 <p class="muted">
-    Category: {{ exercise.category }} |
-    Muscle: {{ exercise.muscle_group }}
-    {% match exercise.equipment %}
-    {% when Some with (equip) %}
-    | Equipment: {{ equip }}
-    {% when None %}
-    {% endmatch %}
+    Category: {{ exercise.category }}
 </p>
 
-<h2>Personal Records</h2>
-{% if prs.is_empty() %}
-<p class="muted">No PRs for this exercise yet.</p>
-{% else %}
+<h2>Personal Record</h2>
+{% match pr %}
+{% when Some with (p) %}
 <table>
     <thead>
         <tr>
-            <th>Type</th>
-            <th>Value</th>
+            <th>Max Weight</th>
             <th>Date</th>
         </tr>
     </thead>
     <tbody>
-        {% for pr in prs %}
         <tr>
-            <td>{{ pr.record_type }}</td>
-            <td>{{ pr.value }}</td>
-            <td class="muted">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+            <td>{{ p.value }}</td>
+            <td class="muted">{{ p.achieved_at.format("%Y-%m-%d") }}</td>
         </tr>
-        {% endfor %}
     </tbody>
 </table>
-{% endif %}
+{% when None %}
+<p class="muted">No PR for this exercise yet.</p>
+{% endmatch %}
 
 <h2>Recent History</h2>
 {% if history.is_empty() %}

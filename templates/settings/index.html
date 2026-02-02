@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<h1>Settings</h1>
+
+<h2>Application Info</h2>
+<table>
+    <tbody>
+        <tr>
+            <th style="width:150px;">Version</th>
+            <td><code>{{ git_version }}</code></td>
+        </tr>
+    </tbody>
+</table>
+{% endblock %}

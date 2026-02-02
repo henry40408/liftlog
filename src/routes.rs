@@ -3,7 +3,7 @@ use axum::{
     Extension, Router,
 };
 
-use crate::handlers::{auth, dashboard, exercises, stats, workouts};
+use crate::handlers::{auth, dashboard, exercises, settings, stats, workouts};
 use crate::session::SessionKey;
 
 pub fn create_router(
@@ -49,17 +49,27 @@ pub fn create_router(
             "/workouts/:id/logs/:log_id/delete",
             post(workouts::delete_log),
         )
+        .route(
+            "/workouts/:id/logs/:log_id/edit",
+            get(workouts::edit_log_page),
+        )
+        .route("/workouts/:id/logs/:log_id", post(workouts::update_log))
         .with_state(workouts_state)
         // Exercise routes
         .route("/exercises", get(exercises::list))
         .route("/exercises/new", get(exercises::new_page))
         .route("/exercises", post(exercises::create))
+        .route("/exercises/:id/edit", get(exercises::edit_page))
+        .route("/exercises/:id", post(exercises::update))
+        .route("/exercises/:id/delete", post(exercises::delete))
         .with_state(exercises_state)
         // Stats routes
         .route("/stats", get(stats::index))
         .route("/stats/exercise/:id", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
         .with_state(stats_state)
+        // Settings routes
+        .route("/settings", get(settings::index))
         // Session key via Extension layer
         .layer(Extension(session_key))
 }

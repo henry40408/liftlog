@@ -10,7 +10,8 @@ use serde::Deserialize;
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
 use crate::models::{
-    CreateWorkoutLog, CreateWorkoutSession, Exercise, WorkoutLogWithExercise, WorkoutSession,
+    CreateWorkoutLog, CreateWorkoutSession, Exercise, UpdateWorkoutLog, WorkoutLog,
+    WorkoutLogWithExercise, WorkoutSession,
 };
 use crate::repositories::{ExerciseRepository, WorkoutRepository};
 
@@ -53,6 +54,16 @@ struct ShowWorkoutTemplate {
 struct EditWorkoutTemplate {
     user: AuthUser,
     workout: WorkoutSession,
+    error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "workouts/edit_log.html")]
+struct EditLogTemplate {
+    user: AuthUser,
+    workout: WorkoutSession,
+    log: WorkoutLog,
+    exercise_name: String,
     error: Option<String>,
 }
 
@@ -144,7 +155,10 @@ pub async fn show(
         return Err(AppError::NotFound("Workout not found".to_string()));
     }
 
-    let logs = state.workout_repo.find_logs_by_session(&id).await?;
+    let logs = state
+        .workout_repo
+        .find_logs_by_session_with_pr(&id, &auth_user.id)
+        .await?;
     let exercises = state
         .exercise_repo
         .find_available_for_user(&auth_user.id)
@@ -251,8 +265,8 @@ pub async fn add_log(
         .get_next_set_number(&session_id, &form.exercise_id)
         .await?;
 
-    // Create the log
-    let log = state
+    // Create the log (PR is computed dynamically)
+    state
         .workout_repo
         .create_log(
             &session_id,
@@ -263,25 +277,6 @@ pub async fn add_log(
             form.rpe,
         )
         .await?;
-
-    // Check for PR
-    let current_pr = state
-        .workout_repo
-        .find_pr(&auth_user.id, &form.exercise_id, "max_weight")
-        .await?;
-
-    let is_new_pr = match current_pr {
-        Some(pr) => form.weight > pr.value,
-        None => true,
-    };
-
-    if is_new_pr {
-        state
-            .workout_repo
-            .upsert_pr(&auth_user.id, &form.exercise_id, "max_weight", form.weight)
-            .await?;
-        state.workout_repo.mark_as_pr(&log.id).await?;
-    }
 
     Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
 }
@@ -303,6 +298,82 @@ pub async fn delete_log(
     }
 
     state.workout_repo.delete_log(&log_id, &session_id).await?;
+
+    Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
+}
+
+pub async fn edit_log_page(
+    State(state): State<WorkoutsState>,
+    auth_user: AuthUser,
+    Path((session_id, log_id)): Path<(String, String)>,
+) -> Result<Response> {
+    // Verify session ownership
+    let session = state
+        .workout_repo
+        .find_session_by_id(&session_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+
+    if session.user_id != auth_user.id {
+        return Err(AppError::NotFound("Workout not found".to_string()));
+    }
+
+    // Get the log
+    let log = state
+        .workout_repo
+        .find_log_by_id(&log_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Log not found".to_string()))?;
+
+    // Verify log belongs to this session
+    if log.session_id != session_id {
+        return Err(AppError::NotFound("Log not found".to_string()));
+    }
+
+    // Get exercise name
+    let exercise = state
+        .exercise_repo
+        .find_by_id(&log.exercise_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
+
+    let template = EditLogTemplate {
+        user: auth_user,
+        workout: session,
+        log,
+        exercise_name: exercise.name,
+        error: None,
+    };
+
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
+}
+
+pub async fn update_log(
+    State(state): State<WorkoutsState>,
+    auth_user: AuthUser,
+    Path((session_id, log_id)): Path<(String, String)>,
+    Form(form): Form<UpdateWorkoutLog>,
+) -> Result<Response> {
+    // Verify session ownership
+    let session = state
+        .workout_repo
+        .find_session_by_id(&session_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+
+    if session.user_id != auth_user.id {
+        return Err(AppError::NotFound("Workout not found".to_string()));
+    }
+
+    state
+        .workout_repo
+        .update_log(&log_id, &session_id, form.reps, form.weight, form.rpe)
+        .await?;
 
     Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
 }

@@ -19,6 +19,9 @@ pub enum AppError {
     #[allow(dead_code)]
     Unauthorized,
 
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Bad request: {0}")]
     #[allow(dead_code)]
     BadRequest(String),
@@ -53,6 +56,7 @@ impl IntoResponse for AppError {
             }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Internal(msg) => {

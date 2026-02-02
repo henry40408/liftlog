@@ -1,30 +1,30 @@
 {% extends "base.html" %}
 
-{% block title %}New Exercise - LiftLog{% endblock %}
+{% block title %}Edit Exercise - LiftLog{% endblock %}
 
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Add Custom Exercise</h1>
+<h1>Edit Exercise</h1>
 
 {% if let Some(err) = error %}
 <div class="error">{{ err }}</div>
 {% endif %}
 
-<form method="post" action="/exercises">
+<form method="post" action="/exercises/{{ exercise.id }}">
     <div class="form-group">
         <label for="name">Name</label>
-        <input type="text" id="name" name="name" required autofocus>
+        <input type="text" id="name" name="name" value="{{ exercise.name }}" required autofocus>
     </div>
     <div class="form-group">
         <label for="category">Category</label>
         <select id="category" name="category" required>
             {% for cat in categories %}
-            <option value="{{ cat.name }}">{{ cat.display_name }}</option>
+            <option value="{{ cat.name }}" {% if cat.name == exercise.category %}selected{% endif %}>{{ cat.display_name }}</option>
             {% endfor %}
         </select>
     </div>
-    <button type="submit">[Add Exercise]</button>
+    <button type="submit">[Save Changes]</button>
 </form>
 
 <div class="link">
