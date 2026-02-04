@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
 use crate::models::{
-    CreateWorkoutLog, CreateWorkoutSession, Exercise, UpdateWorkoutLog, WorkoutLog,
+    CreateWorkoutLog, CreateWorkoutSession, DynamicPR, Exercise, UpdateWorkoutLog, WorkoutLog,
     WorkoutLogWithExercise, WorkoutSession,
 };
 use crate::repositories::{ExerciseRepository, WorkoutRepository};
@@ -46,6 +46,7 @@ struct ShowWorkoutTemplate {
     workout: WorkoutSession,
     logs: Vec<WorkoutLogWithExercise>,
     exercises: Vec<Exercise>,
+    exercise_prs: Vec<DynamicPR>,
     error: Option<String>,
 }
 
@@ -163,12 +164,17 @@ pub async fn show(
         .exercise_repo
         .find_available_for_user(&auth_user.id)
         .await?;
+    let exercise_prs = state
+        .workout_repo
+        .get_all_prs_by_user(&auth_user.id)
+        .await?;
 
     let template = ShowWorkoutTemplate {
         user: auth_user,
         workout,
         logs,
         exercises,
+        exercise_prs,
         error: None,
     };
 
