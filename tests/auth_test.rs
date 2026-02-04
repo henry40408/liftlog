@@ -63,7 +63,7 @@ async fn test_dashboard_requires_auth() {
 #[tokio::test]
 async fn test_login_valid_credentials() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a test user
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
@@ -95,7 +95,7 @@ async fn test_login_valid_credentials() {
 #[tokio::test]
 async fn test_login_invalid_credentials() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a test user
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
@@ -124,7 +124,7 @@ async fn test_login_invalid_credentials() {
 #[tokio::test]
 async fn test_login_nonexistent_user() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a user so we don't get redirected to setup
     common::create_test_user(&pool, "existing", "password", UserRole::User).await;
@@ -152,11 +152,11 @@ async fn test_login_nonexistent_user() {
 #[tokio::test]
 async fn test_logout_clears_session() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create and login a user
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -187,7 +187,7 @@ async fn test_logout_clears_session() {
 #[tokio::test]
 async fn test_setup_creates_admin_user() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let response = test_app
         .router
@@ -216,7 +216,7 @@ async fn test_setup_creates_admin_user() {
 #[tokio::test]
 async fn test_setup_redirects_when_users_exist() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create an existing user
     common::create_test_user(&pool, "existing", "password", UserRole::User).await;

@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::handlers::{auth, dashboard, exercises, settings, stats, workouts};
-use crate::session::SessionKey;
+use crate::repositories::{SessionRepository, UserRepository};
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -12,7 +12,9 @@ pub fn create_router(
     workouts_state: workouts::WorkoutsState,
     exercises_state: exercises::ExercisesState,
     stats_state: stats::StatsState,
-    session_key: SessionKey,
+    settings_state: settings::SettingsState,
+    session_repo: SessionRepository,
+    user_repo: UserRepository,
 ) -> Router {
     Router::new()
         // Dashboard
@@ -70,6 +72,9 @@ pub fn create_router(
         .with_state(stats_state)
         // Settings routes
         .route("/settings", get(settings::index))
-        // Session key via Extension layer
-        .layer(Extension(session_key))
+        .route("/settings/password", post(settings::change_password))
+        .with_state(settings_state)
+        // Session + User repos via Extension layer for auth extractors
+        .layer(Extension(session_repo))
+        .layer(Extension(user_repo))
 }

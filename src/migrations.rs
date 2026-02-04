@@ -27,6 +27,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "007_add_user_role.sql",
         include_str!("../migrations/007_add_user_role.sql"),
     ),
+    (
+        "008_create_sessions.sql",
+        include_str!("../migrations/008_create_sessions.sql"),
+    ),
 ];
 
 /// Run all pending migrations on the database pool.

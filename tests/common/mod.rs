@@ -3,8 +3,7 @@ use axum::Router;
 use liftlog::db::{create_memory_pool, DbPool};
 use liftlog::migrations::run_migrations_for_tests;
 use liftlog::models::{User, UserRole};
-use liftlog::repositories::UserRepository;
-use liftlog::session::SessionKey;
+use liftlog::repositories::{SessionRepository, UserRepository};
 
 pub fn setup_test_db() -> DbPool {
     let pool = create_memory_pool().expect("Failed to create test database");
@@ -14,28 +13,27 @@ pub fn setup_test_db() -> DbPool {
 
 pub struct TestApp {
     pub router: Router,
-    pub session_key: SessionKey,
+    pub session_repo: SessionRepository,
 }
 
 pub fn create_test_app(pool: DbPool) -> Router {
-    create_test_app_with_key(pool).router
+    create_test_app_with_session(pool).router
 }
 
-pub fn create_test_app_with_key(pool: DbPool) -> TestApp {
-    use liftlog::handlers::{auth, dashboard, exercises, stats, workouts};
+pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
+    use liftlog::handlers::{auth, dashboard, exercises, settings, stats, workouts};
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
-
-    // Generate session key for tests
-    let session_key = SessionKey::generate();
 
     // Create repositories
     let user_repo = UserRepository::new(pool.clone());
     let exercise_repo = ExerciseRepository::new(pool.clone());
     let workout_repo = WorkoutRepository::new(pool.clone());
+    let session_repo = SessionRepository::new(pool.clone());
 
     // Create handler states
     let auth_state = auth::AuthState {
         user_repo: user_repo.clone(),
+        session_repo: session_repo.clone(),
     };
     let dashboard_state = dashboard::DashboardState {
         workout_repo: workout_repo.clone(),
@@ -51,6 +49,10 @@ pub fn create_test_app_with_key(pool: DbPool) -> TestApp {
         workout_repo: workout_repo.clone(),
         exercise_repo: exercise_repo.clone(),
     };
+    let settings_state = settings::SettingsState {
+        user_repo: user_repo.clone(),
+        session_repo: session_repo.clone(),
+    };
 
     let router = liftlog::routes::create_router(
         auth_state,
@@ -58,12 +60,14 @@ pub fn create_test_app_with_key(pool: DbPool) -> TestApp {
         workouts_state,
         exercises_state,
         stats_state,
-        session_key.clone(),
+        settings_state,
+        session_repo.clone(),
+        user_repo,
     );
 
     TestApp {
         router,
-        session_key,
+        session_repo,
     }
 }
 
@@ -77,24 +81,10 @@ pub async fn create_test_user(
     user_repo.create(username, password, role).await.unwrap()
 }
 
-pub fn create_session_cookie(user: &User, session_key: &SessionKey) -> String {
-    use axum::http::HeaderMap;
-    use axum_extra::extract::cookie::SignedCookieJar;
-    use liftlog::middleware::AuthUser;
-
-    let jar = SignedCookieJar::from_headers(&HeaderMap::new(), session_key.0.clone());
-    let jar = AuthUser::login(jar, user);
-
-    // Extract the cookie from the jar using into_response
-    use axum::response::IntoResponse;
-    let response = jar.into_response();
-    let headers = response.headers();
-
-    headers
-        .get(axum::http::header::SET_COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string()
+pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
+    let session_repo = SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    format!("session={}", token)
 }
 
 pub fn extract_cookie_header(set_cookie: &str) -> String {

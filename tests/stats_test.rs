@@ -50,10 +50,10 @@ async fn test_prs_requires_auth() {
 #[tokio::test]
 async fn test_stats_index_shows_workout_counts() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     // Create some workouts (using recent dates for week/month counts)
@@ -91,10 +91,10 @@ async fn test_stats_index_shows_workout_counts() {
 #[tokio::test]
 async fn test_stats_index_calculates_volume() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     // Create workout with logs
@@ -129,10 +129,10 @@ async fn test_stats_index_calculates_volume() {
 #[tokio::test]
 async fn test_stats_index_shows_prs() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
@@ -169,10 +169,10 @@ async fn test_stats_index_shows_prs() {
 #[tokio::test]
 async fn test_exercise_stats_shows_history() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
@@ -218,10 +218,10 @@ async fn test_exercise_stats_shows_history() {
 #[tokio::test]
 async fn test_exercise_stats_nonexistent_exercise() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -242,10 +242,10 @@ async fn test_exercise_stats_nonexistent_exercise() {
 #[tokio::test]
 async fn test_prs_list_shows_all_prs() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise1 = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;

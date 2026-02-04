@@ -108,6 +108,23 @@ impl UserRepository {
         Ok(user)
     }
 
+    pub async fn change_password(&self, user_id: &str, new_password: &str) -> Result<bool> {
+        let password_hash = hash_password(new_password)?;
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                rusqlite::params![password_hash, user_id],
+            )?;
+            Ok(rows > 0)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
     pub async fn verify_password(&self, username: &str, password: &str) -> Result<Option<User>> {
         let user = self.find_by_username(username).await?;
 

@@ -31,10 +31,10 @@ async fn test_settings_requires_auth() {
 #[tokio::test]
 async fn test_settings_page_renders() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -63,10 +63,10 @@ async fn test_settings_page_renders() {
 #[tokio::test]
 async fn test_settings_shows_git_version() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
