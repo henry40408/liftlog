@@ -85,7 +85,7 @@ async fn test_stats_index_shows_workout_counts() {
     let body_str = String::from_utf8_lossy(&body);
 
     // Should show workout counts (at least 2 total)
-    assert!(body_str.contains("2") || body_str.contains("統計"));
+    assert!(body_str.contains("2") || body_str.contains("Stats"));
 }
 
 #[tokio::test]
@@ -123,7 +123,7 @@ async fn test_stats_index_calculates_volume() {
     let body_str = String::from_utf8_lossy(&body);
 
     // Should contain volume data
-    assert!(body_str.contains("1000") || body_str.contains("volume") || body_str.contains("總量"));
+    assert!(body_str.contains("1000") || body_str.contains("volume") || body_str.contains("Volume"));
 }
 
 #[tokio::test]

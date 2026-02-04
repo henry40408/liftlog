@@ -56,7 +56,7 @@ async fn test_settings_page_renders() {
 
     // Should contain settings page content
     assert!(
-        body_str.contains("設定") || body_str.contains("Settings") || body_str.contains("testuser")
+        body_str.contains("Settings") || body_str.contains("testuser")
     );
 }
 
@@ -91,7 +91,6 @@ async fn test_settings_shows_git_version() {
     assert!(
         body_str.contains("version")
             || body_str.contains("Version")
-            || body_str.contains("版本")
             || body_str.len() > 100 // Page has content
     );
 }

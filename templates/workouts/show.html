@@ -106,8 +106,8 @@ var exerciseSelect = document.getElementById('exercise_id');
 function showPRInfo(exerciseId) {
     if (exerciseId && exercisePRs[exerciseId]) {
         var pr = exercisePRs[exerciseId];
-        prInfoEl.innerHTML = "歷史最重: " + pr.weight + " kg @ " + pr.date +
-            ' <button type="button" class="btn-small btn-inline" onclick="fillMaxWeight()">[填入]</button>';
+        prInfoEl.innerHTML = "Max Weight: " + pr.weight + " kg @ " + pr.date +
+            ' <button type="button" class="btn-small btn-inline" onclick="fillMaxWeight()">[Fill]</button>';
         prInfoEl.classList.add('visible');
     } else {
         prInfoEl.innerHTML = "";
