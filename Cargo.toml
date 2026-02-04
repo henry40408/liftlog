@@ -4,27 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 askama = "0.12"
-askama_axum = "0.4"
 time = "0.3"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
-axum-extra = { version = "0.9", features = ["cookie"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
 argon2 = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-validator = { version = "0.18", features = ["derive"] }
-tower-http = { version = "0.5", features = ["fs", "trace"] }
-tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
-thiserror = "1"
+thiserror = "2"
 anyhow = "1"
 rand = "0.8"
 
