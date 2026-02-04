@@ -1,21 +1,21 @@
 use askama::Template;
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
     response::{Html, IntoResponse, Redirect, Response},
-    Extension, Form,
+    Form,
 };
-use axum_extra::extract::cookie::SignedCookieJar;
+use axum_extra::extract::CookieJar;
 
 use crate::error::{AppError, Result};
 use crate::middleware::{auth::OptionalAuthUser, AdminUser, AuthUser};
 use crate::models::{CreateUser, LoginCredentials, User, UserRole};
-use crate::repositories::UserRepository;
-use crate::session::SessionKey;
+use crate::repositories::{SessionRepository, UserRepository};
+use crate::session::{create_session_cookie, remove_session_cookie};
 
 #[derive(Clone)]
 pub struct AuthState {
     pub user_repo: UserRepository,
+    pub session_repo: SessionRepository,
 }
 
 // Templates
@@ -73,12 +73,9 @@ pub async fn login_page(
 
 pub async fn login_submit(
     State(state): State<AuthState>,
-    Extension(key): Extension<SessionKey>,
-    headers: HeaderMap,
+    jar: CookieJar,
     Form(credentials): Form<LoginCredentials>,
 ) -> Result<Response> {
-    let jar = SignedCookieJar::from_headers(&headers, key.0);
-
     let user = state
         .user_repo
         .verify_password(&credentials.username, &credentials.password)
@@ -86,22 +83,25 @@ pub async fn login_submit(
 
     match user {
         Some(user) => {
-            let jar = AuthUser::login(jar, &user);
+            let token = state.session_repo.create(&user.id).await?;
+            // Lazily clean up expired sessions
+            let repo = state.session_repo.clone();
+            tokio::spawn(async move {
+                let _ = repo.cleanup_expired().await;
+            });
+            let jar = jar.add(create_session_cookie(&token));
             Ok((jar, Redirect::to("/")).into_response())
         }
         None => {
             let template = LoginTemplate {
                 error: Some("Invalid username or password".to_string()),
             };
-            Ok((
-                jar,
-                Html(
-                    template
-                        .render()
-                        .map_err(|e| AppError::Internal(e.to_string()))?,
-                ),
+            Ok(Html(
+                template
+                    .render()
+                    .map_err(|e| AppError::Internal(e.to_string()))?,
             )
-                .into_response())
+            .into_response())
         }
     }
 }
@@ -124,16 +124,13 @@ pub async fn setup_page(State(state): State<AuthState>) -> Result<Response> {
 
 pub async fn setup_submit(
     State(state): State<AuthState>,
-    Extension(key): Extension<SessionKey>,
-    headers: HeaderMap,
+    jar: CookieJar,
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
-    let jar = SignedCookieJar::from_headers(&headers, key.0);
-
     // Only allow setup if no users exist
     let user_count = state.user_repo.count().await?;
     if user_count > 0 {
-        return Ok((jar, Redirect::to("/auth/login")).into_response());
+        return Ok(Redirect::to("/auth/login").into_response());
     }
 
     // Validate input
@@ -141,30 +138,24 @@ pub async fn setup_submit(
         let template = SetupTemplate {
             error: Some("Username is required".to_string()),
         };
-        return Ok((
-            jar,
-            Html(
-                template
-                    .render()
-                    .map_err(|e| AppError::Internal(e.to_string()))?,
-            ),
+        return Ok(Html(
+            template
+                .render()
+                .map_err(|e| AppError::Internal(e.to_string()))?,
         )
-            .into_response());
+        .into_response());
     }
 
     if form.password.len() < 6 {
         let template = SetupTemplate {
             error: Some("Password must be at least 6 characters".to_string()),
         };
-        return Ok((
-            jar,
-            Html(
-                template
-                    .render()
-                    .map_err(|e| AppError::Internal(e.to_string()))?,
-            ),
+        return Ok(Html(
+            template
+                .render()
+                .map_err(|e| AppError::Internal(e.to_string()))?,
         )
-            .into_response());
+        .into_response());
     }
 
     // Create the first user as admin
@@ -173,15 +164,20 @@ pub async fn setup_submit(
         .create(&form.username, &form.password, UserRole::Admin)
         .await?;
 
-    // Auto login
-    let jar = AuthUser::login(jar, &user);
+    // Auto login — create DB session
+    let token = state.session_repo.create(&user.id).await?;
+    let jar = jar.add(create_session_cookie(&token));
 
     Ok((jar, Redirect::to("/")).into_response())
 }
 
-pub async fn logout(Extension(key): Extension<SessionKey>, headers: HeaderMap) -> Response {
-    let jar = SignedCookieJar::from_headers(&headers, key.0);
-    let jar = AuthUser::logout(jar);
+pub async fn logout(
+    State(state): State<AuthState>,
+    auth_user: AuthUser,
+    jar: CookieJar,
+) -> Response {
+    let _ = state.session_repo.delete(&auth_user.session_token).await;
+    let jar = jar.add(remove_session_cookie());
     (jar, Redirect::to("/auth/login")).into_response()
 }
 

@@ -43,26 +43,26 @@ pub struct ExerciseCategory {
 pub const CATEGORIES: &[ExerciseCategory] = &[
     ExerciseCategory {
         name: "chest",
-        display_name: "胸",
+        display_name: "Chest",
     },
     ExerciseCategory {
         name: "back",
-        display_name: "背",
+        display_name: "Back",
     },
     ExerciseCategory {
         name: "legs",
-        display_name: "腿",
+        display_name: "Legs",
     },
     ExerciseCategory {
         name: "shoulders",
-        display_name: "肩",
+        display_name: "Shoulders",
     },
     ExerciseCategory {
         name: "arms",
-        display_name: "手臂",
+        display_name: "Arms",
     },
     ExerciseCategory {
         name: "core",
-        display_name: "核心",
+        display_name: "Core",
     },
 ];

@@ -51,11 +51,11 @@ async fn test_new_workout_requires_auth() {
 #[tokio::test]
 async fn test_create_workout_authenticated() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a test user
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -91,11 +91,11 @@ async fn test_create_workout_authenticated() {
 #[tokio::test]
 async fn test_workout_list_shows_user_workouts() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a test user and some workouts
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     // Create workouts directly via repository
@@ -142,7 +142,7 @@ async fn test_workout_list_shows_user_workouts() {
 #[tokio::test]
 async fn test_workout_list_only_shows_own_workouts() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create two users
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
@@ -168,7 +168,7 @@ async fn test_workout_list_only_shows_own_workouts() {
         .unwrap();
 
     // Login as user1
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -196,11 +196,11 @@ async fn test_workout_list_only_shows_own_workouts() {
 #[tokio::test]
 async fn test_delete_workout() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a test user and a workout
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let workout_repo = WorkoutRepository::new(pool.clone());
@@ -238,7 +238,7 @@ async fn test_delete_workout() {
 #[tokio::test]
 async fn test_cannot_delete_others_workout() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create two users
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
@@ -256,7 +256,7 @@ async fn test_cannot_delete_others_workout() {
         .unwrap();
 
     // Login as user1 and try to delete user2's workout
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -283,11 +283,11 @@ async fn test_cannot_delete_others_workout() {
 #[tokio::test]
 async fn test_view_workout_details() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create a test user and a workout
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let workout_repo = WorkoutRepository::new(pool.clone());
@@ -323,7 +323,7 @@ async fn test_view_workout_details() {
 #[tokio::test]
 async fn test_cannot_view_others_workout() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     // Create two users
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
@@ -341,7 +341,7 @@ async fn test_cannot_view_others_workout() {
         .unwrap();
 
     // Login as user1 and try to view user2's workout
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -365,10 +365,10 @@ async fn test_cannot_view_others_workout() {
 #[tokio::test]
 async fn test_edit_workout_page_renders() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let workout_repo = WorkoutRepository::new(pool.clone());
@@ -404,10 +404,10 @@ async fn test_edit_workout_page_renders() {
 #[tokio::test]
 async fn test_update_workout_success() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let workout_repo = WorkoutRepository::new(pool.clone());
@@ -452,7 +452,7 @@ async fn test_update_workout_success() {
 #[tokio::test]
 async fn test_cannot_edit_others_workout_page() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
@@ -467,7 +467,7 @@ async fn test_cannot_edit_others_workout_page() {
         .await
         .unwrap();
 
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -490,10 +490,10 @@ async fn test_cannot_edit_others_workout_page() {
 #[tokio::test]
 async fn test_add_log_success() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
@@ -545,7 +545,7 @@ async fn test_add_log_success() {
 #[tokio::test]
 async fn test_add_log_requires_ownership() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
@@ -559,7 +559,7 @@ async fn test_add_log_requires_ownership() {
     )
     .await;
 
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -585,10 +585,10 @@ async fn test_add_log_requires_ownership() {
 #[tokio::test]
 async fn test_delete_log_success() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
@@ -628,7 +628,7 @@ async fn test_delete_log_success() {
 #[tokio::test]
 async fn test_delete_log_requires_ownership() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
@@ -643,7 +643,7 @@ async fn test_delete_log_requires_ownership() {
     .await;
     let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
 
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -672,10 +672,10 @@ async fn test_delete_log_requires_ownership() {
 #[tokio::test]
 async fn test_edit_log_page_renders() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
@@ -713,10 +713,10 @@ async fn test_edit_log_page_renders() {
 #[tokio::test]
 async fn test_update_log_success() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
@@ -756,7 +756,7 @@ async fn test_update_log_success() {
 #[tokio::test]
 async fn test_update_log_requires_ownership() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
@@ -771,7 +771,7 @@ async fn test_update_log_requires_ownership() {
     .await;
     let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
 
-    let session_cookie = common::create_session_cookie(&user1, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let response = test_app
@@ -802,10 +802,10 @@ async fn test_update_log_requires_ownership() {
 #[tokio::test]
 async fn test_workouts_list_pagination_page_2() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_key(pool.clone());
+    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&user, &test_app.session_key);
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     // Create 15 workouts (more than one page of 10)

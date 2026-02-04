@@ -5,38 +5,21 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     Extension,
 };
-use axum_extra::extract::cookie::SignedCookieJar;
+use axum_extra::extract::CookieJar;
 
-use crate::models::{User, UserRole};
-use crate::session::{
-    create_session_cookie, get_session_from_jar, remove_session_cookie, SessionData, SessionKey,
-};
+use crate::models::UserRole;
+use crate::repositories::{SessionRepository, UserRepository};
+use crate::session::get_session_token;
 
 #[derive(Clone, Debug)]
 pub struct AuthUser {
     pub id: String,
     pub username: String,
     pub role: UserRole,
+    pub session_token: String,
 }
 
 impl AuthUser {
-    pub fn login(jar: SignedCookieJar, user: &User) -> SignedCookieJar {
-        let data = SessionData::new(user.id.clone(), user.username.clone(), user.role);
-        jar.add(create_session_cookie(&data))
-    }
-
-    pub fn logout(jar: SignedCookieJar) -> SignedCookieJar {
-        jar.remove(remove_session_cookie())
-    }
-
-    pub fn from_jar(jar: &SignedCookieJar) -> Option<Self> {
-        get_session_from_jar(jar).map(|data| Self {
-            id: data.user_id,
-            username: data.username,
-            role: data.role,
-        })
-    }
-
     pub fn is_admin(&self) -> bool {
         self.role.is_admin()
     }
@@ -50,13 +33,39 @@ where
     type Rejection = AuthRedirect;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Extension(key) = Extension::<SessionKey>::from_request_parts(parts, state)
+        let jar = CookieJar::from_request_parts(parts, state)
             .await
             .map_err(|_| AuthRedirect)?;
 
-        let jar = SignedCookieJar::from_headers(&parts.headers, key.0);
+        let token = get_session_token(&jar).ok_or(AuthRedirect)?;
 
-        AuthUser::from_jar(&jar).ok_or(AuthRedirect)
+        let Extension(session_repo) =
+            Extension::<SessionRepository>::from_request_parts(parts, state)
+                .await
+                .map_err(|_| AuthRedirect)?;
+
+        let user_id = session_repo
+            .find_valid(&token)
+            .await
+            .map_err(|_| AuthRedirect)?
+            .ok_or(AuthRedirect)?;
+
+        let Extension(user_repo) = Extension::<UserRepository>::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AuthRedirect)?;
+
+        let user = user_repo
+            .find_by_id(&user_id)
+            .await
+            .map_err(|_| AuthRedirect)?
+            .ok_or(AuthRedirect)?;
+
+        Ok(AuthUser {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            session_token: token,
+        })
     }
 }
 
@@ -79,13 +88,40 @@ where
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Extension(key) = Extension::<SessionKey>::from_request_parts(parts, state)
+        let jar = CookieJar::from_request_parts(parts, state)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Cookie error"))?;
+
+        let token = match get_session_token(&jar) {
+            Some(t) => t,
+            None => return Ok(OptionalAuthUser(None)),
+        };
+
+        let Extension(session_repo) =
+            Extension::<SessionRepository>::from_request_parts(parts, state)
+                .await
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Session error"))?;
+
+        let user_id = match session_repo.find_valid(&token).await {
+            Ok(Some(uid)) => uid,
+            _ => return Ok(OptionalAuthUser(None)),
+        };
+
+        let Extension(user_repo) = Extension::<UserRepository>::from_request_parts(parts, state)
             .await
             .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Session error"))?;
 
-        let jar = SignedCookieJar::from_headers(&parts.headers, key.0);
+        let user = match user_repo.find_by_id(&user_id).await {
+            Ok(Some(u)) => u,
+            _ => return Ok(OptionalAuthUser(None)),
+        };
 
-        Ok(OptionalAuthUser(AuthUser::from_jar(&jar)))
+        Ok(OptionalAuthUser(Some(AuthUser {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            session_token: token,
+        })))
     }
 }
 
@@ -109,13 +145,9 @@ where
     type Rejection = AdminOrAuthRedirect;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Extension(key) = Extension::<SessionKey>::from_request_parts(parts, state)
+        let user = AuthUser::from_request_parts(parts, state)
             .await
             .map_err(|_| AdminOrAuthRedirect::Auth)?;
-
-        let jar = SignedCookieJar::from_headers(&parts.headers, key.0);
-
-        let user = AuthUser::from_jar(&jar).ok_or(AdminOrAuthRedirect::Auth)?;
 
         if user.is_admin() {
             Ok(AdminUser(user))

@@ -14,10 +14,9 @@ mod session;
 mod version;
 
 use config::Config;
-use handlers::{auth, dashboard, exercises, stats, workouts};
+use handlers::{auth, dashboard, exercises, settings, stats, workouts};
 use migrations::run_migrations;
-use repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
-use session::SessionKey;
+use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -44,17 +43,16 @@ async fn main() -> anyhow::Result<()> {
     // Run migrations
     run_migrations(&pool)?;
 
-    // Generate session key
-    let session_key = SessionKey::generate();
-
     // Create repositories
     let user_repo = UserRepository::new(pool.clone());
     let exercise_repo = ExerciseRepository::new(pool.clone());
     let workout_repo = WorkoutRepository::new(pool.clone());
+    let session_repo = SessionRepository::new(pool.clone());
 
     // Create handler states
     let auth_state = auth::AuthState {
         user_repo: user_repo.clone(),
+        session_repo: session_repo.clone(),
     };
     let dashboard_state = dashboard::DashboardState {
         workout_repo: workout_repo.clone(),
@@ -70,6 +68,10 @@ async fn main() -> anyhow::Result<()> {
         workout_repo: workout_repo.clone(),
         exercise_repo: exercise_repo.clone(),
     };
+    let settings_state = settings::SettingsState {
+        user_repo: user_repo.clone(),
+        session_repo: session_repo.clone(),
+    };
 
     // Build router
     let app = routes::create_router(
@@ -78,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
         workouts_state,
         exercises_state,
         stats_state,
-        session_key,
+        settings_state,
     );
 
     // Start server
