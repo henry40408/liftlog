@@ -1,5 +1,4 @@
 use axum::{
-    async_trait,
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Redirect, Response},
@@ -25,7 +24,6 @@ impl AuthUser {
     }
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AuthUser
 where
     S: Send + Sync,
@@ -80,7 +78,6 @@ impl IntoResponse for AuthRedirect {
 // Optional auth - doesn't redirect, just returns None if not logged in
 pub struct OptionalAuthUser(pub Option<AuthUser>);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for OptionalAuthUser
 where
     S: Send + Sync,
@@ -137,7 +134,6 @@ impl std::ops::Deref for AdminUser {
     }
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AdminUser
 where
     S: Send + Sync,
