@@ -7,7 +7,7 @@ edition = "2021"
 axum = { version = "0.7", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 askama = "0.12"
-askama_axum = "0.4"
+askama_axum = "0.5"
 time = "0.3"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
