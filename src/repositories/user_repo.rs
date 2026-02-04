@@ -407,4 +407,38 @@ mod tests {
 
         assert!(!updated);
     }
+
+    #[tokio::test]
+    async fn test_change_password_success() {
+        let pool = setup_test_db();
+        let repo = UserRepository::new(pool);
+
+        let user = repo
+            .create("pwuser", "oldpass123", UserRole::User)
+            .await
+            .unwrap();
+
+        let changed = repo.change_password(&user.id, "newpass456").await.unwrap();
+        assert!(changed);
+
+        // Old password should no longer work
+        let result = repo.verify_password("pwuser", "oldpass123").await.unwrap();
+        assert!(result.is_none());
+
+        // New password should work
+        let result = repo.verify_password("pwuser", "newpass456").await.unwrap();
+        assert!(result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_change_password_not_exists() {
+        let pool = setup_test_db();
+        let repo = UserRepository::new(pool);
+
+        let changed = repo
+            .change_password("nonexistent", "newpass")
+            .await
+            .unwrap();
+        assert!(!changed);
+    }
 }

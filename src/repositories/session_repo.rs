@@ -119,3 +119,156 @@ impl SessionRepository {
         .map_err(|e| AppError::Internal(e.to_string()))?
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::create_memory_pool;
+    use crate::migrations::run_migrations_for_tests;
+    use crate::models::UserRole;
+    use crate::repositories::UserRepository;
+
+    fn setup_test_db() -> crate::db::DbPool {
+        let pool = create_memory_pool().expect("Failed to create test database");
+        run_migrations_for_tests(&pool).expect("Failed to run migrations");
+        pool
+    }
+
+    async fn create_user(pool: &crate::db::DbPool) -> String {
+        let user_repo = UserRepository::new(pool.clone());
+        let user = user_repo
+            .create("testuser", "password", UserRole::User)
+            .await
+            .unwrap();
+        user.id
+    }
+
+    #[tokio::test]
+    async fn test_create_and_find_valid() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool);
+
+        let token = repo.create(&user_id).await.unwrap();
+        assert!(!token.is_empty());
+
+        let found = repo.find_valid(&token).await.unwrap();
+        assert_eq!(found, Some(user_id));
+    }
+
+    #[tokio::test]
+    async fn test_find_valid_nonexistent() {
+        let pool = setup_test_db();
+        let repo = SessionRepository::new(pool);
+
+        let found = repo.find_valid("nonexistent-token").await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_valid_expired() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let token = repo.create(&user_id).await.unwrap();
+
+        // Manually expire the session (scoped to release connection before await)
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+                [&token],
+            )
+            .unwrap();
+        }
+
+        // Should return None and lazily delete
+        let found = repo.find_valid(&token).await.unwrap();
+        assert!(found.is_none());
+
+        // Should be deleted from DB
+        {
+            let conn = pool.get().unwrap();
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE token = ?",
+                    [&token],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool);
+
+        let token = repo.create(&user_id).await.unwrap();
+        repo.delete(&token).await.unwrap();
+
+        let found = repo.find_valid(&token).await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_all_for_user_except() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool);
+
+        let token1 = repo.create(&user_id).await.unwrap();
+        let token2 = repo.create(&user_id).await.unwrap();
+        let token3 = repo.create(&user_id).await.unwrap();
+
+        // Keep token2, delete the rest
+        repo.delete_all_for_user_except(&user_id, &token2)
+            .await
+            .unwrap();
+
+        assert!(repo.find_valid(&token1).await.unwrap().is_none());
+        assert!(repo.find_valid(&token2).await.unwrap().is_some());
+        assert!(repo.find_valid(&token3).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_expired() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let token_valid = repo.create(&user_id).await.unwrap();
+        let token_expired = repo.create(&user_id).await.unwrap();
+
+        // Manually expire one session (scoped to release connection before await)
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+                [&token_expired],
+            )
+            .unwrap();
+        }
+
+        repo.cleanup_expired().await.unwrap();
+
+        // Valid session should still exist
+        assert!(repo.find_valid(&token_valid).await.unwrap().is_some());
+
+        // Expired session should be cleaned up
+        {
+            let conn = pool.get().unwrap();
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE token = ?",
+                    [&token_expired],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+}
