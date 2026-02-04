@@ -4,7 +4,6 @@ use axum::{
 };
 
 use crate::handlers::{auth, dashboard, exercises, settings, stats, workouts};
-use crate::repositories::{SessionRepository, UserRepository};
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -13,9 +12,10 @@ pub fn create_router(
     exercises_state: exercises::ExercisesState,
     stats_state: stats::StatsState,
     settings_state: settings::SettingsState,
-    session_repo: SessionRepository,
-    user_repo: UserRepository,
 ) -> Router {
+    let session_repo = auth_state.session_repo.clone();
+    let user_repo = auth_state.user_repo.clone();
+
     Router::new()
         // Dashboard
         .route("/", get(dashboard::index))

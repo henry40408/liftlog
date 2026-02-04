@@ -61,8 +61,6 @@ pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
         exercises_state,
         stats_state,
         settings_state,
-        session_repo.clone(),
-        user_repo,
     );
 
     TestApp {

@@ -123,7 +123,9 @@ async fn test_stats_index_calculates_volume() {
     let body_str = String::from_utf8_lossy(&body);
 
     // Should contain volume data
-    assert!(body_str.contains("1000") || body_str.contains("volume") || body_str.contains("Volume"));
+    assert!(
+        body_str.contains("1000") || body_str.contains("volume") || body_str.contains("Volume")
+    );
 }
 
 #[tokio::test]

@@ -171,7 +171,11 @@ pub async fn setup_submit(
     Ok((jar, Redirect::to("/")).into_response())
 }
 
-pub async fn logout(State(state): State<AuthState>, auth_user: AuthUser, jar: CookieJar) -> Response {
+pub async fn logout(
+    State(state): State<AuthState>,
+    auth_user: AuthUser,
+    jar: CookieJar,
+) -> Response {
     let _ = state.session_repo.delete(&auth_user.session_token).await;
     let jar = jar.add(remove_session_cookie());
     (jar, Redirect::to("/auth/login")).into_response()

@@ -81,8 +81,6 @@ async fn main() -> anyhow::Result<()> {
         exercises_state,
         stats_state,
         settings_state,
-        session_repo,
-        user_repo,
     );
 
     // Start server

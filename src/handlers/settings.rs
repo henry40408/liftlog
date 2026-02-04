@@ -122,7 +122,9 @@ pub async fn change_password(
         user: auth_user,
         git_version: GIT_VERSION,
         error: None,
-        success: Some("Password changed successfully. All other sessions have been logged out.".to_string()),
+        success: Some(
+            "Password changed successfully. All other sessions have been logged out.".to_string(),
+        ),
     };
     Ok(Html(
         template
