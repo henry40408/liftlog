@@ -680,10 +680,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(logs.len(), 3);
+        // With DESC ordering: newest first
         // 105.0 is PR for bench press, 120.0 is PR for squat
-        assert!(!logs[0].is_pr); // 100.0 bench
+        assert!(logs[0].is_pr); // 120.0 squat - PR (created last)
         assert!(logs[1].is_pr); // 105.0 bench - PR
-        assert!(logs[2].is_pr); // 120.0 squat - PR
+        assert!(!logs[2].is_pr); // 100.0 bench (created first)
     }
 
     #[tokio::test]
@@ -882,8 +883,9 @@ mod tests {
             .find_logs_by_session_with_pr(&session.id, "user1")
             .await
             .unwrap();
-        assert!(!logs[0].is_pr); // 100.0 is no longer PR
-        assert!(logs[1].is_pr); // 110.0 is now PR
+        // With DESC ordering: newest (110.0) first
+        assert!(logs[0].is_pr); // 110.0 is now PR (created last)
+        assert!(!logs[1].is_pr); // 100.0 is no longer PR (created first)
     }
 
     #[tokio::test]
