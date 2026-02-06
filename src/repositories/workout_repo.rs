@@ -241,7 +241,7 @@ impl WorkoutRepository {
                  FROM workout_logs wl
                  JOIN exercises e ON wl.exercise_id = e.id
                  WHERE wl.session_id = ?
-                 ORDER BY wl.created_at, wl.set_number",
+                 ORDER BY wl.created_at DESC, wl.set_number",
             )?;
             let logs = stmt
                 .query_map(
