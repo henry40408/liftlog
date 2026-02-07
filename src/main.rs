@@ -60,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let workouts_state = workouts::WorkoutsState {
         workout_repo: workout_repo.clone(),
         exercise_repo: exercise_repo.clone(),
+        user_repo: user_repo.clone(),
     };
     let exercises_state = exercises::ExercisesState {
         exercise_repo: exercise_repo.clone(),

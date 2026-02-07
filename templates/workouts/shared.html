@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Shared Workout {{ workout.date }} - LiftLog{% endblock %}
+
+{% block content %}
+<h1>Shared Workout: {{ workout.date }}</h1>
+
+<p class="muted">Shared by: <strong>{{ owner_username }}</strong></p>
+
+{% match workout.notes %}
+{% when Some with (notes) %}
+<p class="muted"><em>{{ notes }}</em></p>
+{% when None %}
+{% endmatch %}
+
+<h2>Sets</h2>
+
+{% if logs.is_empty() %}
+<p class="muted">No sets recorded.</p>
+{% else %}
+<div class="sets-list">
+    <div class="sets-header">
+        <div>Exercise</div>
+        <div>Set</div>
+        <div>Weight</div>
+        <div>Reps</div>
+        <div>RPE</div>
+        <div></div>
+    </div>
+    {% for log in logs %}
+    <div class="set-row">
+        <div class="set-cell set-cell-exercise">{{ log.exercise_name }}</div>
+        <div class="set-cell set-cell-set">{{ log.set_number }}</div>
+        <div class="set-cell set-cell-weight">{{ log.weight }}</div>
+        <div class="set-cell set-cell-reps">{{ log.reps }}</div>
+        <div class="set-cell set-cell-rpe">{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</div>
+        <div class="set-cell set-cell-pr"></div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="link">
+    <p class="muted">This is a shared workout from <a href="/">LiftLog</a>.</p>
+</div>
+{% endblock %}

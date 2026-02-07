@@ -56,6 +56,10 @@ pub fn create_router(
             get(workouts::edit_log_page),
         )
         .route("/workouts/{id}/logs/{log_id}", post(workouts::update_log))
+        .route("/workouts/{id}/share", post(workouts::share_workout))
+        .route("/workouts/{id}/revoke-share", post(workouts::revoke_share))
+        // Public shared workout route (no auth required)
+        .route("/shared/{token}", get(workouts::view_shared))
         .with_state(workouts_state)
         // Exercise routes
         .route("/exercises", get(exercises::list))

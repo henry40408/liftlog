@@ -30,6 +30,7 @@ impl WorkoutRepository {
             user_id: user_id.to_string(),
             date,
             notes: notes.map(|s| s.to_string()),
+            share_token: None,
             created_at: now,
         };
         let session_clone = session.clone();
@@ -477,6 +478,93 @@ impl WorkoutRepository {
                     rusqlite::params![user_id, user_id, exercise_id, limit],
                     WorkoutLogWithExercise::from_row,
                 )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(logs)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    // Share functionality
+
+    /// Set share token for a workout session (creates a new token)
+    pub async fn set_share_token(&self, id: &str, user_id: &str) -> Result<String> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        let user_id = user_id.to_string();
+        let token = Uuid::new_v4().to_string();
+        let token_clone = token.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE workout_sessions SET share_token = ? WHERE id = ? AND user_id = ?",
+                rusqlite::params![token_clone, id, user_id],
+            )?;
+            if rows > 0 {
+                Ok(token_clone)
+            } else {
+                Err(AppError::NotFound("Workout not found".to_string()))
+            }
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    /// Revoke share token for a workout session
+    pub async fn revoke_share_token(&self, id: &str, user_id: &str) -> Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE workout_sessions SET share_token = NULL WHERE id = ? AND user_id = ?",
+                rusqlite::params![id, user_id],
+            )?;
+            Ok(rows > 0)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    /// Find a workout session by share token
+    pub async fn find_session_by_share_token(&self, token: &str) -> Result<Option<WorkoutSession>> {
+        let pool = self.pool.clone();
+        let token = token.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare("SELECT * FROM workout_sessions WHERE share_token = ?")?;
+            let result = stmt
+                .query_row([&token], WorkoutSession::from_row)
+                .optional()?;
+            Ok(result)
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    /// Find logs by session for sharing (without PR calculation)
+    pub async fn find_logs_by_session_for_share(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<WorkoutLogWithExercise>> {
+        let pool = self.pool.clone();
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare(
+                "SELECT wl.id, wl.session_id, wl.exercise_id, e.name as exercise_name,
+                        wl.set_number, wl.reps, wl.weight, wl.rpe,
+                        0 as is_pr
+                 FROM workout_logs wl
+                 JOIN exercises e ON wl.exercise_id = e.id
+                 WHERE wl.session_id = ?
+                 ORDER BY wl.created_at DESC, wl.set_number",
+            )?;
+            let logs = stmt
+                .query_map([&session_id], WorkoutLogWithExercise::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
@@ -1013,5 +1101,146 @@ mod tests {
         let prs = repo.get_all_prs_by_user("user1").await.unwrap();
 
         assert!(prs.is_empty());
+    }
+
+    // Share functionality tests
+
+    #[tokio::test]
+    async fn test_set_share_token() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        assert!(session.share_token.is_none());
+
+        let token = repo.set_share_token(&session.id, "user1").await.unwrap();
+        assert!(!token.is_empty());
+
+        let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(found.share_token, Some(token));
+    }
+
+    #[tokio::test]
+    async fn test_set_share_token_wrong_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        let result = repo.set_share_token(&session.id, "user2").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_share_token() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        let token = repo.set_share_token(&session.id, "user1").await.unwrap();
+        assert!(!token.is_empty());
+
+        let revoked = repo.revoke_share_token(&session.id, "user1").await.unwrap();
+        assert!(revoked);
+
+        let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
+        assert!(found.share_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_share_token_wrong_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        repo.set_share_token(&session.id, "user1").await.unwrap();
+
+        let revoked = repo.revoke_share_token(&session.id, "user2").await.unwrap();
+        assert!(!revoked);
+
+        // Token should still exist
+        let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
+        assert!(found.share_token.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_find_session_by_share_token() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+        let token = repo.set_share_token(&session.id, "user1").await.unwrap();
+
+        let found = repo
+            .find_session_by_share_token(&token)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.id, session.id);
+    }
+
+    #[tokio::test]
+    async fn test_find_session_by_share_token_not_found() {
+        let pool = setup_test_db();
+        let repo = WorkoutRepository::new(pool);
+
+        let result = repo
+            .find_session_by_share_token("nonexistent-token")
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_logs_by_session_for_share() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+
+        let logs = repo
+            .find_logs_by_session_for_share(&session.id)
+            .await
+            .unwrap();
+
+        assert_eq!(logs.len(), 1);
+        // is_pr should be false for share (we don't calculate PRs)
+        assert!(!logs[0].is_pr);
+    }
+
+    #[tokio::test]
+    async fn test_reshare_generates_new_token() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        let token1 = repo.set_share_token(&session.id, "user1").await.unwrap();
+        repo.revoke_share_token(&session.id, "user1").await.unwrap();
+        let token2 = repo.set_share_token(&session.id, "user1").await.unwrap();
+
+        assert_ne!(token1, token2);
     }
 }

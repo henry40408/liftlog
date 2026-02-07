@@ -10,6 +10,7 @@ pub struct WorkoutSession {
     pub user_id: String,
     pub date: NaiveDate,
     pub notes: Option<String>,
+    pub share_token: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -20,6 +21,7 @@ impl FromSqliteRow for WorkoutSession {
             user_id: row.get("user_id")?,
             date: row.get("date")?,
             notes: row.get("notes")?,
+            share_token: row.get("share_token")?,
             created_at: row.get("created_at")?,
         })
     }
