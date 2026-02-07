@@ -13,12 +13,13 @@ use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, DynamicPR, Exercise, UpdateWorkoutLog, WorkoutLog,
     WorkoutLogWithExercise, WorkoutSession,
 };
-use crate::repositories::{ExerciseRepository, WorkoutRepository};
+use crate::repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
 
 #[derive(Clone)]
 pub struct WorkoutsState {
     pub workout_repo: WorkoutRepository,
     pub exercise_repo: ExerciseRepository,
+    pub user_repo: UserRepository,
 }
 
 // Templates
@@ -47,7 +48,16 @@ struct ShowWorkoutTemplate {
     logs: Vec<WorkoutLogWithExercise>,
     exercises: Vec<Exercise>,
     exercise_prs: Vec<DynamicPR>,
+    share_url: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "workouts/shared.html")]
+struct SharedWorkoutTemplate {
+    workout: WorkoutSession,
+    logs: Vec<WorkoutLogWithExercise>,
+    owner_username: String,
 }
 
 #[derive(Template)]
@@ -169,12 +179,18 @@ pub async fn show(
         .get_all_prs_by_user(&auth_user.id)
         .await?;
 
+    let share_url = workout
+        .share_token
+        .as_ref()
+        .map(|token| format!("/shared/{}", token));
+
     let template = ShowWorkoutTemplate {
         user: auth_user,
         workout,
         logs,
         exercises,
         exercise_prs,
+        share_url,
         error: None,
     };
 
@@ -382,4 +398,89 @@ pub async fn update_log(
         .await?;
 
     Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
+}
+
+// Share functionality
+
+pub async fn share_workout(
+    State(state): State<WorkoutsState>,
+    auth_user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Response> {
+    // Verify session ownership
+    let session = state
+        .workout_repo
+        .find_session_by_id(&id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+
+    if session.user_id != auth_user.id {
+        return Err(AppError::NotFound("Workout not found".to_string()));
+    }
+
+    state
+        .workout_repo
+        .set_share_token(&id, &auth_user.id)
+        .await?;
+
+    Ok(Redirect::to(&format!("/workouts/{}", id)).into_response())
+}
+
+pub async fn revoke_share(
+    State(state): State<WorkoutsState>,
+    auth_user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Response> {
+    // Verify session ownership
+    let session = state
+        .workout_repo
+        .find_session_by_id(&id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+
+    if session.user_id != auth_user.id {
+        return Err(AppError::NotFound("Workout not found".to_string()));
+    }
+
+    state
+        .workout_repo
+        .revoke_share_token(&id, &auth_user.id)
+        .await?;
+
+    Ok(Redirect::to(&format!("/workouts/{}", id)).into_response())
+}
+
+pub async fn view_shared(
+    State(state): State<WorkoutsState>,
+    Path(token): Path<String>,
+) -> Result<Response> {
+    let workout = state
+        .workout_repo
+        .find_session_by_share_token(&token)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Shared workout not found".to_string()))?;
+
+    let logs = state
+        .workout_repo
+        .find_logs_by_session_for_share(&workout.id)
+        .await?;
+
+    let owner = state
+        .user_repo
+        .find_by_id(&workout.user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let template = SharedWorkoutTemplate {
+        workout,
+        logs,
+        owner_username: owner.username,
+    };
+
+    Ok(Html(
+        template
+            .render()
+            .map_err(|e| AppError::Internal(e.to_string()))?,
+    )
+    .into_response())
 }

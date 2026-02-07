@@ -19,7 +19,26 @@
           onsubmit="return confirm('Delete this workout?');">
         <button type="submit" class="btn-small btn-inline">[Delete]</button>
     </form>
+    {% match share_url %}
+    {% when Some with (url) %}
+    <form action="/workouts/{{ workout.id }}/revoke-share" method="post" style="display:inline;">
+        <button type="submit" class="btn-small btn-inline">[Revoke Share]</button>
+    </form>
+    {% when None %}
+    <form action="/workouts/{{ workout.id }}/share" method="post" style="display:inline;">
+        <button type="submit" class="btn-small btn-inline">[Share]</button>
+    </form>
+    {% endmatch %}
 </div>
+
+{% match share_url %}
+{% when Some with (url) %}
+<div class="share-info">
+    <p>Share link: <a href="{{ url }}" target="_blank">{{ url }}</a>
+    <button type="button" class="btn-small btn-inline" onclick="copyShareLink('{{ url }}')">[Copy]</button></p>
+</div>
+{% when None %}
+{% endmatch %}
 
 <h3>Add Set</h3>
 <form method="post" action="/workouts/{{ workout.id }}/logs">
@@ -137,6 +156,15 @@ function cloneSet(exerciseId, weight, reps, rpe) {
     }
     showPRInfo(exerciseId);
     exerciseSelect.scrollIntoView({ behavior: 'smooth' });
+}
+
+function copyShareLink(url) {
+    var fullUrl = window.location.origin + url;
+    navigator.clipboard.writeText(fullUrl).then(function() {
+        alert('Link copied to clipboard!');
+    }, function() {
+        prompt('Copy this link:', fullUrl);
+    });
 }
 </script>
 {% endblock %}
