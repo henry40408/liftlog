@@ -9,11 +9,11 @@ use serde::Deserialize;
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
+use crate::models::exercise::{ExerciseCategory, CATEGORIES};
 use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, DynamicPR, Exercise, UpdateWorkoutLog, WorkoutLog,
     WorkoutLogWithExercise, WorkoutSession,
 };
-use crate::models::exercise::{ExerciseCategory, CATEGORIES};
 use crate::repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
 
 #[derive(Clone)]
