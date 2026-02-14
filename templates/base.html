@@ -211,6 +211,25 @@
             background: #fff;
             color: #cc0000;
         }
+        /* Override .actions scoped styles for danger buttons */
+        .actions .btn-danger {
+            background: #cc0000;
+            color: #fff;
+            border-color: #cc0000;
+        }
+        .actions .btn-danger:hover {
+            background: #fff;
+            color: #cc0000;
+        }
+        .set-row-actions .btn-danger {
+            background: #cc0000;
+            color: #fff;
+            border-color: #cc0000;
+        }
+        .set-row-actions .btn-danger:hover {
+            background: #fff;
+            color: #cc0000;
+        }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -332,6 +351,22 @@
             .set-row-actions button,
             .set-row-actions a {
                 padding: 0.25rem 0.5rem;
+            }
+            /* Action buttons: increase touch target on mobile */
+            .actions a,
+            .actions button,
+            .actions .btn {
+                padding: 0.4rem 0.75rem;
+                font-size: var(--font-sm);
+            }
+            /* Form inputs: full width on mobile */
+            input[type="text"],
+            input[type="password"],
+            input[type="number"],
+            input[type="date"],
+            select,
+            textarea {
+                max-width: 100%;
             }
         }
     </style>

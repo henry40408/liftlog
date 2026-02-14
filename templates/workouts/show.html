@@ -17,7 +17,7 @@
     <a href="/workouts/{{ workout.id }}/edit">Edit</a>
     <form action="/workouts/{{ workout.id }}/delete" method="post" style="display:inline;"
           onsubmit="return confirm('Delete this workout?');">
-        <button type="submit">Delete</button>
+        <button type="submit" class="btn-danger">Delete</button>
     </form>
     {% match share_url %}
     {% when None %}
@@ -35,7 +35,7 @@
     <button type="button" class="btn-small btn-inline" onclick="copyShareLink('{{ url }}')">Copy</button></p>
     <form action="/workouts/{{ workout.id }}/revoke-share" method="post" style="display:inline;"
           onsubmit="return confirm('Revoke sharing? The link will stop working.');">
-        <button type="submit" class="btn-small btn-inline">Revoke Share</button>
+        <button type="submit" class="btn-small btn-inline btn-danger">Revoke Share</button>
     </form>
 </div>
 {% when None %}
@@ -99,7 +99,7 @@
             <button type="button" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>
             <form action="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete" method="post" style="display:inline;"
                   onsubmit="return confirm('Delete this set?');">
-                <button type="submit">&times;</button>
+                <button type="submit" class="btn-danger">&times;</button>
             </form>
         </div>
     </div>

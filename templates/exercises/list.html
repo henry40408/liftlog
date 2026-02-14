@@ -27,7 +27,7 @@
                 <div class="actions">
                     <a href="/exercises/{{ ex.id }}/edit">Edit</a>
                     <form method="post" action="/exercises/{{ ex.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this exercise?');">
-                        <button type="submit">Delete</button>
+                        <button type="submit" class="btn-danger">Delete</button>
                     </form>
                 </div>
             </td>
