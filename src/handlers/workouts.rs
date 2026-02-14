@@ -13,6 +13,7 @@ use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, DynamicPR, Exercise, UpdateWorkoutLog, WorkoutLog,
     WorkoutLogWithExercise, WorkoutSession,
 };
+use crate::models::exercise::{ExerciseCategory, CATEGORIES};
 use crate::repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
 
 #[derive(Clone)]
@@ -47,6 +48,7 @@ struct ShowWorkoutTemplate {
     workout: WorkoutSession,
     logs: Vec<WorkoutLogWithExercise>,
     exercises: Vec<Exercise>,
+    categories: &'static [ExerciseCategory],
     exercise_prs: Vec<DynamicPR>,
     share_url: Option<String>,
     error: Option<String>,
@@ -189,6 +191,7 @@ pub async fn show(
         workout,
         logs,
         exercises,
+        categories: CATEGORIES,
         exercise_prs,
         share_url,
         error: None,

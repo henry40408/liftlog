@@ -47,8 +47,14 @@
         <label for="exercise_id">Exercise</label>
         <select id="exercise_id" name="exercise_id" required>
             <option value="">-- Select --</option>
-            {% for ex in exercises %}
-            <option value="{{ ex.id }}">{{ ex.name }} ({{ ex.category }})</option>
+            {% for cat in categories %}
+            <optgroup label="{{ cat.display_name }}">
+                {% for ex in exercises %}
+                {% if ex.category == cat.name %}
+                <option value="{{ ex.id }}">{{ ex.name }}</option>
+                {% endif %}
+                {% endfor %}
+            </optgroup>
             {% endfor %}
         </select>
         <div id="exercise-pr-info" class="pr-info"></div>
