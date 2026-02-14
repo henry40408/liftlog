@@ -32,10 +32,10 @@
         <label for="rpe">RPE (1-10, optional)</label>
         <input type="number" id="rpe" name="rpe" min="1" max="10" value="{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}{% endmatch %}">
     </div>
-    <button type="submit">[Save Changes]</button>
+    <button type="submit">Save Changes</button>
 </form>
 
 <div class="link">
-    &larr; <a href="/workouts/{{ workout.id }}">[Back to Workout]</a>
+    &larr; <a href="/workouts/{{ workout.id }}">Back to Workout</a>
 </div>
 {% endblock %}

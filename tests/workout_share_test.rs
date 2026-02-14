@@ -443,9 +443,9 @@ async fn test_show_workout_displays_share_button() {
     let body_str = String::from_utf8_lossy(&body);
 
     // Should show share button
-    assert!(body_str.contains("[Share]"));
+    assert!(body_str.contains(">Share</button>"));
     // Should not show revoke button or share link
-    assert!(!body_str.contains("[Revoke Share]"));
+    assert!(!body_str.contains("Revoke Share"));
     assert!(!body_str.contains("Share link:"));
 }
 
@@ -491,9 +491,9 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     let body_str = String::from_utf8_lossy(&body);
 
     // Should show revoke button and share link
-    assert!(body_str.contains("[Revoke Share]"));
+    assert!(body_str.contains("Revoke Share</button>"));
     assert!(body_str.contains("Share link:"));
     assert!(body_str.contains(&format!("/shared/{}", share_token)));
-    // Should not show share button
-    assert!(!body_str.contains(">[Share]<"));
+    // Should not show share button (only the revoke form, not the share form)
+    assert!(!body_str.contains(">Share</button>"));
 }

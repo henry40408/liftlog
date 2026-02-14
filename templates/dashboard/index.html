@@ -25,7 +25,7 @@
 <h2>Recent Workouts</h2>
 {% if recent_workouts.is_empty() %}
 <p class="muted">No workouts yet.</p>
-<p><a href="/workouts/new">[+ Start Your First Workout]</a></p>
+<p><a href="/workouts/new">+ Start Your First Workout</a></p>
 {% else %}
 <table>
     <thead>
@@ -43,12 +43,12 @@
         {% endfor %}
     </tbody>
 </table>
-<p><a href="/workouts">[View All Workouts &rarr;]</a></p>
+<p><a href="/workouts">View All Workouts &rarr;</a></p>
 {% endif %}
 
 <h2>Quick Actions</h2>
 <div class="actions">
-    <a href="/workouts/new" class="btn">[+ New Workout]</a>
-    <a href="/stats/prs" class="btn">[View PRs]</a>
+    <a href="/workouts/new" class="btn">+ New Workout</a>
+    <a href="/stats/prs" class="btn">View PRs</a>
 </div>
 {% endblock %}

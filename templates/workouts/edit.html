@@ -20,10 +20,10 @@
         <label for="notes">Notes (optional)</label>
         <textarea id="notes" name="notes" rows="3">{% match workout.notes %}{% when Some with (n) %}{{ n }}{% when None %}{% endmatch %}</textarea>
     </div>
-    <button type="submit">[Save Changes]</button>
+    <button type="submit">Save Changes</button>
 </form>
 
 <div class="link">
-    &larr; <a href="/workouts/{{ workout.id }}">[Back to Workout]</a>
+    &larr; <a href="/workouts/{{ workout.id }}">Back to Workout</a>
 </div>
 {% endblock %}

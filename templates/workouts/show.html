@@ -14,15 +14,15 @@
 {% endmatch %}
 
 <div class="actions">
-    <a href="/workouts/{{ workout.id }}/edit">[Edit]</a>
+    <a href="/workouts/{{ workout.id }}/edit">Edit</a>
     <form action="/workouts/{{ workout.id }}/delete" method="post" style="display:inline;"
           onsubmit="return confirm('Delete this workout?');">
-        <button type="submit" class="btn-small btn-inline">[Delete]</button>
+        <button type="submit" class="btn-danger">Delete</button>
     </form>
     {% match share_url %}
     {% when None %}
     <form action="/workouts/{{ workout.id }}/share" method="post" style="display:inline;">
-        <button type="submit" class="btn-small btn-inline">[Share]</button>
+        <button type="submit">Share</button>
     </form>
     {% when Some with (url) %}
     {% endmatch %}
@@ -32,10 +32,10 @@
 {% when Some with (url) %}
 <div class="share-info" style="margin: 1rem 0; padding: 0.5rem; background: #f5f5f5; border-left: 3px solid #111;">
     <p style="margin: 0 0 0.5rem 0;">Share link: <a href="{{ url }}" target="_blank">{{ url }}</a>
-    <button type="button" class="btn-small btn-inline" onclick="copyShareLink('{{ url }}')">[Copy]</button></p>
+    <button type="button" class="btn-small btn-inline" onclick="copyShareLink('{{ url }}')">Copy</button></p>
     <form action="/workouts/{{ workout.id }}/revoke-share" method="post" style="display:inline;"
           onsubmit="return confirm('Revoke sharing? The link will stop working.');">
-        <button type="submit" class="btn-small btn-inline">[Revoke Share]</button>
+        <button type="submit" class="btn-small btn-inline btn-danger">Revoke Share</button>
     </form>
 </div>
 {% when None %}
@@ -47,8 +47,14 @@
         <label for="exercise_id">Exercise</label>
         <select id="exercise_id" name="exercise_id" required>
             <option value="">-- Select --</option>
-            {% for ex in exercises %}
-            <option value="{{ ex.id }}">{{ ex.name }} ({{ ex.category }})</option>
+            {% for cat in categories %}
+            <optgroup label="{{ cat.display_name }}">
+                {% for ex in exercises %}
+                {% if ex.category == cat.name %}
+                <option value="{{ ex.id }}">{{ ex.name }}</option>
+                {% endif %}
+                {% endfor %}
+            </optgroup>
             {% endfor %}
         </select>
         <div id="exercise-pr-info" class="pr-info"></div>
@@ -65,7 +71,7 @@
         <label for="rpe">RPE (1-10, optional)</label>
         <input type="number" id="rpe" name="rpe" min="1" max="10">
     </div>
-    <button type="submit">[Add Set]</button>
+    <button type="submit">Add Set</button>
 </form>
 
 <h2>Sets</h2>
@@ -95,11 +101,11 @@
         <div class="set-cell set-cell-rpe">{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</div>
         <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</div>
         <div class="set-row-actions">
-            <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit" class="btn-small btn-inline">[Edit]</a>
-            <button type="button" class="btn-small btn-inline" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">[Clone]</button>
+            <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit">Edit</a>
+            <button type="button" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>
             <form action="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete" method="post" style="display:inline;"
                   onsubmit="return confirm('Delete this set?');">
-                <button type="submit" class="btn-small btn-inline">[x]</button>
+                <button type="submit" class="btn-danger">&times;</button>
             </form>
         </div>
     </div>
@@ -108,7 +114,7 @@
 {% endif %}
 
 <div class="link">
-    &larr; <a href="/workouts">[Back to Workouts]</a>
+    &larr; <a href="/workouts">Back to Workouts</a>
 </div>
 
 <script>
@@ -127,7 +133,7 @@ function showPRInfo(exerciseId) {
     if (exerciseId && exercisePRs[exerciseId]) {
         var pr = exercisePRs[exerciseId];
         prInfoEl.innerHTML = "Max Weight: " + pr.weight + " kg @ " + pr.date +
-            ' <button type="button" class="btn-small btn-inline" onclick="fillMaxWeight()">[Fill]</button>';
+            ' <button type="button" class="btn-small btn-inline" onclick="fillMaxWeight()">Fill</button>';
         prInfoEl.classList.add('visible');
     } else {
         prInfoEl.innerHTML = "";
