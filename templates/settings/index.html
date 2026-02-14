@@ -10,7 +10,7 @@
 <h2>Change Password</h2>
 
 {% if let Some(msg) = success %}
-<div style="margin-bottom: 1rem;">[OK] {{ msg }}</div>
+<div style="margin-bottom: 1rem;">{{ msg }}</div>
 {% endif %}
 
 {% if let Some(err) = error %}
@@ -30,7 +30,7 @@
         <label for="confirm_password">Confirm New Password</label>
         <input type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password">
     </div>
-    <button type="submit">[Change Password]</button>
+    <button type="submit">Change Password</button>
 </form>
 
 <h2>Application Info</h2>
