@@ -9,7 +9,7 @@
         <li class="ml-auto">
             <span class="muted">{{ user.username }}{% if user.is_admin() %} <strong>admin</strong>{% endif %}</span>
             <form action="/auth/logout" method="post" style="display:inline;">
-                <button type="submit" style="background:none;color:#111;border:none;padding:0;cursor:pointer;">Sign Out</button>
+                <button type="submit" style="background:transparent;color:var(--color-text);border:none;padding:0;cursor:pointer;">Sign Out</button>
             </form>
         </li>
     </ul>

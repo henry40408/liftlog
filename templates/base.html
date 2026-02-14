@@ -25,6 +25,33 @@
             /* Border radius */
             --radius-sm: 2px;
             --radius-md: 4px;
+
+            /* Colors */
+            --color-bg: #fff;
+            --color-text: #111;
+            --color-text-muted: #666;
+            --color-border: #111;
+            --color-border-light: #ddd;
+            --color-bg-secondary: #f5f5f5;
+            --color-danger: #cc0000;
+            --color-danger-text: #fff;
+            --color-btn-bg: #111;
+            --color-btn-text: #fff;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --color-bg: #1a1a1a;
+                --color-text: #e0e0e0;
+                --color-text-muted: #999;
+                --color-border: #555;
+                --color-border-light: #333;
+                --color-bg-secondary: #2a2a2a;
+                --color-danger: #e04040;
+                --color-danger-text: #fff;
+                --color-btn-bg: #e0e0e0;
+                --color-btn-text: #1a1a1a;
+            }
         }
         * {
             box-sizing: border-box;
@@ -35,8 +62,8 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             font-size: 15px;
             line-height: 1.5;
-            background-color: #fff;
-            color: #111;
+            background-color: var(--color-bg);
+            color: var(--color-text);
             padding: var(--space-8) var(--space-16);
             max-width: 900px;
             margin: 0 auto;
@@ -45,7 +72,7 @@
             font-size: 1rem;
             font-weight: normal;
             margin-bottom: 1.5rem;
-            border-bottom: 1px solid #111;
+            border-bottom: 1px solid var(--color-border);
             padding-bottom: 0.5rem;
         }
         h2 {
@@ -63,7 +90,7 @@
         nav {
             margin-bottom: 1.5rem;
             padding-bottom: 0.5rem;
-            border-bottom: 1px solid #111;
+            border-bottom: 1px solid var(--color-border);
         }
         nav ul {
             list-style: none;
@@ -82,11 +109,11 @@
             margin-left: auto;
         }
         a {
-            color: #111;
+            color: var(--color-text);
         }
         a:hover {
-            background: #111;
-            color: #fff;
+            background: var(--color-btn-bg);
+            color: var(--color-btn-text);
         }
         .form-group {
             margin-bottom: 1rem;
@@ -104,22 +131,23 @@
             width: 100%;
             max-width: 300px;
             padding: 0.5rem;
-            border: 1px solid #111;
+            border: 1px solid var(--color-border);
             font-family: inherit;
             font-size: inherit;
-            background: #fff;
+            background: var(--color-bg);
+            color: var(--color-text);
         }
         input:focus,
         select:focus,
         textarea:focus {
-            outline: 2px solid #111;
+            outline: 2px solid var(--color-border);
             outline-offset: 1px;
         }
         button, .btn {
             padding: 0.5rem 1rem;
-            background: #111;
-            color: #fff;
-            border: 1px solid #111;
+            background: var(--color-btn-bg);
+            color: var(--color-btn-text);
+            border: 1px solid var(--color-btn-bg);
             font-family: inherit;
             font-size: inherit;
             cursor: pointer;
@@ -127,8 +155,8 @@
             display: inline-block;
         }
         button:hover, .btn:hover {
-            background: #fff;
-            color: #111;
+            background: var(--color-bg);
+            color: var(--color-text);
         }
         .btn-small {
             padding: 0.25rem 0.5rem;
@@ -146,10 +174,10 @@
         th, td {
             text-align: left;
             padding: 0.25rem 0.5rem;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid var(--color-border-light);
         }
         th {
-            border-bottom: 1px solid #111;
+            border-bottom: 1px solid var(--color-border);
         }
         .error {
             margin-bottom: 1rem;
@@ -158,14 +186,14 @@
             content: "[ERROR] ";
         }
         .muted {
-            color: #666;
+            color: var(--color-text-muted);
         }
         .link {
             margin-top: 1.5rem;
         }
         hr {
             border: none;
-            border-top: 1px solid #111;
+            border-top: 1px solid var(--color-border);
             margin: 1.5rem 0;
         }
         ul, ol {
@@ -188,9 +216,9 @@
             padding: 0.25rem 0.5rem;
             font-size: var(--font-xs);
             margin: 0;
-            background: #111;
-            color: #fff;
-            border: 1px solid #111;
+            background: var(--color-btn-bg);
+            color: var(--color-btn-text);
+            border: 1px solid var(--color-btn-bg);
             text-decoration: none;
             display: inline-block;
             cursor: pointer;
@@ -199,36 +227,36 @@
         .actions a:hover,
         .actions button:hover,
         .actions .btn:hover {
-            background: #fff;
-            color: #111;
+            background: var(--color-bg);
+            color: var(--color-text);
         }
         .btn-danger {
-            background: #cc0000;
-            color: #fff;
-            border-color: #cc0000;
+            background: var(--color-danger);
+            color: var(--color-danger-text);
+            border-color: var(--color-danger);
         }
         .btn-danger:hover {
-            background: #fff;
-            color: #cc0000;
+            background: var(--color-bg);
+            color: var(--color-danger);
         }
         /* Override .actions scoped styles for danger buttons */
         .actions .btn-danger {
-            background: #cc0000;
-            color: #fff;
-            border-color: #cc0000;
+            background: var(--color-danger);
+            color: var(--color-danger-text);
+            border-color: var(--color-danger);
         }
         .actions .btn-danger:hover {
-            background: #fff;
-            color: #cc0000;
+            background: var(--color-bg);
+            color: var(--color-danger);
         }
         .set-row-actions .btn-danger {
-            background: #cc0000;
-            color: #fff;
-            border-color: #cc0000;
+            background: var(--color-danger);
+            color: var(--color-danger-text);
+            border-color: var(--color-danger);
         }
         .set-row-actions .btn-danger:hover {
-            background: #fff;
-            color: #cc0000;
+            background: var(--color-bg);
+            color: var(--color-danger);
         }
         .stats-grid {
             display: grid;
@@ -238,19 +266,19 @@
         }
         .stat-item {
             padding: 1rem;
-            border: 1px solid #111;
+            border: 1px solid var(--color-border);
         }
         .stat-value {
             font-size: 1.5rem;
             font-weight: bold;
         }
         .stat-label {
-            color: #666;
+            color: var(--color-text-muted);
             font-size: 0.85rem;
         }
         .pr-badge {
-            background: #111;
-            color: #fff;
+            background: var(--color-btn-bg);
+            color: var(--color-btn-text);
             padding: 0 0.25rem;
             font-size: 0.75rem;
         }
@@ -263,7 +291,7 @@
             grid-template-columns: 2fr 0.5fr 1fr 0.5fr 0.5fr 0.5fr;
             gap: 0.5rem;
             padding: 0.25rem 0.5rem;
-            border-bottom: 1px solid #111;
+            border-bottom: 1px solid var(--color-border);
             font-weight: bold;
         }
         .set-row {
@@ -271,7 +299,7 @@
             grid-template-columns: 2fr 0.5fr 1fr 0.5fr 0.5fr 0.5fr;
             gap: 0.5rem;
             padding: 0.25rem 0.5rem;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid var(--color-border-light);
             align-items: center;
         }
         .set-row-actions {
@@ -286,9 +314,9 @@
             padding: 0.25rem 0.5rem;
             font-size: var(--font-xs);
             margin: 0;
-            background: #111;
-            color: #fff;
-            border: 1px solid #111;
+            background: var(--color-btn-bg);
+            color: var(--color-btn-text);
+            border: 1px solid var(--color-btn-bg);
             text-decoration: none;
             display: inline-block;
             cursor: pointer;
@@ -296,16 +324,16 @@
         }
         .set-row-actions a:hover,
         .set-row-actions button:hover {
-            background: #fff;
-            color: #111;
+            background: var(--color-bg);
+            color: var(--color-text);
         }
 
         /* Exercise PR info */
         .pr-info {
             padding: 0.5rem;
             margin-top: 0.25rem;
-            background: #f5f5f5;
-            border-left: 3px solid #111;
+            background: var(--color-bg-secondary);
+            border-left: 3px solid var(--color-border);
             font-size: 0.85rem;
             display: none;
         }
@@ -331,7 +359,7 @@
             }
             .set-row .set-cell::before {
                 font-size: 0.7rem;
-                color: #666;
+                color: var(--color-text-muted);
                 display: block;
             }
             .set-row .set-cell-exercise::before { content: "Exercise"; }
@@ -346,7 +374,7 @@
                 gap: 0.5rem;
                 margin-top: 0.25rem;
                 padding-top: 0.25rem;
-                border-top: 1px dashed #ddd;
+                border-top: 1px dashed var(--color-border-light);
             }
             .set-row-actions button,
             .set-row-actions a {
