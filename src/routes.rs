@@ -3,7 +3,7 @@ use axum::{
     Extension, Router,
 };
 
-use crate::handlers::{auth, dashboard, exercises, settings, stats, workouts};
+use crate::handlers::{auth, dashboard, exercises, health, settings, stats, workouts};
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -17,6 +17,8 @@ pub fn create_router(
     let user_repo = auth_state.user_repo.clone();
 
     Router::new()
+        // Health check
+        .route("/health", get(health::health_check))
         // Dashboard
         .route("/", get(dashboard::index))
         .with_state(dashboard_state)
