@@ -44,11 +44,12 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
-      - name: Install nextest
-        uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@nextest
+        if: runner.os != 'Linux'
 
       - name: Run tests
-        run: cargo nextest run --verbose
+        if: runner.os != 'Linux'
+        run: cargo nextest run
 
   coverage:
     runs-on: ubuntu-latest
@@ -75,14 +76,15 @@ jobs:
 
       - uses: taiki-e/install-action@cargo-llvm-cov
 
+      - uses: taiki-e/install-action@nextest
+
       - name: Generate coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --lcov --output-path lcov.info
 
       - name: Upload coverage reports to Codecov
-        if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: henry40408/liftlog
           files: lcov.info
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
