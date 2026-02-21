@@ -62,11 +62,8 @@ async fn test_share_workout_success() {
 #[tokio::test]
 async fn test_view_shared_workout_public() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&pool, &user).await;
-    let cookie_header = common::extract_cookie_header(&session_cookie);
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let workout = common::create_test_workout(
