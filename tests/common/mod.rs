@@ -13,9 +13,9 @@ pub fn setup_test_db() -> DbPool {
 
 pub struct TestApp {
     pub router: Router,
-    pub session_repo: SessionRepository,
 }
 
+#[allow(dead_code)]
 pub fn create_test_app(pool: DbPool) -> Router {
     create_test_app_with_session(pool).router
 }
@@ -64,10 +64,7 @@ pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
         settings_state,
     );
 
-    TestApp {
-        router,
-        session_repo,
-    }
+    TestApp { router }
 }
 
 pub async fn create_test_user(
@@ -92,6 +89,7 @@ pub fn extract_cookie_header(set_cookie: &str) -> String {
 }
 
 // Test data creation helpers
+#[allow(dead_code)]
 pub async fn create_test_exercise(
     pool: &DbPool,
     user_id: &str,
@@ -102,6 +100,7 @@ pub async fn create_test_exercise(
     exercise_repo.create(name, category, user_id).await.unwrap()
 }
 
+#[allow(dead_code)]
 pub async fn create_test_workout(
     pool: &DbPool,
     user_id: &str,
@@ -115,6 +114,7 @@ pub async fn create_test_workout(
         .unwrap()
 }
 
+#[allow(dead_code)]
 pub async fn create_test_log(
     pool: &DbPool,
     session_id: &str,

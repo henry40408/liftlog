@@ -13,6 +13,7 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 axum-extra = { version = "0.12", features = ["cookie"] }
 argon2 = "0.5"
+password-hash = { version = "0.5", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -24,7 +25,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
-rand = "0.8"
+rand = "0.10"
 
 [dev-dependencies]
 tokio-test = "0.4"
