@@ -109,7 +109,7 @@ cargo clippy -- -D warnings
 
 ## Tech Stack
 
-- **Web Framework**: Axum 0.7
+- **Web Framework**: Axum 0.8
 - **Async Runtime**: Tokio
 - **Database**: SQLite (rusqlite + r2d2)
 - **Templates**: Askama
