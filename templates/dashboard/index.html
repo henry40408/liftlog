@@ -5,50 +5,49 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Dashboard</h1>
+<main>
+    <div class="page-header">
+        <h1>Dashboard</h1>
+        <div class="subtitle">Your training overview</div>
+    </div>
 
-<div class="stats-grid">
-    <div class="stat-item">
-        <div class="stat-value">{{ workouts_this_week }}</div>
-        <div class="stat-label">This Week</div>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ workouts_this_week }}</div>
+            <div class="stat-label">This Week</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ workouts_this_month }}</div>
+            <div class="stat-label">This Month</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_volume }}</div>
+            <div class="stat-label">Volume (Week)</div>
+        </div>
     </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ workouts_this_month }}</div>
-        <div class="stat-label">This Month</div>
-    </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ total_volume }}</div>
-        <div class="stat-label">Volume (Week)</div>
-    </div>
-</div>
 
-<h2>Recent Workouts</h2>
-{% if recent_workouts.is_empty() %}
-<p class="muted">No workouts yet.</p>
-<p><a href="/workouts/new">+ Start Your First Workout</a></p>
-{% else %}
-<table>
-    <thead>
-        <tr>
-            <th>Date</th>
-            <th>Notes</th>
-        </tr>
-    </thead>
-    <tbody>
+    <h2>Recent Workouts</h2>
+    {% if recent_workouts.is_empty() %}
+    <div class="empty-state">
+        <p class="muted">No workouts yet.</p>
+        <a href="/workouts/new" class="btn btn-primary">Start Your First Workout</a>
+    </div>
+    {% else %}
+    <div class="workout-list">
         {% for w in recent_workouts %}
-        <tr>
-            <td><a href="/workouts/{{ w.id }}">{{ w.date }}</a></td>
-            <td class="muted">{% match w.notes %}{% when Some with (n) %}{{ n }}{% when None %}-{% endmatch %}</td>
-        </tr>
+        <div class="workout-item">
+            <a href="/workouts/{{ w.id }}">{{ w.date }}</a>
+            <span class="notes">{% match w.notes %}{% when Some with (n) %}{{ n }}{% when None %}&mdash;{% endmatch %}</span>
+        </div>
         {% endfor %}
-    </tbody>
-</table>
-<p><a href="/workouts">View All Workouts &rarr;</a></p>
-{% endif %}
+    </div>
+    <p class="mt-4"><a href="/workouts">View All Workouts &rarr;</a></p>
+    {% endif %}
 
-<h2>Quick Actions</h2>
-<div class="actions">
-    <a href="/workouts/new" class="btn">+ New Workout</a>
-    <a href="/stats/prs" class="btn">View PRs</a>
-</div>
+    <h2>Quick Actions</h2>
+    <div class="actions">
+        <a href="/workouts/new" class="btn btn-primary">+ New Workout</a>
+        <a href="/stats/prs" class="btn btn-ghost">View PRs</a>
+    </div>
+</main>
 {% endblock %}

@@ -5,49 +5,53 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Users</h1>
+<main>
+    <div class="page-header">
+        <h1>Users</h1>
+    </div>
 
-{% if is_admin %}
-<p><a href="/users/new">+ Add New User</a></p>
-{% endif %}
+    {% if is_admin %}
+    <p class="mb-4"><a href="/users/new" class="btn btn-primary">+ Add New User</a></p>
+    {% endif %}
 
-<table>
-    <thead>
-        <tr>
-            <th>Username</th>
-            <th>Role</th>
-            <th>Created</th>
-            {% if is_admin %}
-            <th>Actions</th>
-            {% endif %}
-        </tr>
-    </thead>
-    <tbody>
-        {% for u in users %}
-        <tr>
-            <td>{{ u.username }}</td>
-            <td>{{ u.role.as_str() }}</td>
-            <td class="muted">{{ u.created_at.format("%Y-%m-%d %H:%M") }}</td>
-            {% if is_admin %}
-            <td>
-                {% if u.id != user.id %}
-                <div class="actions">
-                    {% if !u.role.is_admin() %}
-                    <form action="/users/{{ u.id }}/promote" method="post" style="display:inline;" onsubmit="return confirm('Promote {{ u.username }} to admin?');">
-                        <button type="submit">Promote</button>
-                    </form>
-                    {% endif %}
-                    <form action="/users/{{ u.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('Delete user {{ u.username }}?');">
-                        <button type="submit" class="btn-danger">Delete</button>
-                    </form>
-                </div>
-                {% else %}
-                <span class="muted">(you)</span>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Created</th>
+                {% if is_admin %}
+                <th>Actions</th>
                 {% endif %}
-            </td>
-            {% endif %}
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td style="color: var(--text-primary);">{{ u.username }}</td>
+                <td>{% if u.role.is_admin() %}<span style="color: var(--gold);">{{ u.role.as_str() }}</span>{% else %}{{ u.role.as_str() }}{% endif %}</td>
+                <td>{{ u.created_at.format("%Y-%m-%d %H:%M") }}</td>
+                {% if is_admin %}
+                <td>
+                    {% if u.id != user.id %}
+                    <div class="actions">
+                        {% if !u.role.is_admin() %}
+                        <form action="/users/{{ u.id }}/promote" method="post" style="display:inline;" onsubmit="return confirm('Promote {{ u.username }} to admin?');">
+                            <button type="submit" class="btn btn-ghost btn-sm">Promote</button>
+                        </form>
+                        {% endif %}
+                        <form action="/users/{{ u.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('Delete user {{ u.username }}?');">
+                            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                        </form>
+                    </div>
+                    {% else %}
+                    <span class="muted">(you)</span>
+                    {% endif %}
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</main>
 {% endblock %}

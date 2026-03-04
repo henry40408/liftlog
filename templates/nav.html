@@ -1,16 +1,17 @@
-<nav>
-    <ul>
-        <li><a href="/">Home</a></li>
+<nav class="nav-bar">
+    <a href="/" class="nav-logo">Lift<span>Log</span></a>
+    <ul class="nav-links">
+        <li><a href="/">Dashboard</a></li>
         <li><a href="/workouts">Workouts</a></li>
         <li><a href="/exercises">Exercises</a></li>
         <li><a href="/stats">Stats</a></li>
         <li><a href="/settings">Settings</a></li>
         <li><a href="/users">Users</a></li>
-        <li class="ml-auto">
-            <span class="muted">{{ user.username }}{% if user.is_admin() %} <strong>admin</strong>{% endif %}</span>
-            <form action="/auth/logout" method="post" style="display:inline;">
-                <button type="submit" style="background:transparent;color:var(--color-text);border:none;padding:0;cursor:pointer;">Sign Out</button>
-            </form>
-        </li>
     </ul>
+    <div class="nav-user">
+        <span class="username">{{ user.username }}{% if user.is_admin() %} <span class="admin-badge">Admin</span>{% endif %}</span>
+        <form action="/auth/logout" method="post" style="display:inline;">
+            <button type="button" class="sign-out-btn" onclick="this.closest('form').submit()">Sign Out</button>
+        </form>
+    </div>
 </nav>

@@ -5,62 +5,53 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>{{ exercise.name }}</h1>
+<main>
+    <div class="page-header">
+        <h1>{{ exercise.name }}</h1>
+        <div class="subtitle">{{ exercise.category }}</div>
+    </div>
 
-<p class="muted">
-    Category: {{ exercise.category }}
-</p>
+    <h2>Personal Record</h2>
+    {% match pr %}
+    {% when Some with (p) %}
+    <div class="card card-gold" style="margin-bottom: var(--sp-6); display: inline-block;">
+        <div style="display: flex; align-items: baseline; gap: var(--sp-4);">
+            <span class="stat-value" style="font-size: var(--font-4xl);">{{ p.value }}</span>
+            <span class="text-secondary text-sm">kg &middot; {{ p.achieved_at.format("%Y-%m-%d") }}</span>
+        </div>
+    </div>
+    {% when None %}
+    <p class="muted">No PR for this exercise yet.</p>
+    {% endmatch %}
 
-<h2>Personal Record</h2>
-{% match pr %}
-{% when Some with (p) %}
-<table>
-    <thead>
-        <tr>
-            <th>Max Weight</th>
-            <th>Date</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>{{ p.value }}</td>
-            <td class="muted">{{ p.achieved_at.format("%Y-%m-%d") }}</td>
-        </tr>
-    </tbody>
-</table>
-{% when None %}
-<p class="muted">No PR for this exercise yet.</p>
-{% endmatch %}
+    <h2>Recent History</h2>
+    {% if history.is_empty() %}
+    <p class="muted">No history for this exercise.</p>
+    {% else %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Set</th>
+                <th>Weight</th>
+                <th>Reps</th>
+                <th>RPE</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in history %}
+            <tr>
+                <td>{{ log.set_number }}</td>
+                <td style="color: var(--text-primary); font-weight: 500;">{{ log.weight }}</td>
+                <td>{{ log.reps }}</td>
+                <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
+                <td>{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
 
-<h2>Recent History</h2>
-{% if history.is_empty() %}
-<p class="muted">No history for this exercise.</p>
-{% else %}
-<table>
-    <thead>
-        <tr>
-            <th>Set</th>
-            <th>Weight</th>
-            <th>Reps</th>
-            <th>RPE</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for log in history %}
-        <tr>
-            <td>{{ log.set_number }}</td>
-            <td>{{ log.weight }}</td>
-            <td>{{ log.reps }}</td>
-            <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
-            <td>{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% endif %}
-
-<div class="link">
-    &larr; <a href="/exercises">Back to Exercises</a>
-</div>
+    <a href="/exercises" class="back-link">&larr; Back to Exercises</a>
+</main>
 {% endblock %}

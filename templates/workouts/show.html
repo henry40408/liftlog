@@ -5,117 +5,120 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Workout: {{ workout.date }}</h1>
+<main>
+    <div class="page-header">
+        <h1>{{ workout.date }}</h1>
+        {% match workout.notes %}
+        {% when Some with (notes) %}
+        <div class="subtitle"><em>{{ notes }}</em></div>
+        {% when None %}
+        {% endmatch %}
+    </div>
 
-{% match workout.notes %}
-{% when Some with (notes) %}
-<p class="muted"><em>{{ notes }}</em></p>
-{% when None %}
-{% endmatch %}
+    <div class="actions mb-6">
+        <a href="/workouts/{{ workout.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+        <form action="/workouts/{{ workout.id }}/delete" method="post" style="display:inline;"
+              onsubmit="return confirm('Delete this workout?');">
+            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+        </form>
+        {% match share_url %}
+        {% when None %}
+        <form action="/workouts/{{ workout.id }}/share" method="post" style="display:inline;">
+            <button type="submit" class="btn btn-ghost btn-sm">Share</button>
+        </form>
+        {% when Some with (url) %}
+        {% endmatch %}
+    </div>
 
-<div class="actions">
-    <a href="/workouts/{{ workout.id }}/edit">Edit</a>
-    <form action="/workouts/{{ workout.id }}/delete" method="post" style="display:inline;"
-          onsubmit="return confirm('Delete this workout?');">
-        <button type="submit" class="btn-danger">Delete</button>
-    </form>
     {% match share_url %}
-    {% when None %}
-    <form action="/workouts/{{ workout.id }}/share" method="post" style="display:inline;">
-        <button type="submit">Share</button>
-    </form>
     {% when Some with (url) %}
+    <div class="share-info">
+        <p style="margin: 0 0 var(--sp-3) 0;">Share link: <a href="{{ url }}" target="_blank">{{ url }}</a>
+        <button type="button" class="btn btn-sm btn-inline" onclick="copyShareLink('{{ url }}')" style="background:var(--accent);color:var(--text-inverse);border-color:var(--accent);">Copy</button></p>
+        <form action="/workouts/{{ workout.id }}/revoke-share" method="post" style="display:inline;"
+              onsubmit="return confirm('Revoke sharing? The link will stop working.');">
+            <button type="submit" class="btn btn-danger btn-sm">Revoke Share</button>
+        </form>
+    </div>
+    {% when None %}
     {% endmatch %}
-</div>
 
-{% match share_url %}
-{% when Some with (url) %}
-<div class="share-info" style="margin: 1rem 0; padding: 0.5rem; background: var(--color-bg-secondary); border-left: 3px solid var(--color-border);">
-    <p style="margin: 0 0 0.5rem 0;">Share link: <a href="{{ url }}" target="_blank">{{ url }}</a>
-    <button type="button" class="btn-small btn-inline" onclick="copyShareLink('{{ url }}')">Copy</button></p>
-    <form action="/workouts/{{ workout.id }}/revoke-share" method="post" style="display:inline;"
-          onsubmit="return confirm('Revoke sharing? The link will stop working.');">
-        <button type="submit" class="btn-small btn-inline btn-danger">Revoke Share</button>
-    </form>
-</div>
-{% when None %}
-{% endmatch %}
+    <h3>Add Set</h3>
+    <div class="card card-accent" style="margin: var(--sp-4) 0;">
+        <form method="post" action="/workouts/{{ workout.id }}/logs">
+            <div class="form-group">
+                <label for="exercise_id">Exercise</label>
+                <select id="exercise_id" name="exercise_id" required>
+                    <option value="">-- Select --</option>
+                    {% for cat in categories %}
+                    <optgroup label="{{ cat.display_name }}">
+                        {% for ex in exercises %}
+                        {% if ex.category == cat.name %}
+                        <option value="{{ ex.id }}">{{ ex.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+                <div id="exercise-pr-info" class="pr-info"></div>
+            </div>
+            <div class="form-group">
+                <label for="weight">Weight</label>
+                <input type="number" id="weight" name="weight" step="0.5" min="0" required>
+            </div>
+            <div class="form-group">
+                <label for="reps">Reps</label>
+                <input type="number" id="reps" name="reps" min="1" required>
+            </div>
+            <div class="form-group">
+                <label for="rpe">RPE (1-10, optional)</label>
+                <input type="number" id="rpe" name="rpe" min="1" max="10">
+            </div>
+            <button type="submit">Add Set</button>
+        </form>
+    </div>
 
-<h3>Add Set</h3>
-<form method="post" action="/workouts/{{ workout.id }}/logs">
-    <div class="form-group">
-        <label for="exercise_id">Exercise</label>
-        <select id="exercise_id" name="exercise_id" required>
-            <option value="">-- Select --</option>
-            {% for cat in categories %}
-            <optgroup label="{{ cat.display_name }}">
-                {% for ex in exercises %}
-                {% if ex.category == cat.name %}
-                <option value="{{ ex.id }}">{{ ex.name }}</option>
-                {% endif %}
-                {% endfor %}
-            </optgroup>
-            {% endfor %}
-        </select>
-        <div id="exercise-pr-info" class="pr-info"></div>
-    </div>
-    <div class="form-group">
-        <label for="weight">Weight</label>
-        <input type="number" id="weight" name="weight" step="0.5" min="0" required>
-    </div>
-    <div class="form-group">
-        <label for="reps">Reps</label>
-        <input type="number" id="reps" name="reps" min="1" required>
-    </div>
-    <div class="form-group">
-        <label for="rpe">RPE (1-10, optional)</label>
-        <input type="number" id="rpe" name="rpe" min="1" max="10">
-    </div>
-    <button type="submit">Add Set</button>
-</form>
+    <h2>Sets</h2>
 
-<h2>Sets</h2>
+    {% if let Some(err) = error %}
+    <div class="error">{{ err }}</div>
+    {% endif %}
 
-{% if let Some(err) = error %}
-<div class="error">{{ err }}</div>
-{% endif %}
-
-{% if logs.is_empty() %}
-<p class="muted">No sets recorded yet.</p>
-{% else %}
-<div class="sets-list">
-    <div class="sets-header">
-        <div>Exercise</div>
-        <div>Set</div>
-        <div>Weight</div>
-        <div>Reps</div>
-        <div>RPE</div>
-        <div></div>
-    </div>
-    {% for log in logs %}
-    <div class="set-row">
-        <div class="set-cell set-cell-exercise"><a href="/stats/exercise/{{ log.exercise_id }}">{{ log.exercise_name }}</a></div>
-        <div class="set-cell set-cell-set">{{ log.set_number }}</div>
-        <div class="set-cell set-cell-weight">{{ log.weight }}</div>
-        <div class="set-cell set-cell-reps">{{ log.reps }}</div>
-        <div class="set-cell set-cell-rpe">{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</div>
-        <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</div>
-        <div class="set-row-actions">
-            <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit">Edit</a>
-            <button type="button" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>
-            <form action="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete" method="post" style="display:inline;"
-                  onsubmit="return confirm('Delete this set?');">
-                <button type="submit" class="btn-danger">&times;</button>
-            </form>
+    {% if logs.is_empty() %}
+    <p class="muted">No sets recorded yet.</p>
+    {% else %}
+    <div class="sets-list">
+        <div class="sets-header">
+            <div>Exercise</div>
+            <div>Set</div>
+            <div>Weight</div>
+            <div>Reps</div>
+            <div>RPE</div>
+            <div></div>
         </div>
+        {% for log in logs %}
+        <div class="set-row">
+            <div class="set-cell set-cell-exercise"><a href="/stats/exercise/{{ log.exercise_id }}">{{ log.exercise_name }}</a></div>
+            <div class="set-cell set-cell-set">{{ log.set_number }}</div>
+            <div class="set-cell set-cell-weight">{{ log.weight }}</div>
+            <div class="set-cell set-cell-reps">{{ log.reps }}</div>
+            <div class="set-cell set-cell-rpe">{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</div>
+            <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</div>
+            <div class="set-row-actions">
+                <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>
+                <form action="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete" method="post" style="display:inline;"
+                      onsubmit="return confirm('Delete this set?');">
+                    <button type="submit" class="btn btn-danger btn-sm">&times;</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
     </div>
-    {% endfor %}
-</div>
-{% endif %}
+    {% endif %}
 
-<div class="link">
-    &larr; <a href="/workouts">Back to Workouts</a>
-</div>
+    <a href="/workouts" class="back-link">&larr; Back to Workouts</a>
+</main>
 
 <script>
 var exercisePRs = {};
@@ -133,7 +136,7 @@ function showPRInfo(exerciseId) {
     if (exerciseId && exercisePRs[exerciseId]) {
         var pr = exercisePRs[exerciseId];
         prInfoEl.innerHTML = "Max Weight: " + pr.weight + " kg @ " + pr.date +
-            ' <button type="button" class="btn-small btn-inline" onclick="fillMaxWeight()">Fill</button>';
+            ' <button type="button" class="btn btn-sm btn-inline" style="background:var(--gold);color:var(--text-inverse);border-color:var(--gold);" onclick="fillMaxWeight()">Fill</button>';
         prInfoEl.classList.add('visible');
     } else {
         prInfoEl.innerHTML = "";

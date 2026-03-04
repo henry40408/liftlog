@@ -5,25 +5,27 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Add New User</h1>
-
-{% if let Some(err) = error %}
-<div class="error">{{ err }}</div>
-{% endif %}
-
-<form method="post" action="/users/new">
-    <div class="form-group">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" required autofocus>
+<main>
+    <div class="page-header">
+        <h1>Add New User</h1>
     </div>
-    <div class="form-group">
-        <label for="password">Password (min 6 characters)</label>
-        <input type="password" id="password" name="password" required minlength="6">
-    </div>
-    <button type="submit">Create User</button>
-</form>
 
-<div class="link">
-    &larr; <a href="/users">Back to Users</a>
-</div>
+    {% if let Some(err) = error %}
+    <div class="error">{{ err }}</div>
+    {% endif %}
+
+    <form method="post" action="/users/new">
+        <div class="form-group">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required autofocus>
+        </div>
+        <div class="form-group">
+            <label for="password">Password (min 6 characters)</label>
+            <input type="password" id="password" name="password" required minlength="6">
+        </div>
+        <button type="submit">Create User</button>
+    </form>
+
+    <a href="/users" class="back-link">&larr; Back to Users</a>
+</main>
 {% endblock %}

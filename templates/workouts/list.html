@@ -5,40 +5,38 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Workouts</h1>
+<main>
+    <div class="page-header">
+        <h1>Workouts</h1>
+    </div>
 
-<p><a href="/workouts/new">+ New Workout</a></p>
+    <p class="mb-6"><a href="/workouts/new" class="btn btn-primary">+ New Workout</a></p>
 
-{% if workouts.is_empty() %}
-<p class="muted">No workouts yet.</p>
-{% else %}
-<table>
-    <thead>
-        <tr>
-            <th>Date</th>
-            <th>Notes</th>
-        </tr>
-    </thead>
-    <tbody>
+    {% if workouts.is_empty() %}
+    <div class="empty-state">
+        <p class="muted">No workouts yet. Time to hit the iron.</p>
+    </div>
+    {% else %}
+    <div class="workout-list">
         {% for w in workouts %}
-        <tr>
-            <td><a href="/workouts/{{ w.id }}">{{ w.date }}</a></td>
-            <td class="muted">{% match w.notes %}{% when Some with (n) %}{{ n }}{% when None %}-{% endmatch %}</td>
-        </tr>
+        <div class="workout-item">
+            <a href="/workouts/{{ w.id }}">{{ w.date }}</a>
+            <span class="notes">{% match w.notes %}{% when Some with (n) %}{{ n }}{% when None %}&mdash;{% endmatch %}</span>
+        </div>
         {% endfor %}
-    </tbody>
-</table>
+    </div>
 
-{% if total_pages > 1 %}
-<p class="muted">
-    Page {{ page }} of {{ total_pages }}
-    {% if page > 1 %}
-    | <a href="/workouts?page={{ page - 1 }}">&larr; Previous</a>
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        <span>Page {{ page }} / {{ total_pages }}</span>
+        {% if page > 1 %}
+        <a href="/workouts?page={{ page - 1 }}">&larr; Previous</a>
+        {% endif %}
+        {% if page < total_pages %}
+        <a href="/workouts?page={{ page + 1 }}">Next &rarr;</a>
+        {% endif %}
+    </div>
     {% endif %}
-    {% if page < total_pages %}
-    | <a href="/workouts?page={{ page + 1 }}">Next &rarr;</a>
     {% endif %}
-</p>
-{% endif %}
-{% endif %}
+</main>
 {% endblock %}

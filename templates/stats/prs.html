@@ -5,32 +5,36 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Personal Records</h1>
+<main>
+    <div class="page-header">
+        <h1>Personal Records</h1>
+    </div>
 
-{% if prs.is_empty() %}
-<p class="muted">No personal records yet. Start lifting!</p>
-{% else %}
-<table>
-    <thead>
-        <tr>
-            <th>Exercise</th>
-            <th>Max Weight</th>
-            <th>Date</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for pr in prs %}
-        <tr>
-            <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
-            <td>{{ pr.value }}</td>
-            <td class="muted">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% endif %}
+    {% if prs.is_empty() %}
+    <div class="empty-state">
+        <p class="muted">No personal records yet. Start lifting!</p>
+    </div>
+    {% else %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Exercise</th>
+                <th>Max Weight</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pr in prs %}
+            <tr>
+                <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
+                <td style="color: var(--gold); font-weight: 600;">{{ pr.value }}</td>
+                <td>{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
 
-<div class="link">
-    &larr; <a href="/stats">Back to Stats</a>
-</div>
+    <a href="/stats" class="back-link">&larr; Back to Stats</a>
+</main>
 {% endblock %}

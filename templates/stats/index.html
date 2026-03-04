@@ -5,49 +5,55 @@
 {% block content %}
 {% include "nav.html" %}
 
-<h1>Statistics</h1>
+<main>
+    <div class="page-header">
+        <h1>Statistics</h1>
+    </div>
 
-<div class="stats-grid">
-    <div class="stat-item">
-        <div class="stat-value">{{ total_workouts }}</div>
-        <div class="stat-label">Total Workouts</div>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_workouts }}</div>
+            <div class="stat-label">Total Workouts</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ workouts_this_week }}</div>
+            <div class="stat-label">This Week</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ workouts_this_month }}</div>
+            <div class="stat-label">This Month</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_volume }}</div>
+            <div class="stat-label">Volume (Week)</div>
+        </div>
     </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ workouts_this_week }}</div>
-        <div class="stat-label">This Week</div>
-    </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ workouts_this_month }}</div>
-        <div class="stat-label">This Month</div>
-    </div>
-    <div class="stat-item">
-        <div class="stat-value">{{ total_volume }}</div>
-        <div class="stat-label">Volume (Week)</div>
-    </div>
-</div>
 
-<h2>Recent Personal Records</h2>
-{% if prs.is_empty() %}
-<p class="muted">No personal records yet. Start lifting!</p>
-{% else %}
-<table>
-    <thead>
-        <tr>
-            <th>Exercise</th>
-            <th>Max Weight</th>
-            <th>Date</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for pr in prs %}
-        <tr>
-            <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
-            <td>{{ pr.value }}</td>
-            <td class="muted">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-<p><a href="/stats/prs">View All PRs &rarr;</a></p>
-{% endif %}
+    <h2>Recent Personal Records</h2>
+    {% if prs.is_empty() %}
+    <div class="empty-state">
+        <p class="muted">No personal records yet. Start lifting!</p>
+    </div>
+    {% else %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Exercise</th>
+                <th>Max Weight</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pr in prs %}
+            <tr>
+                <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
+                <td style="color: var(--gold); font-weight: 600;">{{ pr.value }}</td>
+                <td>{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p class="mt-4"><a href="/stats/prs">View All PRs &rarr;</a></p>
+    {% endif %}
+</main>
 {% endblock %}
