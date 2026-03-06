@@ -26,9 +26,9 @@
         <tbody>
             {% for pr in prs %}
             <tr>
-                <td><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
-                <td style="color: var(--gold); font-weight: 600;">{{ pr.value }}</td>
-                <td>{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
+                <td data-label="Exercise"><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
+                <td data-label="Max Weight" style="color: var(--gold); font-weight: 600;">{{ pr.value }}</td>
+                <td data-label="Date">{{ pr.achieved_at.format("%Y-%m-%d") }}</td>
             </tr>
             {% endfor %}
         </tbody>

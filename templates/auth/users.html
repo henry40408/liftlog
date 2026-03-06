@@ -28,11 +28,11 @@
         <tbody>
             {% for u in users %}
             <tr>
-                <td style="color: var(--text-primary);">{{ u.username }}</td>
-                <td>{% if u.role.is_admin() %}<span style="color: var(--gold);">{{ u.role.as_str() }}</span>{% else %}{{ u.role.as_str() }}{% endif %}</td>
-                <td>{{ u.created_at.format("%Y-%m-%d %H:%M") }}</td>
+                <td data-label="Username" style="color: var(--text-primary);">{{ u.username }}</td>
+                <td data-label="Role">{% if u.role.is_admin() %}<span style="color: var(--gold);">{{ u.role.as_str() }}</span>{% else %}{{ u.role.as_str() }}{% endif %}</td>
+                <td data-label="Created">{{ u.created_at.format("%Y-%m-%d %H:%M") }}</td>
                 {% if is_admin %}
-                <td>
+                <td data-label="Actions">
                     {% if u.id != user.id %}
                     <div class="actions">
                         {% if !u.role.is_admin() %}
