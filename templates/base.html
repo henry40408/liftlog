@@ -41,8 +41,8 @@
 
             /* Text */
             --text-primary: #F0F0F3;
-            --text-secondary: #B8B8C2;
-            --text-muted: #78788A;
+            --text-secondary: #E8E8EC;
+            --text-muted: #C0C0CC;
             --text-inverse: #0B0B0F;
 
             /* Borders */
@@ -318,6 +318,54 @@
             border-color: var(--text-secondary);
         }
 
+        /* Hamburger toggle (hidden on desktop) */
+        .nav-toggle-checkbox {
+            display: none;
+        }
+
+        .nav-toggle-label {
+            display: none;
+            cursor: pointer;
+            padding: var(--sp-2);
+            margin-left: auto;
+            order: 2;
+        }
+
+        .nav-toggle-icon,
+        .nav-toggle-icon::before,
+        .nav-toggle-icon::after {
+            display: block;
+            width: 20px;
+            height: 2px;
+            background: var(--text-secondary);
+            border-radius: 1px;
+            position: relative;
+            transition: all var(--transition);
+        }
+
+        .nav-toggle-icon::before,
+        .nav-toggle-icon::after {
+            content: '';
+            position: absolute;
+            left: 0;
+        }
+
+        .nav-toggle-icon::before { top: -6px; }
+        .nav-toggle-icon::after { top: 6px; }
+
+        /* Animate to X when open */
+        .nav-toggle-checkbox:checked + .nav-toggle-label .nav-toggle-icon {
+            background: transparent;
+        }
+        .nav-toggle-checkbox:checked + .nav-toggle-label .nav-toggle-icon::before {
+            top: 0;
+            transform: rotate(45deg);
+        }
+        .nav-toggle-checkbox:checked + .nav-toggle-label .nav-toggle-icon::after {
+            top: 0;
+            transform: rotate(-45deg);
+        }
+
         /* ============================================
            BUTTONS
            ============================================ */
@@ -515,7 +563,7 @@
             font-family: var(--font-mono);
             font-size: var(--font-xs);
             font-weight: 500;
-            color: var(--text-muted);
+            color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.06em;
             margin-top: var(--sp-2);
@@ -534,7 +582,7 @@
             font-family: var(--font-display);
             font-size: var(--font-xs);
             font-weight: 600;
-            color: var(--text-muted);
+            color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.06em;
             text-align: left;
@@ -965,26 +1013,49 @@
                 padding: 0 var(--sp-4);
             }
 
+            /* Hamburger menu */
             .nav-bar {
                 flex-wrap: wrap;
                 gap: var(--sp-3);
                 padding: var(--sp-4) 0;
             }
 
+            .nav-toggle-label {
+                display: block;
+            }
+
             .nav-links {
+                display: none;
                 order: 3;
                 width: 100%;
+                flex-direction: column;
                 gap: 0;
                 padding-bottom: var(--sp-2);
             }
 
+            .nav-toggle-checkbox:checked ~ .nav-links {
+                display: flex;
+            }
+
+            .nav-links li {
+                list-style: none;
+            }
+
             .nav-links a {
-                padding: var(--sp-2);
-                font-size: var(--font-xs);
+                padding: var(--sp-3) var(--sp-2);
+                font-size: var(--font-sm);
+                display: block;
+                border-bottom: 1px solid var(--border-light);
+            }
+
+            .nav-links li:last-child a {
+                border-bottom: none;
             }
 
             .nav-user {
-                order: 2;
+                order: 4;
+                width: 100%;
+                padding-top: var(--sp-2);
             }
 
             .page-header h1 {
@@ -997,6 +1068,17 @@
 
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
+            }
+
+            /* Exercise item: vertical layout on mobile */
+            .exercise-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: var(--sp-2);
+            }
+
+            .exercise-item .actions {
+                width: 100%;
             }
 
             /* Sets grid: mobile card layout */
@@ -1079,6 +1161,51 @@
             .workout-item .notes {
                 margin-left: 0;
                 text-align: left;
+            }
+        }
+
+        /* Data table card layout on narrow screens */
+        @media (max-width: 480px) {
+            .data-table thead {
+                display: none;
+            }
+
+            .data-table tr {
+                display: block;
+                background: var(--bg-surface);
+                border: 1px solid var(--border);
+                border-left: 3px solid var(--accent);
+                border-radius: var(--radius);
+                margin-bottom: var(--sp-3);
+                padding: var(--sp-3) 0;
+            }
+
+            .data-table td {
+                display: block;
+                padding: var(--sp-2) var(--sp-4);
+                border-bottom: none;
+                text-align: left;
+            }
+
+            .data-table td::before {
+                content: attr(data-label);
+                font-family: var(--font-display);
+                font-size: var(--font-xs);
+                font-weight: 600;
+                color: var(--text-muted);
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                display: block;
+                margin-bottom: var(--sp-1);
+            }
+
+            .data-table td:last-child {
+                border-bottom: none;
+            }
+
+            /* Settings version overflow */
+            code {
+                word-break: break-all;
             }
         }
 
