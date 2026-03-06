@@ -54,8 +54,9 @@ All configuration is done via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
-| `HOST` | `127.0.0.1` | Server bind address |
+| `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `3000` | HTTP server port |
+| `RUST_LOG` | `liftlog=debug,tower_http=debug` | Log level filter |
 
 ## Docker
 
