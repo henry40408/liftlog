@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 askama = "0.15"
 time = "0.3"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
@@ -15,19 +15,21 @@ axum-extra = { version = "0.12", features = ["cookie"] }
 argon2 = "0.5"
 password-hash = { version = "0.5", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-tower-http = { version = "0.6", features = ["fs", "trace"] }
-tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
-rand = "0.10"
 
 [dev-dependencies]
 tokio-test = "0.4"
 http-body-util = "0.1"
 http = "1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
