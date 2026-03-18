@@ -3,7 +3,7 @@
 [![CI](https://github.com/henry40408/liftlog/actions/workflows/ci.yml/badge.svg)](https://github.com/henry40408/liftlog/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/henry40408/liftlog/graph/badge.svg)](https://codecov.io/gh/henry40408/liftlog)
 [![License](https://img.shields.io/github/license/henry40408/liftlog)](LICENSE.txt)
-[![Rust](https://img.shields.io/badge/rust-1.92-blue.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.94-blue.svg)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/henry40408/liftlog)
 [![Casual Maintenance Intended](https://casuallymaintained.tech/badge.svg)](https://casuallymaintained.tech/)
 
@@ -56,7 +56,7 @@ All configuration is done via environment variables:
 | `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `3000` | HTTP server port |
-| `RUST_LOG` | `liftlog=debug,tower_http=debug` | Log level filter |
+| `RUST_LOG` | `liftlog=debug` | Log level filter |
 
 ## Docker
 
@@ -98,7 +98,7 @@ cargo run
 ### Running Tests
 
 ```bash
-cargo test
+cargo nextest run
 ```
 
 ### Code Quality
