@@ -13,7 +13,7 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 axum-extra = { version = "0.12", features = ["cookie"] }
 argon2 = "0.5"
-password-hash = { version = "0.5", features = ["getrandom"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
