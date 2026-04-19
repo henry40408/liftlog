@@ -4,7 +4,8 @@ use axum::{
 };
 
 const FAVICON_SVG: &[u8] = include_bytes!("../../assets/favicon.svg");
-const APPLE_TOUCH_ICON_PNG: &[u8] = include_bytes!("../../assets/apple-touch-icon.png");
+const APPLE_TOUCH_ICON_PNG: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/apple-touch-icon.png"));
 const CACHE_CONTROL: &str = "public, max-age=86400";
 
 pub async fn favicon_svg() -> impl IntoResponse {
