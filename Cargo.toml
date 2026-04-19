@@ -29,6 +29,9 @@ http-body-util = "0.1"
 http = "1"
 tower = { version = "0.5", features = ["util"] }
 
+[build-dependencies]
+resvg = "0.47"
+
 [profile.release]
 lto = true
 strip = true
