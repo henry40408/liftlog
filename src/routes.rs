@@ -3,7 +3,7 @@ use axum::{
     Extension, Router,
 };
 
-use crate::handlers::{auth, dashboard, exercises, health, settings, stats, workouts};
+use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -19,6 +19,9 @@ pub fn create_router(
     Router::new()
         // Health check
         .route("/health", get(health::health_check))
+        // Favicon (no auth, no state)
+        .route("/favicon.svg", get(favicon::favicon_svg))
+        .route("/apple-touch-icon.png", get(favicon::apple_touch_icon))
         // Dashboard
         .route("/", get(dashboard::index))
         .with_state(dashboard_state)
