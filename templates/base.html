@@ -458,6 +458,7 @@
         textarea {
             width: 100%;
             max-width: 400px;
+            min-width: 0;
             padding: var(--sp-3);
             background: var(--bg-input);
             color: var(--text-primary);
@@ -467,6 +468,19 @@
             font-family: var(--font-mono);
             font-size: var(--font-base);
             transition: all var(--transition);
+        }
+
+        /* iOS Safari: <input type="date"> renders at intrinsic content width
+           and ignores width/max-width unless appearance is reset. */
+        input[type="date"] {
+            display: block;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        input[type="date"]::-webkit-date-and-time-value {
+            text-align: left;
+            min-height: 1.2em;
         }
 
         input:focus,
