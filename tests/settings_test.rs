@@ -257,11 +257,14 @@ async fn test_change_password_invalidates_other_sessions() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Current session should still be valid
-    let current_valid = session_repo.find_valid(&token_current).await.unwrap();
+    let current_valid = session_repo
+        .validate_and_touch(&token_current)
+        .await
+        .unwrap();
     assert!(current_valid.is_some());
 
     // Other session should be invalidated
-    let other_valid = session_repo.find_valid(&token_other).await.unwrap();
+    let other_valid = session_repo.validate_and_touch(&token_other).await.unwrap();
     assert!(other_valid.is_none());
 }
 

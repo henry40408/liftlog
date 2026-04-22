@@ -236,3 +236,106 @@ async fn test_setup_redirects_when_users_exist() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
+
+#[tokio::test]
+async fn test_sliding_session_reissues_cookie_when_throttle_elapsed() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Artificially age last_touched_at so the next request slides expiry.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE sessions SET last_touched_at = datetime('now', '-2 hours') WHERE token = ?",
+            [&token],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should reach the dashboard (no redirect).
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+
+    // And Set-Cookie should have been re-issued with a fresh Max-Age.
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("sliding session should set cookie on touch")
+        .to_str()
+        .unwrap();
+    assert!(set_cookie.starts_with("session="));
+    assert!(set_cookie.contains("Max-Age=604800")); // 7 days in seconds
+}
+
+#[tokio::test]
+async fn test_sliding_session_no_cookie_when_within_throttle() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Fresh session: last_touched_at is ~now, so within throttle.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers().get(header::SET_COOKIE).is_none(),
+        "cookie should NOT be re-issued within throttle window"
+    );
+}
+
+#[tokio::test]
+async fn test_expired_session_redirects_to_login() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+            [&token],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
+}

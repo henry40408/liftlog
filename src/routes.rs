@@ -1,9 +1,11 @@
 use axum::{
+    middleware::from_fn_with_state,
     routing::{get, post},
     Extension, Router,
 };
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
+use crate::middleware::sliding_session_middleware;
 
 pub fn create_router(
     auth_state: auth::AuthState,
@@ -83,7 +85,12 @@ pub fn create_router(
         .route("/settings", get(settings::index))
         .route("/settings/password", post(settings::change_password))
         .with_state(settings_state)
-        // Session + User repos via Extension layer for auth extractors
+        // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
+        .layer(from_fn_with_state(
+            session_repo.clone(),
+            sliding_session_middleware,
+        ))
+        // Repos via Extension layer so extractors can pull them
         .layer(Extension(session_repo))
         .layer(Extension(user_repo))
 }
