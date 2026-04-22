@@ -309,6 +309,58 @@ async fn test_sliding_session_no_cookie_when_within_throttle() {
 }
 
 #[tokio::test]
+async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Age the session so the next request triggers a touch.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE sessions SET last_touched_at = datetime('now', '-2 hours') WHERE token = ?",
+            [&token],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Exactly one Set-Cookie for `session=`, and it must be the removal.
+    let session_cookies: Vec<_> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .filter(|s| s.trim_start().starts_with("session="))
+        .collect();
+    assert_eq!(
+        session_cookies.len(),
+        1,
+        "logout should emit exactly one session Set-Cookie header, got: {:?}",
+        session_cookies
+    );
+    let only = session_cookies[0];
+    assert!(
+        only.contains("Max-Age=0"),
+        "logout cookie should be the removal (Max-Age=0), got: {}",
+        only
+    );
+}
+
+#[tokio::test]
 async fn test_expired_session_redirects_to_login() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;

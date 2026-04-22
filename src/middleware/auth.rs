@@ -90,9 +90,12 @@ pub async fn sliding_session_middleware(
                     should_refresh_cookie = Some(tok.to_string());
                 }
             }
-            Ok(None) | Err(_) => {
+            Ok(None) => {
                 // Invalid / expired token: do not insert ValidatedSession. The
                 // downstream extractor (AuthUser) will redirect to /auth/login.
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "sliding_session_middleware: validate_and_touch failed");
             }
         }
     }
@@ -100,8 +103,26 @@ pub async fn sliding_session_middleware(
     let mut response = next.run(request).await;
 
     if let Some(tok) = should_refresh_cookie {
-        let cookie = create_session_cookie(&tok);
-        if let Ok(header_value) = cookie.to_string().parse() {
+        // Skip the refresh if the handler already emitted a `session=...`
+        // Set-Cookie (e.g. logout's removal cookie). Appending after it
+        // would let the refreshed cookie override the removal in the
+        // browser.
+        let already_set = response
+            .headers()
+            .get_all(axum::http::header::SET_COOKIE)
+            .iter()
+            .any(|v| {
+                v.to_str().ok().is_some_and(|s| {
+                    s.trim_start()
+                        .starts_with(&format!("{}=", crate::session::SESSION_COOKIE_NAME))
+                })
+            });
+        if !already_set {
+            let cookie = create_session_cookie(&tok);
+            let header_value = cookie
+                .to_string()
+                .parse()
+                .expect("session cookie serialises to a valid header value");
             response
                 .headers_mut()
                 .append(axum::http::header::SET_COOKIE, header_value);
