@@ -84,6 +84,7 @@ pub fn create_router(
         // Settings routes
         .route("/settings", get(settings::index))
         .route("/settings/password", post(settings::change_password))
+        .route("/settings/logout-others", post(settings::logout_others))
         .with_state(settings_state)
         // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
         .layer(from_fn_with_state(

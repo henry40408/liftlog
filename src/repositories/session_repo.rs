@@ -18,6 +18,13 @@ pub struct ValidateAndTouchOutcome {
     pub new_expires_at: Option<chrono::DateTime<Utc>>,
 }
 
+/// A single row returned by [`SessionRepository::list_for_user`].
+pub struct SessionListRow {
+    pub token: String,
+    pub created_at: chrono::DateTime<Utc>,
+    pub last_touched_at: chrono::DateTime<Utc>,
+}
+
 impl SessionRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
@@ -124,6 +131,34 @@ impl SessionRepository {
                 rusqlite::params![user_id, keep_token],
             )?;
             Ok(())
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+    }
+
+    /// List all unexpired sessions for a user, newest-touched first.
+    pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<SessionListRow>> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+        let now = Utc::now();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare(
+                "SELECT token, created_at, last_touched_at FROM sessions \
+                 WHERE user_id = ? AND expires_at > ? \
+                 ORDER BY last_touched_at DESC",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![user_id, now], |row| {
+                    Ok(SessionListRow {
+                        token: row.get(0)?,
+                        created_at: row.get(1)?,
+                        last_touched_at: row.get(2)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
         })
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -315,6 +350,58 @@ mod tests {
         assert!(repo.validate_and_touch(&token1).await.unwrap().is_none());
         assert!(repo.validate_and_touch(&token2).await.unwrap().is_some());
         assert!(repo.validate_and_touch(&token3).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_for_user_returns_sessions_newest_first() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let t_old = repo.create(&user_id).await.unwrap();
+        let t_mid = repo.create(&user_id).await.unwrap();
+        let t_new = repo.create(&user_id).await.unwrap();
+
+        // Stagger last_touched_at.
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET last_touched_at = datetime('now', '-3 days') WHERE token = ?",
+                [&t_old],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE sessions SET last_touched_at = datetime('now', '-1 day') WHERE token = ?",
+                [&t_mid],
+            )
+            .unwrap();
+        }
+
+        let rows = repo.list_for_user(&user_id).await.unwrap();
+        let tokens: Vec<_> = rows.iter().map(|r| r.token.as_str()).collect();
+        assert_eq!(tokens, vec![t_new.as_str(), t_mid.as_str(), t_old.as_str()]);
+    }
+
+    #[tokio::test]
+    async fn test_list_for_user_filters_expired() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let live = repo.create(&user_id).await.unwrap();
+        let dead = repo.create(&user_id).await.unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 minute') WHERE token = ?",
+                [&dead],
+            )
+            .unwrap();
+        }
+
+        let rows = repo.list_for_user(&user_id).await.unwrap();
+        let tokens: Vec<_> = rows.iter().map(|r| r.token.as_str()).collect();
+        assert_eq!(tokens, vec![live.as_str()]);
     }
 
     #[tokio::test]

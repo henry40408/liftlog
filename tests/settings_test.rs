@@ -269,6 +269,109 @@ async fn test_change_password_invalidates_other_sessions() {
 }
 
 #[tokio::test]
+async fn test_settings_page_lists_sessions_with_this_device_marker() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let current_token = session_repo.create(&user.id).await.unwrap();
+    let _other_token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .header(header::COOKIE, format!("session={}", current_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(
+        body.contains("Active Sessions"),
+        "missing Active Sessions heading"
+    );
+    assert!(body.contains("This device"), "missing This device marker");
+    assert!(body.contains("Other device"), "missing Other device row");
+}
+
+#[tokio::test]
+async fn test_logout_others_deletes_siblings_only() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let current_token = session_repo.create(&user.id).await.unwrap();
+    let sibling_token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/logout-others")
+                .header(header::COOKIE, format!("session={}", current_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Sibling is gone, current survives.
+    assert!(
+        session_repo
+            .validate_and_touch(&sibling_token)
+            .await
+            .unwrap()
+            .is_none(),
+        "sibling session should be deleted"
+    );
+    assert!(
+        session_repo
+            .validate_and_touch(&current_token)
+            .await
+            .unwrap()
+            .is_some(),
+        "current session should survive"
+    );
+}
+
+#[tokio::test]
+async fn test_logout_others_form_has_confirm_attr() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(
+        body.contains("onsubmit=\"return confirm("),
+        "logout-others form should carry a confirm() guard"
+    );
+}
+
+#[tokio::test]
 async fn test_change_password_requires_auth() {
     let pool = common::setup_test_db();
     let app = common::create_test_app(pool);
