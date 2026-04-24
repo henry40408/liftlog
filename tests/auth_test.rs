@@ -236,3 +236,182 @@ async fn test_setup_redirects_when_users_exist() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
+
+#[tokio::test]
+async fn test_sliding_session_reissues_cookie_when_throttle_elapsed() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Artificially age last_touched_at so the next request slides expiry.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE sessions SET last_touched_at = datetime('now', '-2 hours') WHERE token = ?",
+            [&token],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should reach the dashboard (no redirect).
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+
+    // And Set-Cookie should have been re-issued with a fresh Max-Age.
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("sliding session should set cookie on touch")
+        .to_str()
+        .unwrap();
+    assert!(set_cookie.starts_with("session="));
+    assert!(set_cookie.contains("Max-Age=604800")); // 7 days in seconds
+}
+
+#[tokio::test]
+async fn test_sliding_session_no_cookie_when_within_throttle() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Fresh session: last_touched_at is ~now, so within throttle.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers().get(header::SET_COOKIE).is_none(),
+        "cookie should NOT be re-issued within throttle window"
+    );
+}
+
+#[tokio::test]
+async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Age the session so the next request triggers a touch.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE sessions SET last_touched_at = datetime('now', '-2 hours') WHERE token = ?",
+            [&token],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Exactly one Set-Cookie for `session=`, and it must be the removal.
+    let session_cookies: Vec<_> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .filter(|s| s.trim_start().starts_with("session="))
+        .collect();
+    assert_eq!(
+        session_cookies.len(),
+        1,
+        "logout should emit exactly one session Set-Cookie header, got: {:?}",
+        session_cookies
+    );
+    let only = session_cookies[0];
+    assert!(
+        only.contains("Max-Age=0"),
+        "logout cookie should be the removal (Max-Age=0), got: {}",
+        only
+    );
+}
+
+#[tokio::test]
+async fn test_expired_session_redirects_to_login() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+            [&token],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
+}
+
+#[tokio::test]
+async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/");
+}

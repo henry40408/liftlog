@@ -35,6 +35,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "009_add_workout_share_token.sql",
         include_str!("../migrations/009_add_workout_share_token.sql"),
     ),
+    (
+        "010_rebuild_sessions_with_last_touched_at.sql",
+        include_str!("../migrations/010_rebuild_sessions_with_last_touched_at.sql"),
+    ),
 ];
 
 /// Run all pending migrations on the database pool.

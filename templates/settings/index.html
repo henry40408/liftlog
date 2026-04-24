@@ -36,6 +36,38 @@
         <button type="submit">Change Password</button>
     </form>
 
+    <h2>Active Sessions</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Device</th>
+                <th>Last active</th>
+                <th>Signed in</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sessions %}
+            <tr>
+                <td>
+                    {% if s.token == current_token %}
+                    <strong>This device</strong>
+                    {% else %}
+                    Other device
+                    {% endif %}
+                </td>
+                <td>{{ s.last_touched_at.format("%Y-%m-%d %H:%M UTC") }}</td>
+                <td>{{ s.created_at.format("%Y-%m-%d %H:%M UTC") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <form method="post" action="/settings/logout-others"
+          onsubmit="return confirm('Log out of all other devices?');"
+          style="margin-top: var(--sp-4);">
+        <button type="submit">Log out all other devices</button>
+    </form>
+
     <h2>Application Info</h2>
     <table class="data-table">
         <tbody>
