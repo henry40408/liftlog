@@ -140,38 +140,6 @@ impl IntoResponse for AuthRedirect {
     }
 }
 
-// Optional auth - doesn't redirect, just returns None if not logged in
-pub struct OptionalAuthUser(pub Option<AuthUser>);
-
-impl<S> FromRequestParts<S> for OptionalAuthUser
-where
-    S: Send + Sync,
-{
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Some(validated) = parts.extensions.get::<ValidatedSession>().cloned() else {
-            return Ok(OptionalAuthUser(None));
-        };
-
-        let Extension(user_repo) = Extension::<UserRepository>::from_request_parts(parts, state)
-            .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Session error"))?;
-
-        let user = match user_repo.find_by_id(&validated.user_id).await {
-            Ok(Some(u)) => u,
-            _ => return Ok(OptionalAuthUser(None)),
-        };
-
-        Ok(OptionalAuthUser(Some(AuthUser {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            session_token: validated.session_token,
-        })))
-    }
-}
-
 // Admin user extractor - requires admin role, returns 403 if not admin
 #[derive(Clone, Debug)]
 pub struct AdminUser(pub AuthUser);

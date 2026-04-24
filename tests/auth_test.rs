@@ -391,3 +391,27 @@ async fn test_expired_session_redirects_to_login() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
+
+#[tokio::test]
+async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
+    let token = session_repo.create(&user.id).await.unwrap();
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .header(header::COOKIE, format!("session={}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/");
+}

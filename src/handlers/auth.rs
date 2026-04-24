@@ -1,13 +1,14 @@
 use askama::Template;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Request, State},
     response::{Html, IntoResponse, Redirect, Response},
     Form,
 };
 use axum_extra::extract::CookieJar;
 
 use crate::error::{AppError, Result};
-use crate::middleware::{auth::OptionalAuthUser, AdminUser, AuthUser};
+use crate::middleware::auth::ValidatedSession;
+use crate::middleware::{AdminUser, AuthUser};
 use crate::models::{CreateUser, LoginCredentials, User, UserRole};
 use crate::repositories::{SessionRepository, UserRepository};
 use crate::session::{create_session_cookie, remove_session_cookie};
@@ -47,12 +48,10 @@ struct UsersListTemplate {
 }
 
 // Handlers
-pub async fn login_page(
-    State(state): State<AuthState>,
-    OptionalAuthUser(auth_user): OptionalAuthUser,
-) -> Result<Response> {
-    // Redirect to dashboard if already logged in
-    if auth_user.is_some() {
+pub async fn login_page(State(state): State<AuthState>, request: Request) -> Result<Response> {
+    // Redirect to dashboard if already logged in (sliding_session_middleware
+    // injects ValidatedSession into request extensions when the cookie is valid).
+    if request.extensions().get::<ValidatedSession>().is_some() {
         return Ok(Redirect::to("/").into_response());
     }
 
