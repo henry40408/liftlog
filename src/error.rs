@@ -91,3 +91,24 @@ impl IntoResponse for AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn askama_error_converts_to_internal() {
+        let err: AppError = askama::Error::Fmt.into();
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn join_error_converts_to_internal() {
+        let handle: tokio::task::JoinHandle<()> = tokio::task::spawn(async {
+            panic!("intentional panic for test");
+        });
+        let join_err = handle.await.expect_err("join must fail after panic");
+        let app_err: AppError = join_err.into();
+        assert!(matches!(app_err, AppError::Internal(_)));
+    }
+}
