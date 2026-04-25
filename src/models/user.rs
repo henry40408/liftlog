@@ -23,7 +23,14 @@ impl UserRole {
     pub fn parse(s: &str) -> Self {
         match s {
             "admin" => UserRole::Admin,
-            _ => UserRole::User,
+            "user" => UserRole::User,
+            other => {
+                tracing::warn!(
+                    role = other,
+                    "unknown user role in DB; defaulting to UserRole::User",
+                );
+                UserRole::User
+            }
         }
     }
 

@@ -23,7 +23,6 @@ pub enum AppError {
     Forbidden(String),
 
     #[error("Bad request: {0}")]
-    #[allow(dead_code)]
     BadRequest(String),
 
     #[error("Validation error: {0}")]
@@ -35,6 +34,18 @@ pub enum AppError {
 
     #[error("Password hash error")]
     PasswordHash,
+}
+
+impl From<askama::Error> for AppError {
+    fn from(err: askama::Error) -> Self {
+        AppError::Internal(err.to_string())
+    }
+}
+
+impl From<tokio::task::JoinError> for AppError {
+    fn from(err: tokio::task::JoinError) -> Self {
+        AppError::Internal(err.to_string())
+    }
 }
 
 impl IntoResponse for AppError {

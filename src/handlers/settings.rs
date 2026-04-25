@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::repositories::{SessionListRow, SessionRepository, UserRepository};
 use crate::version::GIT_VERSION;
@@ -32,29 +32,27 @@ struct SettingsTemplate {
     error: Option<String>,
     success: Option<String>,
     sessions: Vec<SessionListRow>,
-    current_token: String,
 }
 
-fn render_settings(template: SettingsTemplate) -> Result<Response> {
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+async fn render_page(
+    state: &SettingsState,
+    auth_user: AuthUser,
+    error: Option<String>,
+    success: Option<String>,
+) -> Result<Response> {
+    let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
+    let template = SettingsTemplate {
+        user: auth_user,
+        git_version: GIT_VERSION,
+        error,
+        success,
+        sessions,
+    };
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn index(State(state): State<SettingsState>, auth_user: AuthUser) -> Result<Response> {
-    let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
-    let current_token = auth_user.session_token.clone();
-    render_settings(SettingsTemplate {
-        user: auth_user,
-        git_version: GIT_VERSION,
-        error: None,
-        success: None,
-        sessions,
-        current_token,
-    })
+    render_page(&state, auth_user, None, None).await
 }
 
 pub async fn change_password(
@@ -62,74 +60,50 @@ pub async fn change_password(
     auth_user: AuthUser,
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
-    let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
-    let current_token = auth_user.session_token.clone();
+    let validation_error = if form.new_password != form.confirm_password {
+        Some("New passwords do not match")
+    } else if form.new_password.len() < 6 {
+        Some("New password must be at least 6 characters")
+    } else {
+        None
+    };
 
-    // Validate: passwords match
-    if form.new_password != form.confirm_password {
-        return render_settings(SettingsTemplate {
-            user: auth_user,
-            git_version: GIT_VERSION,
-            error: Some("New passwords do not match".to_string()),
-            success: None,
-            sessions,
-            current_token,
-        });
+    if let Some(message) = validation_error {
+        return render_page(&state, auth_user, Some(message.to_string()), None).await;
     }
 
-    // Validate: minimum length
-    if form.new_password.len() < 6 {
-        return render_settings(SettingsTemplate {
-            user: auth_user,
-            git_version: GIT_VERSION,
-            error: Some("New password must be at least 6 characters".to_string()),
-            success: None,
-            sessions,
-            current_token,
-        });
-    }
-
-    // Verify current password
     let verified = state
         .user_repo
         .verify_password(&auth_user.username, &form.current_password)
         .await?;
 
     if verified.is_none() {
-        return render_settings(SettingsTemplate {
-            user: auth_user,
-            git_version: GIT_VERSION,
-            error: Some("Current password is incorrect".to_string()),
-            success: None,
-            sessions,
-            current_token,
-        });
+        return render_page(
+            &state,
+            auth_user,
+            Some("Current password is incorrect".to_string()),
+            None,
+        )
+        .await;
     }
 
-    // Change password
     state
         .user_repo
         .change_password(&auth_user.id, &form.new_password)
         .await?;
 
-    // Invalidate all other sessions
     state
         .session_repo
         .delete_all_for_user_except(&auth_user.id, &auth_user.session_token)
         .await?;
 
-    // Reload sessions so the rendered list reflects the just-revoked siblings.
-    let fresh_sessions = state.session_repo.list_for_user(&auth_user.id).await?;
-    render_settings(SettingsTemplate {
-        user: auth_user,
-        git_version: GIT_VERSION,
-        error: None,
-        success: Some(
-            "Password changed successfully. All other sessions have been logged out.".to_string(),
-        ),
-        sessions: fresh_sessions,
-        current_token,
-    })
+    render_page(
+        &state,
+        auth_user,
+        None,
+        Some("Password changed successfully. All other sessions have been logged out.".to_string()),
+    )
+    .await
 }
 
 pub async fn logout_others(
@@ -141,14 +115,11 @@ pub async fn logout_others(
         .delete_all_for_user_except(&auth_user.id, &auth_user.session_token)
         .await?;
 
-    let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
-    let current_token = auth_user.session_token.clone();
-    render_settings(SettingsTemplate {
-        user: auth_user,
-        git_version: GIT_VERSION,
-        error: None,
-        success: Some("Logged out of all other devices.".to_string()),
-        sessions,
-        current_token,
-    })
+    render_page(
+        &state,
+        auth_user,
+        None,
+        Some("Logged out of all other devices.".to_string()),
+    )
+    .await
 }

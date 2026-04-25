@@ -5,7 +5,7 @@ use axum::{
     Form,
 };
 
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::models::exercise::{ExerciseCategory, CATEGORIES};
 use crate::models::{CreateExercise, Exercise, UpdateExercise};
@@ -53,12 +53,7 @@ pub async fn list(State(state): State<ExercisesState>, auth_user: AuthUser) -> R
         categories: CATEGORIES,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
@@ -68,12 +63,7 @@ pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
         error: None,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn create(
@@ -87,12 +77,7 @@ pub async fn create(
             categories: CATEGORIES,
             error: Some("Exercise name is required".to_string()),
         };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
+        return Ok(Html(template.render()?).into_response());
     }
 
     state
@@ -108,17 +93,7 @@ pub async fn edit_page(
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
-    let exercise = state
-        .exercise_repo
-        .find_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
-
-    if exercise.user_id != auth_user.id {
-        return Err(AppError::Forbidden(
-            "You can only edit your own exercises".to_string(),
-        ));
-    }
+    let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
     let template = EditExerciseTemplate {
         user: auth_user,
@@ -127,12 +102,7 @@ pub async fn edit_page(
         error: None,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn update(
@@ -141,17 +111,7 @@ pub async fn update(
     Path(id): Path<String>,
     Form(form): Form<UpdateExercise>,
 ) -> Result<Response> {
-    let exercise = state
-        .exercise_repo
-        .find_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
-
-    if exercise.user_id != auth_user.id {
-        return Err(AppError::Forbidden(
-            "You can only edit your own exercises".to_string(),
-        ));
-    }
+    let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
     if form.name.trim().is_empty() {
         let template = EditExerciseTemplate {
@@ -160,12 +120,7 @@ pub async fn update(
             categories: CATEGORIES,
             error: Some("Exercise name is required".to_string()),
         };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
+        return Ok(Html(template.render()?).into_response());
     }
 
     state
@@ -181,17 +136,7 @@ pub async fn delete(
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
-    let exercise = state
-        .exercise_repo
-        .find_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
-
-    if exercise.user_id != auth_user.id {
-        return Err(AppError::Forbidden(
-            "You can only delete your own exercises".to_string(),
-        ));
-    }
+    state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
     state.exercise_repo.delete(&id, &auth_user.id).await?;
 

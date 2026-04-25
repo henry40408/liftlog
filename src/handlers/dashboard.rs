@@ -4,7 +4,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::models::WorkoutSession;
 use crate::repositories::WorkoutRepository;
@@ -50,10 +50,5 @@ pub async fn index(State(state): State<DashboardState>, auth_user: AuthUser) -> 
         recent_workouts,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
