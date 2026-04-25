@@ -27,8 +27,7 @@ impl UserRepository {
             let count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
             Ok(count)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     #[allow(dead_code)]
@@ -41,8 +40,7 @@ impl UserRepository {
             let result = stmt.query_row([&id], User::from_row).optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn find_by_username(&self, username: &str) -> Result<Option<User>> {
@@ -54,8 +52,7 @@ impl UserRepository {
             let result = stmt.query_row([&username], User::from_row).optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn find_all(&self) -> Result<Vec<User>> {
@@ -68,8 +65,7 @@ impl UserRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(users)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn create(&self, username: &str, password: &str, role: UserRole) -> Result<User> {
@@ -102,8 +98,7 @@ impl UserRepository {
             )?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))??;
+        .await??;
 
         Ok(user)
     }
@@ -121,8 +116,7 @@ impl UserRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn verify_password(&self, username: &str, password: &str) -> Result<Option<User>> {
@@ -148,8 +142,7 @@ impl UserRepository {
             let rows = conn.execute("DELETE FROM users WHERE id = ?", [&id])?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn update_role(&self, id: &str, role: UserRole) -> Result<bool> {
@@ -163,8 +156,7 @@ impl UserRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 }
 

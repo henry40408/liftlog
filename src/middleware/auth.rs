@@ -107,15 +107,15 @@ pub async fn sliding_session_middleware(
         // Set-Cookie (e.g. logout's removal cookie). Appending after it
         // would let the refreshed cookie override the removal in the
         // browser.
+        let cookie_prefix = format!("{}=", crate::session::SESSION_COOKIE_NAME);
         let already_set = response
             .headers()
             .get_all(axum::http::header::SET_COOKIE)
             .iter()
             .any(|v| {
-                v.to_str().ok().is_some_and(|s| {
-                    s.trim_start()
-                        .starts_with(&format!("{}=", crate::session::SESSION_COOKIE_NAME))
-                })
+                v.to_str()
+                    .ok()
+                    .is_some_and(|s| s.trim_start().starts_with(&cookie_prefix))
             });
         if !already_set {
             let cookie = create_session_cookie(&tok);

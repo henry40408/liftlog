@@ -49,6 +49,23 @@ async fn main() -> anyhow::Result<()> {
     let workout_repo = WorkoutRepository::new(pool.clone());
     let session_repo = SessionRepository::new(pool.clone());
 
+    // Periodic background sweep of expired session rows. validate_and_touch
+    // already lazily deletes stale rows it sees, but orphans (sessions never
+    // revisited) need this sweep to avoid unbounded table growth.
+    {
+        let session_repo = session_repo.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(e) = session_repo.cleanup_expired().await {
+                    tracing::warn!(error = ?e, "session cleanup_expired failed");
+                }
+            }
+        });
+    }
+
     // Create handler states
     let auth_state = auth::AuthState {
         user_repo: user_repo.clone(),

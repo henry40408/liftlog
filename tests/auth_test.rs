@@ -214,6 +214,64 @@ async fn test_setup_creates_admin_user() {
 }
 
 #[tokio::test]
+async fn test_setup_rejects_empty_username() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/setup")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=&password=adminpass123"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Validation failure re-renders the setup form (200 OK).
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("Username is required"));
+
+    // No user should have been created.
+    let user_repo = liftlog::repositories::UserRepository::new(pool);
+    let count = user_repo.count().await.unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn test_setup_rejects_short_password() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/setup")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=admin&password=short"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("Password must be at least 6 characters"));
+
+    let user_repo = liftlog::repositories::UserRepository::new(pool);
+    let count = user_repo.count().await.unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
 async fn test_setup_redirects_when_users_exist() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());

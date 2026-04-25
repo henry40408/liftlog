@@ -50,9 +50,21 @@ impl WorkoutRepository {
             )?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))??;
+        .await??;
 
+        Ok(session)
+    }
+
+    /// Fetch a session owned by `user_id`. Returns `NotFound` for both
+    /// missing rows and rows belonging to another user (don't leak existence).
+    pub async fn find_owned_session(&self, id: &str, user_id: &str) -> Result<WorkoutSession> {
+        let session = self
+            .find_session_by_id(id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+        if session.user_id != user_id {
+            return Err(AppError::NotFound("Workout not found".to_string()));
+        }
         Ok(session)
     }
 
@@ -65,8 +77,7 @@ impl WorkoutRepository {
             let result = stmt.query_row([&id], WorkoutSession::from_row).optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     #[allow(dead_code)]
@@ -82,8 +93,7 @@ impl WorkoutRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(sessions)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn find_sessions_by_user_paginated(
@@ -104,8 +114,7 @@ impl WorkoutRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(sessions)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn count_sessions_by_user(&self, user_id: &str) -> Result<i64> {
@@ -120,8 +129,7 @@ impl WorkoutRepository {
             )?;
             Ok(count)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn update_session(
@@ -151,8 +159,7 @@ impl WorkoutRepository {
             };
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn delete_session(&self, id: &str, user_id: &str) -> Result<bool> {
@@ -167,8 +174,7 @@ impl WorkoutRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     // Workout Logs
@@ -214,8 +220,7 @@ impl WorkoutRepository {
             )?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))??;
+        .await??;
 
         Ok(log)
     }
@@ -252,8 +257,7 @@ impl WorkoutRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     #[allow(dead_code)]
@@ -266,8 +270,7 @@ impl WorkoutRepository {
             let result = stmt.query_row([&id], WorkoutLog::from_row).optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn delete_log(&self, id: &str, session_id: &str) -> Result<bool> {
@@ -282,8 +285,7 @@ impl WorkoutRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn update_log(
@@ -305,8 +307,7 @@ impl WorkoutRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn get_next_set_number(&self, session_id: &str, exercise_id: &str) -> Result<i32> {
@@ -325,8 +326,7 @@ impl WorkoutRepository {
                 .flatten();
             Ok(result.map(|n| n + 1).unwrap_or(1))
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     // Dynamic Personal Records
@@ -356,8 +356,7 @@ impl WorkoutRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(prs)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Get the max weight PR for a specific exercise
@@ -385,8 +384,7 @@ impl WorkoutRepository {
                 .optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     // Statistics
@@ -403,8 +401,7 @@ impl WorkoutRepository {
             )?;
             Ok(count)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn count_workouts_this_month(&self, user_id: &str) -> Result<i64> {
@@ -420,8 +417,7 @@ impl WorkoutRepository {
             )?;
             Ok(count)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn get_total_volume_this_week(&self, user_id: &str) -> Result<f64> {
@@ -442,8 +438,7 @@ impl WorkoutRepository {
                 .flatten();
             Ok(result.unwrap_or(0.0))
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Get exercise history with dynamically computed is_pr
@@ -481,8 +476,7 @@ impl WorkoutRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     // Share functionality
@@ -507,8 +501,7 @@ impl WorkoutRepository {
                 Err(AppError::NotFound("Workout not found".to_string()))
             }
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Revoke share token for a workout session
@@ -525,8 +518,7 @@ impl WorkoutRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Find a workout session by share token
@@ -541,8 +533,7 @@ impl WorkoutRepository {
                 .optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Find logs by session for sharing (without PR calculation)
@@ -568,8 +559,7 @@ impl WorkoutRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(logs)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 }
 

@@ -19,7 +19,6 @@ pub struct AuthState {
     pub session_repo: SessionRepository,
 }
 
-// Templates
 #[derive(Template)]
 #[template(path = "auth/login.html")]
 struct LoginTemplate {
@@ -44,30 +43,33 @@ struct NewUserTemplate {
 struct UsersListTemplate {
     user: AuthUser,
     users: Vec<User>,
-    is_admin: bool,
 }
 
-// Handlers
+/// Returns the validation error message, or `None` if the form is valid.
+fn validate_credentials(form: &CreateUser) -> Option<&'static str> {
+    if form.username.trim().is_empty() {
+        Some("Username is required")
+    } else if form.password.len() < 6 {
+        Some("Password must be at least 6 characters")
+    } else {
+        None
+    }
+}
+
 pub async fn login_page(State(state): State<AuthState>, request: Request) -> Result<Response> {
-    // Redirect to dashboard if already logged in (sliding_session_middleware
-    // injects ValidatedSession into request extensions when the cookie is valid).
+    // sliding_session_middleware injects ValidatedSession into request
+    // extensions when the cookie is valid; bounce already-logged-in users.
     if request.extensions().get::<ValidatedSession>().is_some() {
         return Ok(Redirect::to("/").into_response());
     }
 
-    // Check if any users exist
     let user_count = state.user_repo.count().await?;
     if user_count == 0 {
         return Ok(Redirect::to("/auth/setup").into_response());
     }
 
     let template = LoginTemplate { error: None };
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn login_submit(
@@ -83,11 +85,6 @@ pub async fn login_submit(
     match user {
         Some(user) => {
             let token = state.session_repo.create(&user.id).await?;
-            // Lazily clean up expired sessions
-            let repo = state.session_repo.clone();
-            tokio::spawn(async move {
-                let _ = repo.cleanup_expired().await;
-            });
             let jar = jar.add(create_session_cookie(&token));
             Ok((jar, Redirect::to("/")).into_response())
         }
@@ -95,30 +92,19 @@ pub async fn login_submit(
             let template = LoginTemplate {
                 error: Some("Invalid username or password".to_string()),
             };
-            Ok(Html(
-                template
-                    .render()
-                    .map_err(|e| AppError::Internal(e.to_string()))?,
-            )
-            .into_response())
+            Ok(Html(template.render()?).into_response())
         }
     }
 }
 
 pub async fn setup_page(State(state): State<AuthState>) -> Result<Response> {
-    // Only allow setup if no users exist
     let user_count = state.user_repo.count().await?;
     if user_count > 0 {
         return Ok(Redirect::to("/auth/login").into_response());
     }
 
     let template = SetupTemplate { error: None };
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn setup_submit(
@@ -126,44 +112,23 @@ pub async fn setup_submit(
     jar: CookieJar,
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
-    // Only allow setup if no users exist
     let user_count = state.user_repo.count().await?;
     if user_count > 0 {
         return Ok(Redirect::to("/auth/login").into_response());
     }
 
-    // Validate input
-    if form.username.trim().is_empty() {
+    if let Some(message) = validate_credentials(&form) {
         let template = SetupTemplate {
-            error: Some("Username is required".to_string()),
+            error: Some(message.to_string()),
         };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
+        return Ok(Html(template.render()?).into_response());
     }
 
-    if form.password.len() < 6 {
-        let template = SetupTemplate {
-            error: Some("Password must be at least 6 characters".to_string()),
-        };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
-    }
-
-    // Create the first user as admin
     let user = state
         .user_repo
         .create(&form.username, &form.password, UserRole::Admin)
         .await?;
 
-    // Auto login — create DB session
     let token = state.session_repo.create(&user.id).await?;
     let jar = jar.add(create_session_cookie(&token));
 
@@ -185,12 +150,7 @@ pub async fn new_user_page(admin_user: AdminUser) -> Result<Response> {
         user: admin_user.0,
         error: None,
     };
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn new_user_submit(
@@ -198,34 +158,14 @@ pub async fn new_user_submit(
     admin_user: AdminUser,
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
-    // Validate input
-    if form.username.trim().is_empty() {
+    if let Some(message) = validate_credentials(&form) {
         let template = NewUserTemplate {
             user: admin_user.0,
-            error: Some("Username is required".to_string()),
+            error: Some(message.to_string()),
         };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
+        return Ok(Html(template.render()?).into_response());
     }
 
-    if form.password.len() < 6 {
-        let template = NewUserTemplate {
-            user: admin_user.0,
-            error: Some("Password must be at least 6 characters".to_string()),
-        };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
-    }
-
-    // Check if username already exists
     if state
         .user_repo
         .find_by_username(&form.username)
@@ -236,15 +176,9 @@ pub async fn new_user_submit(
             user: admin_user.0,
             error: Some("Username already exists".to_string()),
         };
-        return Ok(Html(
-            template
-                .render()
-                .map_err(|e| AppError::Internal(e.to_string()))?,
-        )
-        .into_response());
+        return Ok(Html(template.render()?).into_response());
     }
 
-    // Create user with regular user role
     state
         .user_repo
         .create(&form.username, &form.password, UserRole::User)
@@ -255,18 +189,11 @@ pub async fn new_user_submit(
 
 pub async fn users_list(State(state): State<AuthState>, auth_user: AuthUser) -> Result<Response> {
     let users = state.user_repo.find_all().await?;
-    let is_admin = auth_user.is_admin();
     let template = UsersListTemplate {
         user: auth_user,
         users,
-        is_admin,
     };
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn delete_user(
@@ -274,7 +201,6 @@ pub async fn delete_user(
     admin_user: AdminUser,
     Path(user_id): Path<String>,
 ) -> Result<Response> {
-    // Prevent self-delete
     if admin_user.id == user_id {
         return Err(AppError::BadRequest(
             "Cannot delete your own account".to_string(),

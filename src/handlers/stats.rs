@@ -73,12 +73,7 @@ pub async fn index(State(state): State<StatsState>, auth_user: AuthUser) -> Resu
         prs,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn exercise_stats(
@@ -109,12 +104,7 @@ pub async fn exercise_stats(
         pr,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn prs_list(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
@@ -128,10 +118,5 @@ pub async fn prs_list(State(state): State<StatsState>, auth_user: AuthUser) -> R
         prs,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }

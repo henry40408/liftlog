@@ -24,8 +24,7 @@ impl ExerciseRepository {
             let result = stmt.query_row([&id], Exercise::from_row).optional()?;
             Ok(result)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     #[allow(dead_code)]
@@ -39,8 +38,7 @@ impl ExerciseRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     #[allow(dead_code)]
@@ -56,8 +54,22 @@ impl ExerciseRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
+    }
+
+    /// Fetch an exercise owned by `user_id`. Returns `NotFound` if no such row,
+    /// `Forbidden` if it exists but belongs to another user.
+    pub async fn find_owned(&self, id: &str, user_id: &str) -> Result<Exercise> {
+        let exercise = self
+            .find_by_id(id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
+        if exercise.user_id != user_id {
+            return Err(AppError::Forbidden(
+                "You can only modify your own exercises".to_string(),
+            ));
+        }
+        Ok(exercise)
     }
 
     pub async fn find_available_for_user(&self, user_id: &str) -> Result<Vec<Exercise>> {
@@ -72,25 +84,7 @@ impl ExerciseRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(exercises)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-    }
-
-    #[allow(dead_code)]
-    pub async fn find_user_custom(&self, user_id: &str) -> Result<Vec<Exercise>> {
-        let pool = self.pool.clone();
-        let user_id = user_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt =
-                conn.prepare("SELECT * FROM exercises WHERE user_id = ? ORDER BY category, name")?;
-            let exercises = stmt
-                .query_map([&user_id], Exercise::from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(exercises)
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn create(&self, name: &str, category: &str, user_id: &str) -> Result<Exercise> {
@@ -118,8 +112,7 @@ impl ExerciseRepository {
             )?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))??;
+        .await??;
 
         Ok(exercise)
     }
@@ -144,8 +137,7 @@ impl ExerciseRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     pub async fn delete(&self, id: &str, user_id: &str) -> Result<bool> {
@@ -160,8 +152,7 @@ impl ExerciseRepository {
             )?;
             Ok(rows > 0)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 }
 

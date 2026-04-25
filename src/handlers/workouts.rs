@@ -23,7 +23,6 @@ pub struct WorkoutsState {
     pub user_repo: UserRepository,
 }
 
-// Templates
 #[derive(Template)]
 #[template(path = "workouts/list.html")]
 struct WorkoutsListTemplate {
@@ -80,13 +79,11 @@ struct EditLogTemplate {
     error: Option<String>,
 }
 
-// Query params
 #[derive(Deserialize)]
 pub struct ListQuery {
     page: Option<i64>,
 }
 
-// Handlers
 pub async fn list(
     State(state): State<WorkoutsState>,
     auth_user: AuthUser,
@@ -114,12 +111,7 @@ pub async fn list(
         total_pages,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
@@ -131,12 +123,7 @@ pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
         error: None,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn create(
@@ -159,14 +146,8 @@ pub async fn show(
 ) -> Result<Response> {
     let workout = state
         .workout_repo
-        .find_session_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
-
-    // Verify ownership
-    if workout.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
+        .find_owned_session(&id, &auth_user.id)
+        .await?;
 
     let logs = state
         .workout_repo
@@ -197,12 +178,7 @@ pub async fn show(
         error: None,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn edit_page(
@@ -212,13 +188,8 @@ pub async fn edit_page(
 ) -> Result<Response> {
     let workout = state
         .workout_repo
-        .find_session_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
-
-    if workout.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
+        .find_owned_session(&id, &auth_user.id)
+        .await?;
 
     let template = EditWorkoutTemplate {
         user: auth_user,
@@ -226,12 +197,7 @@ pub async fn edit_page(
         error: None,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 #[derive(Deserialize)]
@@ -266,31 +232,22 @@ pub async fn delete(
     Ok(Redirect::to("/workouts").into_response())
 }
 
-// Workout Logs
 pub async fn add_log(
     State(state): State<WorkoutsState>,
     auth_user: AuthUser,
     Path(session_id): Path<String>,
     Form(form): Form<CreateWorkoutLog>,
 ) -> Result<Response> {
-    // Verify session ownership
-    let session = state
+    state
         .workout_repo
-        .find_session_by_id(&session_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+        .find_owned_session(&session_id, &auth_user.id)
+        .await?;
 
-    if session.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
-
-    // Get next set number
     let set_number = state
         .workout_repo
         .get_next_set_number(&session_id, &form.exercise_id)
         .await?;
 
-    // Create the log (PR is computed dynamically)
     state
         .workout_repo
         .create_log(
@@ -311,16 +268,10 @@ pub async fn delete_log(
     auth_user: AuthUser,
     Path((session_id, log_id)): Path<(String, String)>,
 ) -> Result<Response> {
-    // Verify session ownership
-    let session = state
+    state
         .workout_repo
-        .find_session_by_id(&session_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
-
-    if session.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
+        .find_owned_session(&session_id, &auth_user.id)
+        .await?;
 
     state.workout_repo.delete_log(&log_id, &session_id).await?;
 
@@ -332,30 +283,21 @@ pub async fn edit_log_page(
     auth_user: AuthUser,
     Path((session_id, log_id)): Path<(String, String)>,
 ) -> Result<Response> {
-    // Verify session ownership
     let session = state
         .workout_repo
-        .find_session_by_id(&session_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
+        .find_owned_session(&session_id, &auth_user.id)
+        .await?;
 
-    if session.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
-
-    // Get the log
     let log = state
         .workout_repo
         .find_log_by_id(&log_id)
         .await?
         .ok_or_else(|| AppError::NotFound("Log not found".to_string()))?;
 
-    // Verify log belongs to this session
     if log.session_id != session_id {
         return Err(AppError::NotFound("Log not found".to_string()));
     }
 
-    // Get exercise name
     let exercise = state
         .exercise_repo
         .find_by_id(&log.exercise_id)
@@ -370,12 +312,7 @@ pub async fn edit_log_page(
         error: None,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }
 
 pub async fn update_log(
@@ -384,16 +321,10 @@ pub async fn update_log(
     Path((session_id, log_id)): Path<(String, String)>,
     Form(form): Form<UpdateWorkoutLog>,
 ) -> Result<Response> {
-    // Verify session ownership
-    let session = state
+    state
         .workout_repo
-        .find_session_by_id(&session_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
-
-    if session.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
+        .find_owned_session(&session_id, &auth_user.id)
+        .await?;
 
     state
         .workout_repo
@@ -403,23 +334,15 @@ pub async fn update_log(
     Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
 }
 
-// Share functionality
-
 pub async fn share_workout(
     State(state): State<WorkoutsState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
-    // Verify session ownership
-    let session = state
+    state
         .workout_repo
-        .find_session_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
-
-    if session.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
+        .find_owned_session(&id, &auth_user.id)
+        .await?;
 
     state
         .workout_repo
@@ -434,16 +357,10 @@ pub async fn revoke_share(
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
-    // Verify session ownership
-    let session = state
+    state
         .workout_repo
-        .find_session_by_id(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Workout not found".to_string()))?;
-
-    if session.user_id != auth_user.id {
-        return Err(AppError::NotFound("Workout not found".to_string()));
-    }
+        .find_owned_session(&id, &auth_user.id)
+        .await?;
 
     state
         .workout_repo
@@ -480,10 +397,5 @@ pub async fn view_shared(
         owner_username: owner.username,
     };
 
-    Ok(Html(
-        template
-            .render()
-            .map_err(|e| AppError::Internal(e.to_string()))?,
-    )
-    .into_response())
+    Ok(Html(template.render()?).into_response())
 }

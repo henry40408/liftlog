@@ -46,11 +46,12 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
 /// This function tracks which migrations have been applied in a `_migrations` table
 /// and only runs migrations that haven't been applied yet.
 pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
+    use std::collections::HashSet;
+
     tracing::info!("Running migrations...");
 
     let conn = pool.get()?;
 
-    // Create migrations tracking table if it doesn't exist
     conn.execute(
         "CREATE TABLE IF NOT EXISTS _migrations (
             name TEXT PRIMARY KEY,
@@ -59,17 +60,16 @@ pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
         [],
     )?;
 
-    for (filename, sql) in MIGRATIONS {
-        // Check if migration was already applied
-        let already_applied: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM _migrations WHERE name = ?",
-                [filename],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
+    let applied: HashSet<String> = {
+        let mut stmt = conn.prepare("SELECT name FROM _migrations")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<HashSet<String>>>()?;
+        rows
+    };
 
-        if already_applied {
+    for (filename, sql) in MIGRATIONS {
+        if applied.contains(*filename) {
             tracing::debug!("Skipping already applied migration: {}", filename);
             continue;
         }
@@ -77,8 +77,6 @@ pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
         tracing::info!("Running migration: {}", filename);
 
         conn.execute_batch(sql)?;
-
-        // Record that migration was applied
         conn.execute("INSERT INTO _migrations (name) VALUES (?)", [filename])?;
     }
 
@@ -99,4 +97,37 @@ pub fn run_migrations_for_tests(pool: &DbPool) -> Result<(), Box<dyn std::error:
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::create_memory_pool;
+
+    #[test]
+    fn run_migrations_creates_tracking_table_and_records_each_migration() {
+        let pool = create_memory_pool().expect("memory pool");
+        run_migrations(&pool).expect("first run");
+
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count as usize, MIGRATIONS.len());
+    }
+
+    #[test]
+    fn run_migrations_is_idempotent() {
+        let pool = create_memory_pool().expect("memory pool");
+        run_migrations(&pool).expect("first run");
+        // Second invocation must not re-apply or error; the HashSet path
+        // should short-circuit each migration as already applied.
+        run_migrations(&pool).expect("second run");
+
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count as usize, MIGRATIONS.len());
+    }
 }

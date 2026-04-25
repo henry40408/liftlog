@@ -48,8 +48,7 @@ impl SessionRepository {
             )?;
             Ok(token_clone)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Validate the session for a given token and, if the throttle window has
@@ -100,8 +99,7 @@ impl SessionRepository {
                 new_expires_at: None,
             }))
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Delete a single session (logout).
@@ -114,8 +112,7 @@ impl SessionRepository {
             conn.execute("DELETE FROM sessions WHERE token = ?", [&token])?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Delete all sessions for a user except the given token (for password change).
@@ -132,8 +129,7 @@ impl SessionRepository {
             )?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// List all unexpired sessions for a user, newest-touched first.
@@ -160,8 +156,7 @@ impl SessionRepository {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 
     /// Batch delete all expired sessions.
@@ -177,8 +172,7 @@ impl SessionRepository {
             )?;
             Ok(())
         })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
+        .await?
     }
 }
 

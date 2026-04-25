@@ -49,7 +49,7 @@
             {% for s in sessions %}
             <tr>
                 <td>
-                    {% if s.token == current_token %}
+                    {% if s.token == user.session_token %}
                     <strong>This device</strong>
                     {% else %}
                     Other device
