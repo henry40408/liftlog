@@ -8,7 +8,7 @@ use axum_extra::extract::CookieJar;
 
 use crate::error::{AppError, Result};
 use crate::middleware::auth::ValidatedSession;
-use crate::middleware::{AdminUser, AuthUser};
+use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
 use crate::models::{CreateUser, LoginCredentials, User, UserRole};
 use crate::session::{create_session_cookie, remove_session_cookie};
 use crate::state::AppState;
@@ -136,7 +136,11 @@ pub async fn logout(
 ) -> Response {
     let _ = state.session_repo.delete(&auth_user.session_token).await;
     let jar = jar.add(remove_session_cookie());
-    (jar, Redirect::to("/auth/login")).into_response()
+    let mut response = (jar, Redirect::to("/auth/login")).into_response();
+    // Tell sliding_session_middleware not to overwrite the removal cookie
+    // with a refreshed one.
+    response.extensions_mut().insert(SuppressSessionRefresh);
+    response
 }
 
 pub async fn new_user_page(admin_user: AdminUser) -> Result<Response> {

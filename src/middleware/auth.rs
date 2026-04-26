@@ -96,21 +96,13 @@ pub async fn sliding_session_middleware(
     let mut response = next.run(request).await;
 
     if let Some(tok) = should_refresh_cookie {
-        // Skip the refresh if the handler already emitted a `session=...`
-        // Set-Cookie (e.g. logout's removal cookie). Appending after it
-        // would let the refreshed cookie override the removal in the
-        // browser.
-        let cookie_prefix = format!("{}=", crate::session::SESSION_COOKIE_NAME);
-        let already_set = response
-            .headers()
-            .get_all(axum::http::header::SET_COOKIE)
-            .iter()
-            .any(|v| {
-                v.to_str()
-                    .ok()
-                    .is_some_and(|s| s.trim_start().starts_with(&cookie_prefix))
-            });
-        if !already_set {
+        // Skip the refresh if the handler explicitly opted out (e.g. logout,
+        // which emits a removal cookie that must not be overwritten).
+        let suppressed = response
+            .extensions()
+            .get::<SuppressSessionRefresh>()
+            .is_some();
+        if !suppressed {
             let cookie = create_session_cookie(&tok);
             let header_value = cookie
                 .to_string()
@@ -124,6 +116,12 @@ pub async fn sliding_session_middleware(
 
     response
 }
+
+/// Response-extension marker that handlers (e.g. `logout`) insert to tell
+/// `sliding_session_middleware` not to append a refreshed session cookie
+/// to this response.
+#[derive(Clone, Copy, Debug)]
+pub struct SuppressSessionRefresh;
 
 pub struct AuthRedirect;
 
