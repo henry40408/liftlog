@@ -4,15 +4,20 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
+use crate::models::UserRole;
 
 #[derive(Clone)]
 pub struct SessionRepository {
     pool: DbPool,
 }
 
-/// Returned by [`SessionRepository::validate_and_touch`].
+/// Returned by [`SessionRepository::validate_and_touch`]. Carries the full
+/// session+user identity so downstream extractors don't need a second
+/// `users` lookup per request.
 pub struct ValidateAndTouchOutcome {
     pub user_id: String,
+    pub username: String,
+    pub role: UserRole,
     /// `Some(new_expires)` iff this call wrote a new `last_touched_at` /
     /// `expires_at`. `None` means the call landed inside the throttle window.
     pub new_expires_at: Option<chrono::DateTime<Utc>>,
@@ -64,18 +69,35 @@ impl SessionRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
 
-            let row: Option<(String, chrono::DateTime<Utc>, chrono::DateTime<Utc>)> = conn
+            type Row = (
+                String,
+                chrono::DateTime<Utc>,
+                chrono::DateTime<Utc>,
+                String,
+                String,
+            );
+            let row: Option<Row> = conn
                 .query_row(
-                    "SELECT user_id, expires_at, last_touched_at \
-                     FROM sessions WHERE token = ?",
+                    "SELECT s.user_id, s.expires_at, s.last_touched_at, u.username, u.role \
+                     FROM sessions s JOIN users u ON u.id = s.user_id \
+                     WHERE s.token = ?",
                     [&token],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
                 )
                 .optional()?;
 
-            let Some((user_id, expires_at, last_touched_at)) = row else {
+            let Some((user_id, expires_at, last_touched_at, username, role_str)) = row else {
                 return Ok::<_, AppError>(None);
             };
+            let role = UserRole::parse(&role_str);
 
             if expires_at <= now {
                 conn.execute("DELETE FROM sessions WHERE token = ?", [&token])?;
@@ -90,12 +112,16 @@ impl SessionRepository {
                 )?;
                 return Ok(Some(ValidateAndTouchOutcome {
                     user_id,
+                    username,
+                    role,
                     new_expires_at: Some(new_expires),
                 }));
             }
 
             Ok(Some(ValidateAndTouchOutcome {
                 user_id,
+                username,
+                role,
                 new_expires_at: None,
             }))
         })
