@@ -46,15 +46,42 @@ pub async fn create_test_user(
     user_repo.create(username, password, role).await.unwrap()
 }
 
-pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
+pub async fn create_session_token(pool: &DbPool, user: &User) -> String {
     let session_repo = SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
+    session_repo.create(&user.id).await.unwrap()
+}
+
+pub fn cookie_header(token: &str) -> String {
     format!("session={}", token)
+}
+
+pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
+    cookie_header(&create_session_token(pool, user).await)
 }
 
 pub fn extract_cookie_header(set_cookie: &str) -> String {
     // Extract just the cookie name=value part for use in Cookie header
     set_cookie.split(';').next().unwrap_or("").to_string()
+}
+
+#[allow(dead_code)]
+pub async fn age_session_touch(pool: &DbPool, token: &str, hours_ago: u32) {
+    let conn = pool.get().unwrap();
+    let sql = format!(
+        "UPDATE sessions SET last_touched_at = datetime('now', '-{} hours') WHERE token = ?",
+        hours_ago
+    );
+    conn.execute(&sql, [token]).unwrap();
+}
+
+#[allow(dead_code)]
+pub async fn expire_session(pool: &DbPool, token: &str) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+        [token],
+    )
+    .unwrap();
 }
 
 // Test data creation helpers

@@ -301,23 +301,15 @@ async fn test_sliding_session_reissues_cookie_when_throttle_elapsed() {
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
     // Artificially age last_touched_at so the next request slides expiry.
-    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
-    {
-        let conn = pool.get().unwrap();
-        conn.execute(
-            "UPDATE sessions SET last_touched_at = datetime('now', '-2 hours') WHERE token = ?",
-            [&token],
-        )
-        .unwrap();
-    }
+    let token = common::create_session_token(&pool, &user).await;
+    common::age_session_touch(&pool, &token, 2).await;
 
     let app = common::create_test_app(pool);
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/")
-                .header(header::COOKIE, format!("session={}", token))
+                .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -344,15 +336,14 @@ async fn test_sliding_session_no_cookie_when_within_throttle() {
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
     // Fresh session: last_touched_at is ~now, so within throttle.
-    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
+    let token = common::create_session_token(&pool, &user).await;
 
     let app = common::create_test_app(pool);
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/")
-                .header(header::COOKIE, format!("session={}", token))
+                .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -372,16 +363,8 @@ async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
     // Age the session so the next request triggers a touch.
-    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
-    {
-        let conn = pool.get().unwrap();
-        conn.execute(
-            "UPDATE sessions SET last_touched_at = datetime('now', '-2 hours') WHERE token = ?",
-            [&token],
-        )
-        .unwrap();
-    }
+    let token = common::create_session_token(&pool, &user).await;
+    common::age_session_touch(&pool, &token, 2).await;
 
     let app = common::create_test_app(pool);
     let response = app
@@ -389,7 +372,7 @@ async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
             Request::builder()
                 .method("POST")
                 .uri("/auth/logout")
-                .header(header::COOKIE, format!("session={}", token))
+                .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -423,23 +406,15 @@ async fn test_expired_session_redirects_to_login() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
-    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
-    {
-        let conn = pool.get().unwrap();
-        conn.execute(
-            "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
-            [&token],
-        )
-        .unwrap();
-    }
+    let token = common::create_session_token(&pool, &user).await;
+    common::expire_session(&pool, &token).await;
 
     let app = common::create_test_app(pool);
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/")
-                .header(header::COOKIE, format!("session={}", token))
+                .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -455,15 +430,14 @@ async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
-    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
+    let token = common::create_session_token(&pool, &user).await;
 
     let app = common::create_test_app(pool);
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/auth/login")
-                .header(header::COOKIE, format!("session={}", token))
+                .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::empty())
                 .unwrap(),
         )

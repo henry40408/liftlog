@@ -236,7 +236,7 @@ async fn test_change_password_invalidates_other_sessions() {
     let token_current = session_repo.create(&user.id).await.unwrap();
     let token_other = session_repo.create(&user.id).await.unwrap();
 
-    let cookie_header = format!("session={}", token_current);
+    let cookie_header = common::cookie_header(&token_current);
 
     let response = test_app
         .router
@@ -282,7 +282,7 @@ async fn test_settings_page_lists_sessions_with_this_device_marker() {
         .oneshot(
             Request::builder()
                 .uri("/settings")
-                .header(header::COOKIE, format!("session={}", current_token))
+                .header(header::COOKIE, common::cookie_header(&current_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -315,7 +315,7 @@ async fn test_logout_others_deletes_siblings_only() {
             Request::builder()
                 .method("POST")
                 .uri("/settings/logout-others")
-                .header(header::COOKIE, format!("session={}", current_token))
+                .header(header::COOKIE, common::cookie_header(&current_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -348,15 +348,14 @@ async fn test_logout_others_form_has_confirm_attr() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
-    let session_repo = liftlog::repositories::SessionRepository::new(pool.clone());
-    let token = session_repo.create(&user.id).await.unwrap();
+    let token = common::create_session_token(&pool, &user).await;
 
     let app = common::create_test_app(pool);
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/settings")
-                .header(header::COOKIE, format!("session={}", token))
+                .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::empty())
                 .unwrap(),
         )
