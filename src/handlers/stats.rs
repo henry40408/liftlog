@@ -7,13 +7,7 @@ use axum::{
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
 use crate::models::{DynamicPR, Exercise, WorkoutLogWithExercise};
-use crate::repositories::{ExerciseRepository, WorkoutRepository};
-
-#[derive(Clone)]
-pub struct StatsState {
-    pub workout_repo: WorkoutRepository,
-    pub exercise_repo: ExerciseRepository,
-}
+use crate::state::AppState;
 
 #[derive(Template)]
 #[template(path = "stats/index.html")]
@@ -42,7 +36,7 @@ struct PrsTemplate {
     prs: Vec<DynamicPR>,
 }
 
-pub async fn index(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
+pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let workouts_this_week = state
         .workout_repo
         .count_workouts_this_week(&auth_user.id)
@@ -77,7 +71,7 @@ pub async fn index(State(state): State<StatsState>, auth_user: AuthUser) -> Resu
 }
 
 pub async fn exercise_stats(
-    State(state): State<StatsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(exercise_id): Path<String>,
 ) -> Result<Response> {
@@ -107,7 +101,7 @@ pub async fn exercise_stats(
     Ok(Html(template.render()?).into_response())
 }
 
-pub async fn prs_list(State(state): State<StatsState>, auth_user: AuthUser) -> Result<Response> {
+pub async fn prs_list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let prs = state
         .workout_repo
         .get_all_prs_by_user(&auth_user.id)

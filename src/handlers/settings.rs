@@ -8,14 +8,9 @@ use serde::Deserialize;
 
 use crate::error::Result;
 use crate::middleware::AuthUser;
-use crate::repositories::{SessionListRow, SessionRepository, UserRepository};
+use crate::repositories::SessionListRow;
+use crate::state::AppState;
 use crate::version::GIT_VERSION;
-
-#[derive(Clone)]
-pub struct SettingsState {
-    pub user_repo: UserRepository,
-    pub session_repo: SessionRepository,
-}
 
 #[derive(Deserialize)]
 pub struct ChangePasswordForm {
@@ -35,7 +30,7 @@ struct SettingsTemplate {
 }
 
 async fn render_page(
-    state: &SettingsState,
+    state: &AppState,
     auth_user: AuthUser,
     error: Option<String>,
     success: Option<String>,
@@ -51,12 +46,12 @@ async fn render_page(
     Ok(Html(template.render()?).into_response())
 }
 
-pub async fn index(State(state): State<SettingsState>, auth_user: AuthUser) -> Result<Response> {
+pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     render_page(&state, auth_user, None, None).await
 }
 
 pub async fn change_password(
-    State(state): State<SettingsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
@@ -106,10 +101,7 @@ pub async fn change_password(
     .await
 }
 
-pub async fn logout_others(
-    State(state): State<SettingsState>,
-    auth_user: AuthUser,
-) -> Result<Response> {
+pub async fn logout_others(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     state
         .session_repo
         .delete_all_for_user_except(&auth_user.id, &auth_user.session_token)

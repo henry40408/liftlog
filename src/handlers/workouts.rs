@@ -14,14 +14,7 @@ use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, DynamicPR, Exercise, UpdateWorkoutLog, WorkoutLog,
     WorkoutLogWithExercise, WorkoutSession,
 };
-use crate::repositories::{ExerciseRepository, UserRepository, WorkoutRepository};
-
-#[derive(Clone)]
-pub struct WorkoutsState {
-    pub workout_repo: WorkoutRepository,
-    pub exercise_repo: ExerciseRepository,
-    pub user_repo: UserRepository,
-}
+use crate::state::AppState;
 
 #[derive(Template)]
 #[template(path = "workouts/list.html")]
@@ -85,7 +78,7 @@ pub struct ListQuery {
 }
 
 pub async fn list(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Query(query): Query<ListQuery>,
 ) -> Result<Response> {
@@ -127,7 +120,7 @@ pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
 }
 
 pub async fn create(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Form(form): Form<CreateWorkoutSession>,
 ) -> Result<Response> {
@@ -140,7 +133,7 @@ pub async fn create(
 }
 
 pub async fn show(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
@@ -182,7 +175,7 @@ pub async fn show(
 }
 
 pub async fn edit_page(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
@@ -207,7 +200,7 @@ pub struct UpdateWorkoutForm {
 }
 
 pub async fn update(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
     Form(form): Form<UpdateWorkoutForm>,
@@ -221,7 +214,7 @@ pub async fn update(
 }
 
 pub async fn delete(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
@@ -233,7 +226,7 @@ pub async fn delete(
 }
 
 pub async fn add_log(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(session_id): Path<String>,
     Form(form): Form<CreateWorkoutLog>,
@@ -264,7 +257,7 @@ pub async fn add_log(
 }
 
 pub async fn delete_log(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path((session_id, log_id)): Path<(String, String)>,
 ) -> Result<Response> {
@@ -279,7 +272,7 @@ pub async fn delete_log(
 }
 
 pub async fn edit_log_page(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path((session_id, log_id)): Path<(String, String)>,
 ) -> Result<Response> {
@@ -316,7 +309,7 @@ pub async fn edit_log_page(
 }
 
 pub async fn update_log(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path((session_id, log_id)): Path<(String, String)>,
     Form(form): Form<UpdateWorkoutLog>,
@@ -335,7 +328,7 @@ pub async fn update_log(
 }
 
 pub async fn share_workout(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
@@ -353,7 +346,7 @@ pub async fn share_workout(
 }
 
 pub async fn revoke_share(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
@@ -371,7 +364,7 @@ pub async fn revoke_share(
 }
 
 pub async fn view_shared(
-    State(state): State<WorkoutsState>,
+    State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<Response> {
     let workout = state

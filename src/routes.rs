@@ -6,17 +6,11 @@ use axum::{
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
 use crate::middleware::sliding_session_middleware;
+use crate::state::AppState;
 
-pub fn create_router(
-    auth_state: auth::AuthState,
-    dashboard_state: dashboard::DashboardState,
-    workouts_state: workouts::WorkoutsState,
-    exercises_state: exercises::ExercisesState,
-    stats_state: stats::StatsState,
-    settings_state: settings::SettingsState,
-) -> Router {
-    let session_repo = auth_state.session_repo.clone();
-    let user_repo = auth_state.user_repo.clone();
+pub fn create_router(state: AppState) -> Router {
+    let session_repo = state.session_repo.clone();
+    let user_repo = state.user_repo.clone();
 
     Router::new()
         // Health check
@@ -26,7 +20,6 @@ pub fn create_router(
         .route("/apple-touch-icon.png", get(favicon::apple_touch_icon))
         // Dashboard
         .route("/", get(dashboard::index))
-        .with_state(dashboard_state)
         // Auth routes
         .route(
             "/auth/login",
@@ -44,7 +37,6 @@ pub fn create_router(
         )
         .route("/users/{id}/delete", post(auth::delete_user))
         .route("/users/{id}/promote", post(auth::promote_user))
-        .with_state(auth_state)
         // Workout routes
         .route("/workouts", get(workouts::list))
         .route("/workouts/new", get(workouts::new_page))
@@ -67,7 +59,6 @@ pub fn create_router(
         .route("/workouts/{id}/revoke-share", post(workouts::revoke_share))
         // Public shared workout route (no auth required)
         .route("/shared/{token}", get(workouts::view_shared))
-        .with_state(workouts_state)
         // Exercise routes
         .route("/exercises", get(exercises::list))
         .route("/exercises/new", get(exercises::new_page))
@@ -75,17 +66,15 @@ pub fn create_router(
         .route("/exercises/{id}/edit", get(exercises::edit_page))
         .route("/exercises/{id}", post(exercises::update))
         .route("/exercises/{id}/delete", post(exercises::delete))
-        .with_state(exercises_state)
         // Stats routes
         .route("/stats", get(stats::index))
         .route("/stats/exercise/{id}", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
-        .with_state(stats_state)
         // Settings routes
         .route("/settings", get(settings::index))
         .route("/settings/password", post(settings::change_password))
         .route("/settings/logout-others", post(settings::logout_others))
-        .with_state(settings_state)
+        .with_state(state)
         // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
         .layer(from_fn_with_state(
             session_repo.clone(),

@@ -21,48 +21,17 @@ pub fn create_test_app(pool: DbPool) -> Router {
 }
 
 pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
-    use liftlog::handlers::{auth, dashboard, exercises, settings, stats, workouts};
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
+    use liftlog::state::AppState;
 
-    // Create repositories
-    let user_repo = UserRepository::new(pool.clone());
-    let exercise_repo = ExerciseRepository::new(pool.clone());
-    let workout_repo = WorkoutRepository::new(pool.clone());
-    let session_repo = SessionRepository::new(pool.clone());
-
-    // Create handler states
-    let auth_state = auth::AuthState {
-        user_repo: user_repo.clone(),
-        session_repo: session_repo.clone(),
-    };
-    let dashboard_state = dashboard::DashboardState {
-        workout_repo: workout_repo.clone(),
-    };
-    let workouts_state = workouts::WorkoutsState {
-        workout_repo: workout_repo.clone(),
-        exercise_repo: exercise_repo.clone(),
-        user_repo: user_repo.clone(),
-    };
-    let exercises_state = exercises::ExercisesState {
-        exercise_repo: exercise_repo.clone(),
-    };
-    let stats_state = stats::StatsState {
-        workout_repo: workout_repo.clone(),
-        exercise_repo: exercise_repo.clone(),
-    };
-    let settings_state = settings::SettingsState {
-        user_repo: user_repo.clone(),
-        session_repo: session_repo.clone(),
+    let app_state = AppState {
+        user_repo: UserRepository::new(pool.clone()),
+        exercise_repo: ExerciseRepository::new(pool.clone()),
+        workout_repo: WorkoutRepository::new(pool.clone()),
+        session_repo: SessionRepository::new(pool.clone()),
     };
 
-    let router = liftlog::routes::create_router(
-        auth_state,
-        dashboard_state,
-        workouts_state,
-        exercises_state,
-        stats_state,
-        settings_state,
-    );
+    let router = liftlog::routes::create_router(app_state);
 
     TestApp { router }
 }
