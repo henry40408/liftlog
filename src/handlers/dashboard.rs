@@ -7,12 +7,7 @@ use axum::{
 use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::models::WorkoutSession;
-use crate::repositories::WorkoutRepository;
-
-#[derive(Clone)]
-pub struct DashboardState {
-    pub workout_repo: WorkoutRepository,
-}
+use crate::state::AppState;
 
 #[derive(Template)]
 #[template(path = "dashboard/index.html")]
@@ -24,7 +19,7 @@ struct DashboardTemplate {
     recent_workouts: Vec<WorkoutSession>,
 }
 
-pub async fn index(State(state): State<DashboardState>, auth_user: AuthUser) -> Result<Response> {
+pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let workouts_this_week = state
         .workout_repo
         .count_workouts_this_week(&auth_user.id)

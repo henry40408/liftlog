@@ -8,4 +8,5 @@ pub mod models;
 pub mod repositories;
 pub mod routes;
 pub mod session;
+pub mod state;
 pub mod version;

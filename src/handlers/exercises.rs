@@ -9,12 +9,7 @@ use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::models::exercise::{ExerciseCategory, CATEGORIES};
 use crate::models::{CreateExercise, Exercise, UpdateExercise};
-use crate::repositories::ExerciseRepository;
-
-#[derive(Clone)]
-pub struct ExercisesState {
-    pub exercise_repo: ExerciseRepository,
-}
+use crate::state::AppState;
 
 #[derive(Template)]
 #[template(path = "exercises/list.html")]
@@ -41,7 +36,7 @@ struct EditExerciseTemplate {
     error: Option<String>,
 }
 
-pub async fn list(State(state): State<ExercisesState>, auth_user: AuthUser) -> Result<Response> {
+pub async fn list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let exercises = state
         .exercise_repo
         .find_available_for_user(&auth_user.id)
@@ -67,7 +62,7 @@ pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
 }
 
 pub async fn create(
-    State(state): State<ExercisesState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Form(form): Form<CreateExercise>,
 ) -> Result<Response> {
@@ -89,7 +84,7 @@ pub async fn create(
 }
 
 pub async fn edit_page(
-    State(state): State<ExercisesState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
@@ -106,7 +101,7 @@ pub async fn edit_page(
 }
 
 pub async fn update(
-    State(state): State<ExercisesState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
     Form(form): Form<UpdateExercise>,
@@ -132,7 +127,7 @@ pub async fn update(
 }
 
 pub async fn delete(
-    State(state): State<ExercisesState>,
+    State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response> {
