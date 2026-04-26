@@ -3,12 +3,11 @@ use axum::{
     http::{request::Parts, StatusCode},
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
-    Extension,
 };
 use axum_extra::extract::CookieJar;
 
 use crate::models::UserRole;
-use crate::repositories::{SessionRepository, UserRepository};
+use crate::repositories::SessionRepository;
 use crate::session::{create_session_cookie, get_session_token};
 
 #[derive(Clone, Debug)]
@@ -31,38 +30,30 @@ where
 {
     type Rejection = AuthRedirect;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let validated = parts
             .extensions
             .get::<ValidatedSession>()
             .cloned()
             .ok_or(AuthRedirect)?;
 
-        let Extension(user_repo) = Extension::<UserRepository>::from_request_parts(parts, state)
-            .await
-            .map_err(|_| AuthRedirect)?;
-
-        let user = user_repo
-            .find_by_id(&validated.user_id)
-            .await
-            .map_err(|_| AuthRedirect)?
-            .ok_or(AuthRedirect)?;
-
         Ok(AuthUser {
-            id: user.id,
-            username: user.username,
-            role: user.role,
+            id: validated.user_id,
+            username: validated.username,
+            role: validated.role,
             session_token: validated.session_token,
         })
     }
 }
 
 /// Produced by `sliding_session_middleware` for every request that arrives
-/// with a valid session cookie. Extractors downstream read this from
-/// request extensions instead of re-hitting the database.
+/// with a valid session cookie. Carries the full user identity so the
+/// `AuthUser` extractor doesn't need a second `users` lookup per request.
 #[derive(Clone, Debug)]
 pub struct ValidatedSession {
     pub user_id: String,
+    pub username: String,
+    pub role: UserRole,
     pub session_token: String,
 }
 
@@ -84,6 +75,8 @@ pub async fn sliding_session_middleware(
             Ok(Some(outcome)) => {
                 request.extensions_mut().insert(ValidatedSession {
                     user_id: outcome.user_id,
+                    username: outcome.username,
+                    role: outcome.role,
                     session_token: tok.to_string(),
                 });
                 if outcome.new_expires_at.is_some() {

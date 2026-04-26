@@ -1,7 +1,7 @@
 use axum::{
     middleware::from_fn_with_state,
     routing::{get, post},
-    Extension, Router,
+    Router,
 };
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
@@ -10,7 +10,6 @@ use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
     let session_repo = state.session_repo.clone();
-    let user_repo = state.user_repo.clone();
 
     Router::new()
         // Health check
@@ -77,10 +76,7 @@ pub fn create_router(state: AppState) -> Router {
         .with_state(state)
         // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
         .layer(from_fn_with_state(
-            session_repo.clone(),
+            session_repo,
             sliding_session_middleware,
         ))
-        // Repos via Extension layer so extractors can pull them
-        .layer(Extension(session_repo))
-        .layer(Extension(user_repo))
 }
