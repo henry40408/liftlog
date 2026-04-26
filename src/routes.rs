@@ -75,8 +75,5 @@ pub fn create_router(state: AppState) -> Router {
         .route("/settings/logout-others", post(settings::logout_others))
         .with_state(state)
         // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
-        .layer(from_fn_with_state(
-            session_repo,
-            sliding_session_middleware,
-        ))
+        .layer(from_fn_with_state(session_repo, sliding_session_middleware))
 }
