@@ -418,6 +418,50 @@ impl WorkoutRepository {
         .await?
     }
 
+    /// Per-session aggregates for a single exercise: top set weight, top set
+    /// reps (tie-broken by higher reps when weight ties), and total volume.
+    /// Ordered oldest → newest (`ws.date ASC, ws.created_at ASC`).
+    pub async fn get_session_metrics_for_exercise(
+        &self,
+        user_id: &str,
+        exercise_id: &str,
+    ) -> Result<Vec<crate::models::ExerciseSessionMetric>> {
+        use crate::models::ExerciseSessionMetric;
+
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+        let exercise_id = exercise_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare(
+                "SELECT
+                     ws.id   AS session_id,
+                     ws.date AS date,
+                     MAX(wl.weight) AS top_weight,
+                     (SELECT wl2.reps
+                        FROM workout_logs wl2
+                       WHERE wl2.session_id  = ws.id
+                         AND wl2.exercise_id = wl.exercise_id
+                       ORDER BY wl2.weight DESC, wl2.reps DESC
+                       LIMIT 1) AS top_reps,
+                     SUM(wl.weight * wl.reps) AS volume
+                 FROM workout_logs wl
+                 JOIN workout_sessions ws ON wl.session_id = ws.id
+                 WHERE ws.user_id = ? AND wl.exercise_id = ?
+                 GROUP BY ws.id
+                 ORDER BY ws.date ASC, ws.created_at ASC",
+            )?;
+            let rows = stmt
+                .query_map(
+                    rusqlite::params![user_id, exercise_id],
+                    ExerciseSessionMetric::from_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await?
+    }
+
     // Statistics
     pub async fn count_workouts_this_week(&self, user_id: &str) -> Result<i64> {
         let pool = self.pool.clone();
@@ -1322,5 +1366,182 @@ mod tests {
         let token2 = repo.set_share_token(&session.id, "user1").await.unwrap();
 
         assert_ne!(token1, token2);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_metrics_for_exercise_empty() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let metrics = repo
+            .get_session_metrics_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
+
+        assert!(metrics.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_metrics_for_exercise_single_session_aggregates_correctly() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // Three sets: 100x10, 110x8, 105x5 — top weight 110 with 8 reps; volume = 1000+880+525 = 2405
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, None)
+            .await
+            .unwrap();
+
+        let metrics = repo
+            .get_session_metrics_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
+
+        assert_eq!(metrics.len(), 1);
+        let m = &metrics[0];
+        assert_eq!(m.session_id, session.id);
+        assert_eq!(m.date, date);
+        assert!((m.top_weight - 110.0).abs() < 1e-9);
+        assert_eq!(m.top_reps, 8);
+        assert!((m.volume - 2405.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_metrics_for_exercise_multiple_sessions_ordered_asc() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        // Insert sessions out of order: middle first, oldest second, newest third.
+        let d_mid = NaiveDate::from_ymd_opt(2024, 1, 12).unwrap();
+        let d_old = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let d_new = NaiveDate::from_ymd_opt(2024, 1, 20).unwrap();
+
+        let s_mid = repo.create_session("user1", d_mid, None).await.unwrap();
+        let s_old = repo.create_session("user1", d_old, None).await.unwrap();
+        let s_new = repo.create_session("user1", d_new, None).await.unwrap();
+
+        repo.create_log(&s_mid.id, "ex-bench-press", 1, 5, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&s_old.id, "ex-bench-press", 1, 5, 90.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&s_new.id, "ex-bench-press", 1, 5, 110.0, None)
+            .await
+            .unwrap();
+
+        let metrics = repo
+            .get_session_metrics_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
+
+        assert_eq!(metrics.len(), 3);
+        assert_eq!(metrics[0].date, d_old);
+        assert_eq!(metrics[1].date, d_mid);
+        assert_eq!(metrics[2].date, d_new);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_metrics_for_exercise_excludes_other_exercises() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        create_test_exercise(&pool, "ex-squat", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // Bench: 100x10 (volume 1000), Squat: 200x5 (volume 1000) — same session.
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-squat", 1, 5, 200.0, None)
+            .await
+            .unwrap();
+
+        let metrics = repo
+            .get_session_metrics_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
+
+        assert_eq!(metrics.len(), 1);
+        let m = &metrics[0];
+        assert!((m.top_weight - 100.0).abs() < 1e-9);
+        assert_eq!(m.top_reps, 10);
+        assert!((m.volume - 1000.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_metrics_for_exercise_user_isolation() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_user(&pool, "user2");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let s1 = repo.create_session("user1", date, None).await.unwrap();
+        let s2 = repo.create_session("user2", date, None).await.unwrap();
+
+        repo.create_log(&s1.id, "ex-bench-press", 1, 5, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&s2.id, "ex-bench-press", 1, 5, 200.0, None)
+            .await
+            .unwrap();
+
+        let metrics = repo
+            .get_session_metrics_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
+
+        assert_eq!(metrics.len(), 1);
+        assert!((metrics[0].top_weight - 100.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_metrics_for_exercise_top_set_tie_picks_higher_reps() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // Same max weight 100, two different rep counts. Tie-break must select 8 reps.
+        repo.create_log(&session.id, "ex-bench-press", 1, 5, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 3, 6, 100.0, None)
+            .await
+            .unwrap();
+
+        let metrics = repo
+            .get_session_metrics_for_exercise("user1", "ex-bench-press")
+            .await
+            .unwrap();
+
+        assert_eq!(metrics.len(), 1);
+        assert!((metrics[0].top_weight - 100.0).abs() < 1e-9);
+        assert_eq!(metrics[0].top_reps, 8);
     }
 }
