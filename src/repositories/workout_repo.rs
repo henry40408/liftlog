@@ -4,7 +4,10 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
-use crate::models::{DynamicPR, FromSqliteRow, WorkoutLog, WorkoutLogWithExercise, WorkoutSession};
+use crate::models::{
+    DynamicPR, FromSqliteRow, LastExerciseWeight, WorkoutLog, WorkoutLogWithExercise,
+    WorkoutSession,
+};
 
 #[derive(Clone)]
 pub struct WorkoutRepository {
@@ -355,6 +358,34 @@ impl WorkoutRepository {
                 .query_map(rusqlite::params![user_id, user_id], DynamicPR::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(prs)
+        })
+        .await?
+    }
+
+    /// Get the most recently logged weight per exercise for a user
+    pub async fn get_last_weight_per_exercise_by_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<LastExerciseWeight>> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare(
+                "SELECT wl.exercise_id, e.name as exercise_name,
+                        wl.weight as weight,
+                        MAX(wl.created_at) as logged_at
+                 FROM workout_logs wl
+                 JOIN workout_sessions ws ON wl.session_id = ws.id
+                 JOIN exercises e ON wl.exercise_id = e.id
+                 WHERE ws.user_id = ?
+                 GROUP BY wl.exercise_id
+                 ORDER BY logged_at DESC",
+            )?;
+            let entries = stmt
+                .query_map([&user_id], LastExerciseWeight::from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(entries)
         })
         .await?
     }
@@ -1091,6 +1122,65 @@ mod tests {
         let prs = repo.get_all_prs_by_user("user1").await.unwrap();
 
         assert!(prs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_last_weight_per_exercise_by_user() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        create_test_exercise(&pool, "ex-squat", "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // Bench press: latest set (105) is lower than max (110)
+        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, None)
+            .await
+            .unwrap();
+        // Squat: single set
+        repo.create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
+            .await
+            .unwrap();
+
+        let entries = repo
+            .get_last_weight_per_exercise_by_user("user1")
+            .await
+            .unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let bench = entries
+            .iter()
+            .find(|e| e.exercise_id == "ex-bench-press")
+            .expect("bench entry");
+        let squat = entries
+            .iter()
+            .find(|e| e.exercise_id == "ex-squat")
+            .expect("squat entry");
+        // Last logged weight, NOT the max
+        assert_eq!(bench.weight, 105.0);
+        assert_eq!(squat.weight, 150.0);
+    }
+
+    #[tokio::test]
+    async fn test_get_last_weight_per_exercise_by_user_empty() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+
+        let entries = repo
+            .get_last_weight_per_exercise_by_user("user1")
+            .await
+            .unwrap();
+
+        assert!(entries.is_empty());
     }
 
     // Share functionality tests

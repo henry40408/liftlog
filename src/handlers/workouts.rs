@@ -11,8 +11,8 @@ use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
 use crate::models::exercise::{ExerciseCategory, CATEGORIES};
 use crate::models::{
-    CreateWorkoutLog, CreateWorkoutSession, DynamicPR, Exercise, UpdateWorkoutLog, WorkoutLog,
-    WorkoutLogWithExercise, WorkoutSession,
+    CreateWorkoutLog, CreateWorkoutSession, Exercise, LastExerciseWeight, UpdateWorkoutLog,
+    WorkoutLog, WorkoutLogWithExercise, WorkoutSession,
 };
 use crate::state::AppState;
 
@@ -41,7 +41,7 @@ struct ShowWorkoutTemplate {
     logs: Vec<WorkoutLogWithExercise>,
     exercises: Vec<Exercise>,
     categories: &'static [ExerciseCategory],
-    exercise_prs: Vec<DynamicPR>,
+    exercise_last_weights: Vec<LastExerciseWeight>,
     share_url: Option<String>,
     error: Option<String>,
 }
@@ -150,9 +150,9 @@ pub async fn show(
         .exercise_repo
         .find_available_for_user(&auth_user.id)
         .await?;
-    let exercise_prs = state
+    let exercise_last_weights = state
         .workout_repo
-        .get_all_prs_by_user(&auth_user.id)
+        .get_last_weight_per_exercise_by_user(&auth_user.id)
         .await?;
 
     let share_url = workout
@@ -166,7 +166,7 @@ pub async fn show(
         logs,
         exercises,
         categories: CATEGORIES,
-        exercise_prs,
+        exercise_last_weights,
         share_url,
         error: None,
     };
