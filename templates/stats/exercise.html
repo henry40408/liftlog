@@ -153,6 +153,7 @@
 
     var activeMetric = 'top_set';
     var activeRange = '20';
+    var lastYMin = 0, lastYMax = 1;
 
     function metricValue(p, m) {
         if (m === 'top_set') return p.top_weight;
@@ -185,6 +186,7 @@
         if (mx === mn) { mn -= 1; mx += 1; }
         var pad = (mx - mn) * 0.1;
         var yMin = mn - pad, yMax = mx + pad;
+        lastYMin = yMin; lastYMax = yMax;
 
         // Y grid + labels (4 ticks)
         yGrid.innerHTML = '';
@@ -249,18 +251,26 @@
         var xPct = n === 1 ? 0.5 : i / (n - 1);
         var leftPx = PL + xPct * plotW;
         var leftCss = (leftPx / W) * rect.width;
+        // Dot's y in CSS pixels, derived from the active metric's value & current scale.
+        var val = metricValue(p, activeMetric);
+        var range = lastYMax - lastYMin || 1;
+        var dotYSvg = PT + (1 - (val - lastYMin) / range) * plotH;
+        var dotYCss = (dotYSvg / H) * rect.height;
         tooltip.innerHTML =
             '<div><strong>' + p.date + '</strong></div>' +
             '<div>Top: ' + p.top_weight + ' kg × ' + p.top_reps + '</div>' +
             '<div>e1RM: ' + p.e1rm.toFixed(1) + ' kg</div>' +
             '<div>Volume: ' + p.volume.toFixed(0) + ' kg</div>';
         tooltip.style.display = 'block';
-        // Clamp horizontally to wrap.
+        // Clamp horizontally to wrap; vertically place 8px above dot, fall back below if it'd go off-top.
         var wrapW = wrap.getBoundingClientRect().width;
         var tipW = tooltip.offsetWidth;
+        var tipH = tooltip.offsetHeight;
         var left = Math.max(0, Math.min(wrapW - tipW, leftCss - tipW / 2));
+        var topAbove = dotYCss - tipH - 8;
+        var top = topAbove >= 0 ? topAbove : dotYCss + 8;
         tooltip.style.left = left + 'px';
-        tooltip.style.top = '0px';
+        tooltip.style.top = top + 'px';
     }
 
     // Tab wiring
