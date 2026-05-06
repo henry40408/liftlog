@@ -60,7 +60,7 @@
                     </optgroup>
                     {% endfor %}
                 </select>
-                <div id="exercise-pr-info" class="pr-info"></div>
+                <div id="exercise-last-weight-info" class="pr-info"></div>
             </div>
             <div class="form-group">
                 <label for="weight">Weight</label>
@@ -121,38 +121,38 @@
 </main>
 
 <script>
-var exercisePRs = {};
-{% for pr in exercise_prs %}
-exercisePRs["{{ pr.exercise_id }}"] = {
-    weight: {{ pr.value }},
-    date: "{{ pr.achieved_at.format("%Y-%m-%d") }}"
+var exerciseLastWeights = {};
+{% for entry in exercise_last_weights %}
+exerciseLastWeights["{{ entry.exercise_id }}"] = {
+    weight: {{ entry.weight }},
+    date: "{{ entry.logged_at.format("%Y-%m-%d") }}"
 };
 {% endfor %}
 
-var prInfoEl = document.getElementById('exercise-pr-info');
+var lastWeightInfoEl = document.getElementById('exercise-last-weight-info');
 var exerciseSelect = document.getElementById('exercise_id');
 
-function showPRInfo(exerciseId) {
-    if (exerciseId && exercisePRs[exerciseId]) {
-        var pr = exercisePRs[exerciseId];
-        prInfoEl.innerHTML = "Max Weight: " + pr.weight + " kg @ " + pr.date +
-            ' <button type="button" class="btn btn-sm btn-inline" style="background:var(--gold);color:var(--text-inverse);border-color:var(--gold);" onclick="fillMaxWeight()">Fill</button>';
-        prInfoEl.classList.add('visible');
+function showLastWeightInfo(exerciseId) {
+    if (exerciseId && exerciseLastWeights[exerciseId]) {
+        var entry = exerciseLastWeights[exerciseId];
+        lastWeightInfoEl.innerHTML = "Last: " + entry.weight + " kg @ " + entry.date +
+            ' <button type="button" class="btn btn-sm btn-inline" style="background:var(--gold);color:var(--text-inverse);border-color:var(--gold);" onclick="fillLastWeight()">Fill</button>';
+        lastWeightInfoEl.classList.add('visible');
     } else {
-        prInfoEl.innerHTML = "";
-        prInfoEl.classList.remove('visible');
+        lastWeightInfoEl.innerHTML = "";
+        lastWeightInfoEl.classList.remove('visible');
     }
 }
 
-function fillMaxWeight() {
+function fillLastWeight() {
     var exerciseId = exerciseSelect.value;
-    if (exerciseId && exercisePRs[exerciseId]) {
-        document.getElementById('weight').value = exercisePRs[exerciseId].weight;
+    if (exerciseId && exerciseLastWeights[exerciseId]) {
+        document.getElementById('weight').value = exerciseLastWeights[exerciseId].weight;
     }
 }
 
 exerciseSelect.addEventListener('change', function() {
-    showPRInfo(this.value);
+    showLastWeightInfo(this.value);
 });
 
 function cloneSet(exerciseId, weight, reps, rpe) {
@@ -164,7 +164,7 @@ function cloneSet(exerciseId, weight, reps, rpe) {
     } else {
         document.getElementById('rpe').value = '';
     }
-    showPRInfo(exerciseId);
+    showLastWeightInfo(exerciseId);
     exerciseSelect.scrollIntoView({ behavior: 'smooth' });
 }
 
