@@ -543,6 +543,52 @@ async fn test_add_log_success() {
 }
 
 #[tokio::test]
+async fn test_add_log_accepts_fractional_weight() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/workouts/{}/logs", workout.id))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::from(format!(
+                    "exercise_id={}&reps=10&weight=21.25&rpe=8",
+                    exercise.id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let workout_repo = WorkoutRepository::new(pool);
+    let logs = workout_repo
+        .find_logs_by_session_with_pr(&workout.id, &user.id)
+        .await
+        .unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].weight, 21.25);
+}
+
+#[tokio::test]
 async fn test_add_log_requires_ownership() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -751,6 +797,46 @@ async fn test_update_log_success() {
     assert_eq!(updated.reps, 12);
     assert_eq!(updated.weight, 110.0);
     assert_eq!(updated.rpe, Some(9));
+}
+
+#[tokio::test]
+async fn test_update_log_accepts_fractional_weight() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/workouts/{}/logs/{}", workout.id, log.id))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::from("reps=10&weight=21.25&rpe=8"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let workout_repo = WorkoutRepository::new(pool);
+    let updated = workout_repo.find_log_by_id(&log.id).await.unwrap().unwrap();
+    assert_eq!(updated.weight, 21.25);
 }
 
 #[tokio::test]
