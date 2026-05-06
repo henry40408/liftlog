@@ -27,8 +27,6 @@ pub struct RenderedChart {
     pub height: f64,
     pub padding_left: f64,
     pub padding_right: f64,
-    pub padding_top: f64,
-    pub padding_bottom: f64,
     pub points: Vec<RenderedPoint>,
     /// Polyline `points` attribute, e.g. "10,20 50,60 ..."
     pub polyline: String,
@@ -144,8 +142,6 @@ fn render_default_chart(points: &[ChartPoint]) -> Option<RenderedChart> {
         height: CHART_H,
         padding_left: PAD_L,
         padding_right: PAD_R,
-        padding_top: PAD_T,
-        padding_bottom: PAD_B,
         points: rendered_points,
         polyline: polyline_parts.join(" "),
         y_ticks,
