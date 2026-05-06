@@ -22,24 +22,24 @@ struct StatsTemplate {
 
 /// Geometry + flags used to draw the *default* server-rendered SVG.
 /// Computed in the handler so the template stays declarative.
-pub struct RenderedChart {
-    pub width: f64,
-    pub height: f64,
-    pub padding_left: f64,
-    pub padding_right: f64,
-    pub points: Vec<RenderedPoint>,
+pub(crate) struct RenderedChart {
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    pub(crate) padding_left: f64,
+    pub(crate) padding_right: f64,
+    pub(crate) points: Vec<RenderedPoint>,
     /// Polyline `points` attribute, e.g. "10,20 50,60 ..."
-    pub polyline: String,
+    pub(crate) polyline: String,
     /// Y-axis tick labels: (y_pixel, label_text)
-    pub y_ticks: Vec<(f64, String)>,
+    pub(crate) y_ticks: Vec<(f64, String)>,
     /// X-axis tick labels: (x_pixel, label_text). Only every Nth point is labeled.
-    pub x_ticks: Vec<(f64, String)>,
+    pub(crate) x_ticks: Vec<(f64, String)>,
 }
 
-pub struct RenderedPoint {
-    pub x: f64,
-    pub y: f64,
-    pub is_pr: bool,
+pub(crate) struct RenderedPoint {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) is_pr: bool,
 }
 
 #[derive(Template)]
