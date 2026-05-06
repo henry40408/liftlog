@@ -872,6 +872,7 @@ dependencies = [
  "resvg",
  "rusqlite",
  "serde",
+ "serde_json",
  "thiserror",
  "time",
  "tokio",
