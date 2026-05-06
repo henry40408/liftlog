@@ -24,6 +24,81 @@
     <p class="muted">No PR for this exercise yet.</p>
     {% endmatch %}
 
+    <h2>Progress Trend</h2>
+    <div class="card" style="margin-bottom: var(--sp-6);">
+        {% if session_count == 0 %}
+        <p class="muted">No progress data yet — log this exercise to see your trend.</p>
+        {% else %}
+        <div id="exercise-chart-controls" style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);">
+            <div role="group" aria-label="Metric" style="display: flex; gap: var(--sp-2);">
+                <button type="button" class="btn btn-sm btn-tab is-active" data-metric="top_set">Top Set</button>
+                <button type="button" class="btn btn-sm btn-tab" data-metric="e1rm">e1RM</button>
+                <button type="button" class="btn btn-sm btn-tab" data-metric="volume">Volume</button>
+            </div>
+            <div role="group" aria-label="Range" style="display: flex; gap: var(--sp-2);">
+                <button type="button" class="btn btn-sm btn-tab is-active" data-range="20">Last 20</button>
+                <button type="button" class="btn btn-sm btn-tab" data-range="all">All</button>
+            </div>
+        </div>
+
+        <div id="exercise-chart-wrap" style="position: relative;">
+            <svg id="exercise-chart" viewBox="0 0 600 220" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Progress line chart">
+                {% match chart %}
+                {% when Some with (c) %}
+                <g id="chart-y-grid">
+                    {% for tick in c.y_ticks %}
+                    <line x1="{{ c.padding_left }}" x2="{{ c.width - c.padding_right }}"
+                          y1="{{ tick.0 }}" y2="{{ tick.0 }}"
+                          stroke="var(--border-light)" stroke-width="1" />
+                    <text x="{{ c.padding_left - 6.0 }}" y="{{ tick.0 + 4.0 }}"
+                          text-anchor="end" font-size="11" fill="var(--text-secondary)">{{ tick.1 }}</text>
+                    {% endfor %}
+                </g>
+                <g id="chart-x-labels">
+                    {% for tick in c.x_ticks %}
+                    <text x="{{ tick.0 }}" y="{{ c.height - 8.0 }}"
+                          text-anchor="middle" font-size="11" fill="var(--text-secondary)">{{ tick.1 }}</text>
+                    {% endfor %}
+                </g>
+                <polyline id="chart-line"
+                          fill="none" stroke="var(--accent)" stroke-width="2"
+                          points="{{ c.polyline }}" />
+                <g id="chart-dots">
+                    {% for pt in c.points %}
+                    <circle cx="{{ pt.x }}" cy="{{ pt.y }}" r="4"
+                            class="{% if pt.is_pr %}ll-dot-pr{% else %}ll-dot{% endif %}"
+                            fill="{% if pt.is_pr %}var(--gold){% else %}var(--accent){% endif %}"
+                            stroke="var(--bg)" stroke-width="1.5" />
+                    {% endfor %}
+                </g>
+                {% when None %}
+                {% if session_count == 1 %}
+                <circle cx="300" cy="110" r="5" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5" />
+                {% endif %}
+                {% endmatch %}
+                <g id="chart-hit-areas"></g>
+            </svg>
+
+            <div id="exercise-chart-tooltip"
+                 style="position: absolute; display: none; pointer-events: none;
+                        background: var(--surface); border: 1px solid var(--border);
+                        padding: 8px 10px; font-size: 12px; border-radius: 6px;
+                        color: var(--text-primary); white-space: nowrap; z-index: 2;"></div>
+        </div>
+
+        {% if session_count == 1 %}
+        <p class="muted" style="margin-top: var(--sp-4);">Need at least 2 sessions to draw a trend.</p>
+        {% endif %}
+
+        <div style="display: flex; gap: var(--sp-4); margin-top: var(--sp-3); font-size: 12px; color: var(--text-secondary);">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);vertical-align:middle;margin-right:4px;"></span>Session</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold);vertical-align:middle;margin-right:4px;"></span>Running PR</span>
+        </div>
+
+        <script type="application/json" id="exercise-chart-data">{{ chart_data_json|safe }}</script>
+        {% endif %}
+    </div>
+
     <h2>Recent History</h2>
     {% if history.is_empty() %}
     <p class="muted">No history for this exercise.</p>
@@ -54,4 +129,157 @@
 
     <a href="/exercises" class="back-link">&larr; Back to Exercises</a>
 </main>
+
+{% if session_count >= 2 %}
+<script>
+(function() {
+    var dataEl = document.getElementById('exercise-chart-data');
+    if (!dataEl) return;
+    var raw;
+    try { raw = JSON.parse(dataEl.textContent); } catch (e) { return; }
+    if (!Array.isArray(raw) || raw.length < 2) return;
+
+    var svg = document.getElementById('exercise-chart');
+    var line = document.getElementById('chart-line');
+    var dots = document.getElementById('chart-dots');
+    var xLabels = document.getElementById('chart-x-labels');
+    var yGrid = document.getElementById('chart-y-grid');
+    var hitAreas = document.getElementById('chart-hit-areas');
+    var tooltip = document.getElementById('exercise-chart-tooltip');
+    var wrap = document.getElementById('exercise-chart-wrap');
+
+    var W = 600, H = 220, PL = 44, PR_ = 12, PT = 14, PB = 28;
+    var plotW = W - PL - PR_, plotH = H - PT - PB;
+
+    var activeMetric = 'top_set';
+    var activeRange = '20';
+
+    function metricValue(p, m) {
+        if (m === 'top_set') return p.top_weight;
+        if (m === 'e1rm') return p.e1rm;
+        return p.volume;
+    }
+    function metricLabel(m) {
+        if (m === 'top_set') return 'Top Set (kg)';
+        if (m === 'e1rm') return 'e1RM (kg)';
+        return 'Volume (kg)';
+    }
+
+    function redraw() {
+        var slice = activeRange === 'all' ? raw : raw.slice(Math.max(0, raw.length - 20));
+        var n = slice.length;
+        if (n < 2) {
+            // Sparse fallback inside the same SVG: clear line/dots, hide tooltip.
+            line.setAttribute('points', '');
+            dots.innerHTML = '';
+            xLabels.innerHTML = '';
+            yGrid.innerHTML = '';
+            hitAreas.innerHTML = '';
+            tooltip.style.display = 'none';
+            return;
+        }
+
+        var vals = slice.map(function(p) { return metricValue(p, activeMetric); });
+        var mn = Math.min.apply(null, vals);
+        var mx = Math.max.apply(null, vals);
+        if (mx === mn) { mn -= 1; mx += 1; }
+        var pad = (mx - mn) * 0.1;
+        var yMin = mn - pad, yMax = mx + pad;
+
+        // Y grid + labels (4 ticks)
+        yGrid.innerHTML = '';
+        for (var i = 0; i < 4; i++) {
+            var frac = i / 3;
+            var y = PT + frac * plotH;
+            var v = yMax - frac * (yMax - yMin);
+            yGrid.insertAdjacentHTML('beforeend',
+                '<line x1="' + PL + '" x2="' + (W - PR_) + '" y1="' + y + '" y2="' + y + '" stroke="var(--border-light)" stroke-width="1"/>' +
+                '<text x="' + (PL - 6) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="var(--text-secondary)">' + v.toFixed(0) + '</text>');
+        }
+
+        // Polyline + dots + PR detection
+        var pts = [];
+        var dotsHtml = '';
+        var hitHtml = '';
+        var labelHtml = '';
+        var running = -Infinity;
+        var bandW = plotW / Math.max(1, n - 1);
+
+        for (var j = 0; j < n; j++) {
+            var p = slice[j];
+            var x = PL + (j / (n - 1)) * plotW;
+            var val = metricValue(p, activeMetric);
+            var yy = PT + (1 - (val - yMin) / (yMax - yMin)) * plotH;
+            pts.push(x.toFixed(2) + ',' + yy.toFixed(2));
+            var isPr = val > running;
+            if (isPr) running = val;
+            var color = isPr ? 'var(--gold)' : 'var(--accent)';
+            dotsHtml += '<circle cx="' + x + '" cy="' + yy + '" r="4" fill="' + color + '" stroke="var(--bg)" stroke-width="1.5"/>';
+            // Invisible hit-area for tooltip
+            var hx = j === 0 ? PL : x - bandW / 2;
+            var hw = (j === 0 || j === n - 1) ? bandW / 2 : bandW;
+            hitHtml += '<rect x="' + hx + '" y="' + PT + '" width="' + hw + '" height="' + plotH + '" fill="transparent" data-i="' + j + '" style="cursor:crosshair"/>';
+        }
+        line.setAttribute('points', pts.join(' '));
+        dots.innerHTML = dotsHtml;
+        hitAreas.innerHTML = hitHtml;
+
+        // X labels (up to 5)
+        var lc = Math.min(5, n);
+        for (var k = 0; k < lc; k++) {
+            var idx = Math.floor(k * (n - 1) / Math.max(1, lc - 1));
+            var lx = PL + (idx / (n - 1)) * plotW;
+            labelHtml += '<text x="' + lx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="var(--text-secondary)">' + slice[idx].date.substring(5) + '</text>';
+        }
+        xLabels.innerHTML = labelHtml;
+
+        // Tooltip handlers
+        Array.prototype.forEach.call(hitAreas.querySelectorAll('rect'), function(rect) {
+            rect.addEventListener('pointerenter', function(e) { showTip(slice, parseInt(rect.getAttribute('data-i'), 10)); });
+            rect.addEventListener('pointermove',  function(e) { showTip(slice, parseInt(rect.getAttribute('data-i'), 10)); });
+            rect.addEventListener('pointerleave', function() { tooltip.style.display = 'none'; });
+            rect.addEventListener('pointerdown',  function(e) { showTip(slice, parseInt(rect.getAttribute('data-i'), 10)); });
+        });
+    }
+
+    function showTip(slice, i) {
+        var p = slice[i];
+        var rect = svg.getBoundingClientRect();
+        var n = slice.length;
+        var xPct = n === 1 ? 0.5 : i / (n - 1);
+        var leftPx = PL + xPct * plotW;
+        var leftCss = (leftPx / W) * rect.width;
+        tooltip.innerHTML =
+            '<div><strong>' + p.date + '</strong></div>' +
+            '<div>Top: ' + p.top_weight + ' kg × ' + p.top_reps + '</div>' +
+            '<div>e1RM: ' + p.e1rm.toFixed(1) + ' kg</div>' +
+            '<div>Volume: ' + p.volume.toFixed(0) + ' kg</div>';
+        tooltip.style.display = 'block';
+        // Clamp horizontally to wrap.
+        var wrapW = wrap.getBoundingClientRect().width;
+        var tipW = tooltip.offsetWidth;
+        var left = Math.max(0, Math.min(wrapW - tipW, leftCss - tipW / 2));
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = '0px';
+    }
+
+    // Tab wiring
+    var controls = document.getElementById('exercise-chart-controls');
+    controls.addEventListener('click', function(e) {
+        var t = e.target;
+        if (t.dataset.metric) {
+            activeMetric = t.dataset.metric;
+            controls.querySelectorAll('[data-metric]').forEach(function(b) { b.classList.toggle('is-active', b === t); });
+            redraw();
+        } else if (t.dataset.range) {
+            activeRange = t.dataset.range;
+            controls.querySelectorAll('[data-range]').forEach(function(b) { b.classList.toggle('is-active', b === t); });
+            redraw();
+        }
+    });
+
+    redraw();
+})();
+</script>
+{% endif %}
 {% endblock %}
