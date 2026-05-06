@@ -68,12 +68,12 @@
                     <circle cx="{{ pt.x }}" cy="{{ pt.y }}" r="4"
                             class="{% if pt.is_pr %}ll-dot-pr{% else %}ll-dot{% endif %}"
                             fill="{% if pt.is_pr %}var(--gold){% else %}var(--accent){% endif %}"
-                            stroke="var(--bg)" stroke-width="1.5" />
+                            stroke="var(--bg-root)" stroke-width="1.5" />
                     {% endfor %}
                 </g>
                 {% when None %}
                 {% if session_count == 1 %}
-                <circle cx="300" cy="110" r="5" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5" />
+                <circle cx="300" cy="110" r="5" fill="var(--accent)" stroke="var(--bg-root)" stroke-width="1.5" />
                 {% endif %}
                 {% endmatch %}
                 <g id="chart-hit-areas"></g>
@@ -81,7 +81,7 @@
 
             <div id="exercise-chart-tooltip"
                  style="position: absolute; display: none; pointer-events: none;
-                        background: var(--surface); border: 1px solid var(--border);
+                        background: var(--bg-elevated); border: 1px solid var(--border);
                         padding: 8px 10px; font-size: 12px; border-radius: 6px;
                         color: var(--text-primary); white-space: nowrap; z-index: 2;"></div>
         </div>
@@ -216,7 +216,7 @@
             var isPr = val > running;
             if (isPr) running = val;
             var color = isPr ? 'var(--gold)' : 'var(--accent)';
-            dotsHtml += '<circle cx="' + x + '" cy="' + yy + '" r="4" fill="' + color + '" stroke="var(--bg)" stroke-width="1.5"/>';
+            dotsHtml += '<circle cx="' + x + '" cy="' + yy + '" r="4" fill="' + color + '" stroke="var(--bg-root)" stroke-width="1.5"/>';
             // Invisible hit-area for tooltip
             var hx = j === 0 ? PL : x - bandW / 2;
             var hw = (j === 0 || j === n - 1) ? bandW / 2 : bandW;
