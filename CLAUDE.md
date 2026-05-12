@@ -47,12 +47,15 @@ npx playwright test sharing               # filter by feature filename
 
 ## E2E test harness
 
-`tests/e2e/playwright.config.js` boots a real `cargo run` against an isolated sqlite at `tests/e2e/.tmp/liftlog-e2e.sqlite3` per run. Important constraints:
+`npm test` (`tests/e2e/`) runs `cargo build` once for the shared workspace target, then `bddgen && playwright test`. A worker-scoped fixture in `steps/fixtures.js` (`workerServer`) spawns one server per Playwright worker, on port `3100 + workerInfo.workerIndex` with sqlite at `tests/e2e/.tmp/liftlog-e2e-{idx}.sqlite3`; Playwright's built-in `baseURL` fixture is overridden to point at that per-worker URL so steps stay worker-agnostic. Server processes are killed on worker teardown.
 
-- **Single sqlite across the whole run.** `workers: 1`, `fullyParallel: false`. Scenarios must scope their data: the `scenarioState` fixture (`steps/fixtures.js`) assigns each scenario a random suffix; steps use `scenarioState.unique('Squat')` to name entities and assert only on what the scenario itself created.
-- **Alphabetical feature ordering matters.** `_bootstrap.feature` is named with a leading `_` so it sorts first and runs against an empty DB; subsequent features can assume the admin user has been (or will be) seeded by `support/seeding.js`.
-- **Confirm dialogs.** Workout-delete and revoke-share use `window.confirm()` — handle with `page.once('dialog', d => d.accept())` before the click.
+- **One DB per worker, not per run.** Each worker boots with a fresh sqlite. Workers run in parallel; within a worker, scenarios still run sequentially.
+- **Worker count.** `workers: process.env.WORKERS ?? (CI ? 2 : '50%')`. Override locally with `WORKERS=4 npm test`.
+- **Scenario data is still scoped.** The `scenarioState` fixture assigns each scenario a random suffix; steps use `scenarioState.unique('Squat')` to name entities and assert only on what the scenario built. Don't assume "lifter has no other workouts" — multiple scenarios on the same worker may have created some.
+- **`_bootstrap.feature` only depends on its worker's DB being empty when the worker starts.** Both its scenarios are no-mutation (navigation; setup form with a 5-char password that fails server validation), so they leave DB state untouched and work no matter which worker they land on.
+- **Confirm dialogs.** Workout-delete, set-delete, exercise-delete, revoke-share, promote-user, delete-user all use `window.confirm()` — handle with `page.once('dialog', d => d.accept())` before the click.
 - **Guest views.** Public share URLs are tested via `browser.newContext()` so the logged-in cookie doesn't leak in.
+- **HTML form validation can swallow the request.** The setup short-password scenario calls `form.noValidate = true` before submit so the request actually reaches the server; otherwise `minlength="6"` blocks it client-side and the server-side defense is untested.
 - **Playwright is pinned to `~1.59.1`.** Playwright 1.60 moved internal paths that `playwright-bdd@8.5` still imports; don't bump without verifying the import surface.
 
 ## Project conventions
