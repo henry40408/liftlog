@@ -4,29 +4,33 @@ import { test } from './fixtures.js';
 
 const { Given, When, Then } = createBdd(test);
 
-async function createExercise(page, name, category) {
+async function createExercise(page, scenarioState, name, category) {
   await page.goto('/exercises/new');
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('Category').selectOption(category);
   await page.getByRole('button', { name: 'Add Exercise' }).click();
   await expect(page).toHaveURL('/exercises');
+  scenarioState.exerciseName = name;
+  // /exercises lists each exercise as <a href="/stats/exercise/{id}">{name}</a>.
+  const href = await page
+    .getByRole('link', { name })
+    .first()
+    .getAttribute('href');
+  scenarioState.exerciseId =
+    href?.match(/\/stats\/exercise\/([^/]+)/)?.[1] ?? null;
 }
 
 When(
   'I create a new exercise in category {string}',
   async ({ page, scenarioState }, category) => {
-    const name = scenarioState.unique('Squat');
-    await createExercise(page, name, category);
-    scenarioState.exerciseName = name;
+    await createExercise(page, scenarioState, scenarioState.unique('Squat'), category);
   },
 );
 
 Given(
   'I have an exercise in category {string}',
   async ({ page, scenarioState }, category) => {
-    const name = scenarioState.unique('Exercise');
-    await createExercise(page, name, category);
-    scenarioState.exerciseName = name;
+    await createExercise(page, scenarioState, scenarioState.unique('Exercise'), category);
   },
 );
 

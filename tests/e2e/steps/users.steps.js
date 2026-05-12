@@ -86,3 +86,13 @@ Then('visiting {string} returns a 403', async ({ page }, path) => {
   const response = await page.goto(path);
   expect(response?.status()).toBe(403);
 });
+
+Then(
+  'the users page does not let me delete my own account',
+  async ({ page }) => {
+    await page.goto('/users');
+    const myRow = page.locator('tr').filter({ hasText: 'lifter' }).first();
+    await expect(myRow.getByText('(you)')).toBeVisible();
+    await expect(myRow.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  },
+);

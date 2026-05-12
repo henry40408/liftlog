@@ -107,3 +107,17 @@ Given(
     ).toBeVisible();
   },
 );
+
+When(
+  'I switch to a fresh non-admin user',
+  async ({ context, page, request, baseURL, scenarioState }) => {
+    await context.clearCookies();
+    const username = scenarioState.unique('other');
+    scenarioState.currentUser = username;
+    await ensureUser(request, baseURL, username, ADMIN.password);
+    await loginViaUi(page, username, ADMIN.password);
+    await expect(
+      page.getByRole('heading', { name: 'Dashboard', level: 1 }),
+    ).toBeVisible();
+  },
+);
