@@ -101,6 +101,28 @@ cargo run
 cargo nextest run
 ```
 
+### UI BDD Tests
+
+End-to-end tests live in `tests/e2e/` (Playwright + [playwright-bdd](https://github.com/vitalets/playwright-bdd)). They lock in user-facing behavior so UI redesigns can't silently change it. Features are described in Gherkin (`tests/e2e/features/`) and step bindings are plain JS (`tests/e2e/steps/`).
+
+First-time setup:
+
+```bash
+cd tests/e2e
+npm install
+npm run install-browsers   # downloads Chromium
+```
+
+Run the suite (boots a fresh sqlite + Rust server per run):
+
+```bash
+cd tests/e2e
+npm test                   # headless
+npm run test:headed        # watch the browser
+npm run test:ui            # interactive Playwright UI
+npm run report             # open last HTML report
+```
+
 ### Code Quality
 
 ```bash
