@@ -25,3 +25,7 @@ Feature: Admin user management
     Given I am logged in as a fresh non-admin user
     Then I do not see the "+ Add New User" button on the users page
     And visiting "/users/new" returns a 403
+
+  Scenario: Admin cannot delete their own account from the users page
+    Given I am logged in as "lifter"
+    Then the users page does not let me delete my own account

@@ -42,3 +42,24 @@ Feature: Workout lifecycle
     And I have a workout
     When I delete the workout
     Then the workout I deleted is not listed on the workouts page
+
+  Scenario: Logging a set with RPE persists the RPE value
+    Given I am logged in as "lifter"
+    And I have an exercise in category "chest"
+    And I have a workout
+    When I log a set of 100 kg for 5 reps with RPE 8 using the exercise I created
+    Then I see my set logged with RPE 8
+
+  Scenario: Multiple sets of the same exercise are auto-numbered
+    Given I am logged in as "lifter"
+    And I have an exercise in category "back"
+    And I have a workout with a set of 40 kg for 10 reps
+    When I log another set of 50 kg for 8 reps using the same exercise
+    Then I see two sets numbered 1 and 2
+
+  Scenario: Clone-set button pre-fills the Add Set form
+    Given I am logged in as "lifter"
+    And I have an exercise in category "shoulders"
+    And I have a workout with a set of 30 kg for 12 reps
+    When I click clone on my set
+    Then the Add Set form is pre-filled with weight 30 and reps 12

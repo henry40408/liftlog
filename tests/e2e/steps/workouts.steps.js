@@ -175,3 +175,105 @@ Then('my set is flagged as a PR', async ({ page, scenarioState }) => {
     .first();
   await expect(row.locator('.pr-badge')).toBeVisible();
 });
+
+When(
+  'I log a set of {int} kg for {int} reps with RPE {int} using the exercise I created',
+  async ({ page, scenarioState }, weight, reps, rpe) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}`);
+    await page
+      .locator('select#exercise_id')
+      .selectOption({ label: scenarioState.exerciseName });
+    await page.getByLabel('Weight').fill(String(weight));
+    await page.getByLabel('Reps').fill(String(reps));
+    await page.getByLabel('RPE (1-10, optional)').fill(String(rpe));
+    await page.getByRole('button', { name: 'Add Set' }).click();
+    await expect(
+      page.locator('.set-row').filter({ hasText: scenarioState.exerciseName }).first(),
+    ).toBeVisible();
+  },
+);
+
+Then(
+  'I see my set logged with RPE {int}',
+  async ({ page, scenarioState }, rpe) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}`);
+    const row = page
+      .locator('.set-row')
+      .filter({ hasText: scenarioState.exerciseName })
+      .first();
+    await expect(row.locator('.set-cell-rpe')).toHaveText(String(rpe));
+  },
+);
+
+When(
+  'I log another set of {int} kg for {int} reps using the same exercise',
+  async ({ page, scenarioState }, weight, reps) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}`);
+    await page
+      .locator('select#exercise_id')
+      .selectOption({ label: scenarioState.exerciseName });
+    await page.getByLabel('Weight').fill(String(weight));
+    await page.getByLabel('Reps').fill(String(reps));
+    await page.getByRole('button', { name: 'Add Set' }).click();
+  },
+);
+
+Then('I see two sets numbered 1 and 2', async ({ page, scenarioState }) => {
+  await page.goto(`/workouts/${scenarioState.workoutId}`);
+  const rows = page
+    .locator('.set-row')
+    .filter({ hasText: scenarioState.exerciseName });
+  await expect(rows).toHaveCount(2);
+  const numbers = (
+    await rows.locator('.set-cell-set').allTextContents()
+  ).sort();
+  expect(numbers).toEqual(['1', '2']);
+});
+
+When('I click clone on my set', async ({ page, scenarioState }) => {
+  await page.goto(`/workouts/${scenarioState.workoutId}`);
+  const row = page
+    .locator('.set-row')
+    .filter({ hasText: scenarioState.exerciseName })
+    .first();
+  await row.getByRole('button', { name: 'Clone' }).click();
+});
+
+Then(
+  'the Add Set form is pre-filled with weight {int} and reps {int}',
+  async ({ page, scenarioState }, weight, reps) => {
+    expect(await page.locator('select#exercise_id').inputValue()).toBe(
+      scenarioState.exerciseId,
+    );
+    await expect(page.getByLabel('Weight')).toHaveValue(String(weight));
+    await expect(page.getByLabel('Reps')).toHaveValue(String(reps));
+  },
+);
+
+Then(
+  'visiting the workout I created returns a 404',
+  async ({ page, scenarioState }) => {
+    const response = await page.goto(`/workouts/${scenarioState.workoutId}`);
+    expect(response?.status()).toBe(404);
+  },
+);
+
+Then(
+  'I do not see the workout I created on the workouts page',
+  async ({ page, scenarioState }) => {
+    await page.goto('/workouts');
+    await expect(
+      page.locator(`a[href="/workouts/${scenarioState.workoutId}"]`),
+    ).toHaveCount(0);
+  },
+);
+
+Then('I see the workouts empty state', async ({ page }) => {
+  await page.goto('/workouts');
+  await expect(page.locator('.empty-state')).toContainText('No workouts yet');
+});
+
+Then('visiting {string} returns a 404', async ({ page }, path) => {
+  const response = await page.goto(path);
+  expect(response?.status()).toBe(404);
+});
