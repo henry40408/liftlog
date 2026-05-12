@@ -124,3 +124,54 @@ Then(
     await expect(row.locator('.set-cell-reps')).toHaveText(String(reps));
   },
 );
+
+When('I delete my set', async ({ page, scenarioState }) => {
+  await page.goto(`/workouts/${scenarioState.workoutId}`);
+  const row = page
+    .locator('.set-row')
+    .filter({ hasText: scenarioState.exerciseName })
+    .first();
+  page.once('dialog', (d) => d.accept());
+  await row.locator('form[action*="/logs/"][action$="/delete"] button').click();
+});
+
+Then(
+  'my set is no longer shown on the workout',
+  async ({ page, scenarioState }) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}`);
+    await expect(
+      page.locator('.set-row').filter({ hasText: scenarioState.exerciseName }),
+    ).toHaveCount(0);
+  },
+);
+
+When(
+  'I edit the workout to date {string} with notes {string}',
+  async ({ page, scenarioState }, date, notes) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}/edit`);
+    await page.getByLabel('Date').fill(date);
+    await page.getByLabel('Notes (optional)').fill(notes);
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}`);
+  },
+);
+
+Then(
+  'the workout detail shows date {string} and notes {string}',
+  async ({ page, scenarioState }, date, notes) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}`);
+    await expect(
+      page.getByRole('heading', { level: 1, name: date }),
+    ).toBeVisible();
+    await expect(page.locator('.subtitle em')).toHaveText(notes);
+  },
+);
+
+Then('my set is flagged as a PR', async ({ page, scenarioState }) => {
+  await page.goto(`/workouts/${scenarioState.workoutId}`);
+  const row = page
+    .locator('.set-row')
+    .filter({ hasText: scenarioState.exerciseName })
+    .first();
+  await expect(row.locator('.pr-badge')).toBeVisible();
+});

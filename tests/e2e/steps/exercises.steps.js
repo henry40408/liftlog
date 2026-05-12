@@ -39,3 +39,44 @@ Then(
     ).toBeVisible();
   },
 );
+
+When(
+  'I rename my exercise',
+  async ({ page, scenarioState }) => {
+    await page.goto('/exercises');
+    const row = page
+      .locator('.exercise-item')
+      .filter({
+        has: page.getByRole('link', { name: scenarioState.exerciseName }),
+      })
+      .first();
+    await row.getByRole('link', { name: 'Edit' }).click();
+    const newName = scenarioState.unique('Renamed');
+    await page.getByLabel('Name').fill(newName);
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(page).toHaveURL('/exercises');
+    scenarioState.exerciseName = newName;
+  },
+);
+
+When('I delete my exercise', async ({ page, scenarioState }) => {
+  await page.goto('/exercises');
+  const row = page
+    .locator('.exercise-item')
+    .filter({
+      has: page.getByRole('link', { name: scenarioState.exerciseName }),
+    })
+    .first();
+  page.once('dialog', (d) => d.accept());
+  await row.getByRole('button', { name: 'Delete' }).click();
+});
+
+Then(
+  'my exercise is no longer listed on the exercises page',
+  async ({ page, scenarioState }) => {
+    await page.goto('/exercises');
+    await expect(
+      page.getByRole('link', { name: scenarioState.exerciseName }),
+    ).toHaveCount(0);
+  },
+);
