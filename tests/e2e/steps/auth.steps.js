@@ -73,3 +73,37 @@ Then('I see the setup page', async ({ page }) => {
 Then('I see the login error {string}', async ({ page }, message) => {
   await expect(page.locator('.error')).toContainText(message);
 });
+
+When(
+  'I submit the setup form with username {string} and password {string}',
+  async ({ page }, username, password) => {
+    await page.goto('/auth/setup');
+    // Bypass the browser's own minlength/required validation so the
+    // request actually hits the server. We want to lock the server-side
+    // defense-in-depth check, not the HTML attributes.
+    await page.locator('form').evaluate((f) => {
+      f.noValidate = true;
+    });
+    await page.getByLabel('Username').fill(username);
+    await page.locator('#password').fill(password);
+    await page.getByRole('button', { name: 'Create Account' }).click();
+  },
+);
+
+Then('I see the setup error {string}', async ({ page }, message) => {
+  await expect(page).toHaveURL('/auth/setup');
+  await expect(page.locator('.error')).toContainText(message);
+});
+
+Given(
+  'I am logged in as a fresh non-admin user',
+  async ({ page, request, baseURL, scenarioState }) => {
+    const username = scenarioState.unique('member');
+    scenarioState.currentUser = username;
+    await ensureUser(request, baseURL, username, ADMIN.password);
+    await loginViaUi(page, username, ADMIN.password);
+    await expect(
+      page.getByRole('heading', { name: 'Dashboard', level: 1 }),
+    ).toBeVisible();
+  },
+);
