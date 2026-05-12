@@ -4,9 +4,10 @@
   "type": "module",
   "description": "UI-level BDD tests for LiftLog (Playwright + playwright-bdd)",
   "scripts": {
-    "test": "bddgen && playwright test",
-    "test:headed": "bddgen && playwright test --headed",
-    "test:ui": "bddgen && playwright test --ui",
+    "build-server": "cargo build --manifest-path ../../Cargo.toml --quiet",
+    "test": "npm run build-server && bddgen && playwright test",
+    "test:headed": "npm run build-server && bddgen && playwright test --headed",
+    "test:ui": "npm run build-server && bddgen && playwright test --ui",
     "report": "playwright show-report",
     "install-browsers": "playwright install --with-deps chromium"
   },
