@@ -7,3 +7,9 @@ Feature: Logging in
     Given a user "lifter" with password "barbell-club" exists
     When I log in as "lifter" with password "barbell-club"
     Then I see the dashboard
+
+  Scenario: Logging in with the wrong password shows an error
+    Given a user "lifter" with password "barbell-club" exists
+    When I log in as "lifter" with password "definitely-not-it"
+    Then I see the login error "Invalid username or password"
+    And the URL is "/auth/login"

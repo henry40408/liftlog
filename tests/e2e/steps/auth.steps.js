@@ -1,40 +1,75 @@
 import { expect } from '@playwright/test';
 import { createBdd } from 'playwright-bdd';
 import { test } from './fixtures.js';
+import { ADMIN, ensureUser } from '../support/seeding.js';
 
 const { Given, When, Then } = createBdd(test);
 
-// The Rust server boots with an empty sqlite DB per run, so /auth/setup is
-// the only path that can create the first user. Subsequent calls 302 back to
-// /auth/login, which is treated as a no-op here.
+async function loginViaUi(page, username, password) {
+  await page.goto('/auth/login');
+  await page.getByLabel('Username').fill(username);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button', { name: 'Login' }).click();
+}
+
 Given(
   'a user {string} with password {string} exists',
   async ({ request, baseURL }, username, password) => {
-    const res = await request.post(`${baseURL}/auth/setup`, {
-      form: { username, password },
-      maxRedirects: 0,
-      failOnStatusCode: false,
-    });
-    expect(
-      [200, 302, 303],
-      `unexpected /auth/setup status ${res.status()}`,
-    ).toContain(res.status());
+    await ensureUser(request, baseURL, username, password);
+  },
+);
+
+Given('I am logged in as {string}', async ({ page, request, baseURL }, username) => {
+  await ensureUser(request, baseURL, username, ADMIN.password);
+  await loginViaUi(page, username, ADMIN.password);
+  await expect(
+    page.getByRole('heading', { name: 'Dashboard', level: 1 }),
+  ).toBeVisible();
+});
+
+Given(
+  'I am logged in as {string} with password {string}',
+  async ({ page, request, baseURL }, username, password) => {
+    await ensureUser(request, baseURL, username, password);
+    await loginViaUi(page, username, password);
+    await expect(
+      page.getByRole('heading', { name: 'Dashboard', level: 1 }),
+    ).toBeVisible();
   },
 );
 
 When(
   'I log in as {string} with password {string}',
   async ({ page }, username, password) => {
-    await page.goto('/auth/login');
-    await page.getByLabel('Username').fill(username);
-    await page.getByLabel('Password').fill(password);
-    await page.getByRole('button', { name: 'Login' }).click();
+    await loginViaUi(page, username, password);
   },
 );
+
+When('I log out', async ({ page }) => {
+  await page.getByRole('button', { name: 'Sign Out' }).click();
+});
 
 Then('I see the dashboard', async ({ page }) => {
   await expect(page).toHaveURL('/');
   await expect(
     page.getByRole('heading', { name: 'Dashboard', level: 1 }),
   ).toBeVisible();
+});
+
+Then('I see the login page', async ({ page }) => {
+  await expect(page).toHaveURL('/auth/login');
+  await expect(
+    page.getByRole('button', { name: 'Login' }),
+  ).toBeVisible();
+});
+
+Then('I see the setup page', async ({ page }) => {
+  await expect(page).toHaveURL('/auth/setup');
+  await expect(
+    page.getByRole('button', { name: 'Create Account' }),
+  ).toBeVisible();
+});
+
+Then('I see the login error {string}', async ({ page }, message) => {
+  await expect(page.locator('.error')).toContainText(message);
 });
