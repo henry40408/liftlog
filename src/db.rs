@@ -29,6 +29,17 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
     Pool::builder().max_size(10).build(manager)
 }
 
+/// Flush the WAL back into the main database and truncate the `-wal` file.
+///
+/// Run on graceful shutdown so the on-disk DB is self-contained; the `-wal`
+/// and `-shm` siblings are then removed by SQLite when the pool's last
+/// connection closes.
+pub fn checkpoint(pool: &DbPool) -> anyhow::Result<()> {
+    let conn = pool.get()?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub fn create_memory_pool() -> Result<DbPool, r2d2::Error> {
     let manager = SqliteConnectionManager::memory();
@@ -88,6 +99,31 @@ mod tests {
             .expect("synchronous");
         // NORMAL == 1 (FULL == 2, OFF == 0).
         assert_eq!(sync, 1);
+    }
+
+    #[test]
+    fn checkpoint_truncates_wal_file() {
+        let tmp = TempDbPath::new();
+        let pool = create_pool(&tmp.url()).expect("file pool");
+        {
+            let conn = pool.get().expect("get conn");
+            conn.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\
+                 INSERT INTO t (v) VALUES ('a'), ('b'), ('c');",
+            )
+            .expect("write");
+        }
+
+        let wal_path = format!("{}-wal", tmp.0.display());
+        let before = std::fs::metadata(&wal_path).expect("wal exists").len();
+        assert!(before > 0, "WAL should have frames before checkpoint");
+
+        checkpoint(&pool).expect("checkpoint");
+
+        let after = std::fs::metadata(&wal_path)
+            .expect("wal still exists")
+            .len();
+        assert_eq!(after, 0, "TRUNCATE checkpoint should zero the WAL file");
     }
 
     #[test]

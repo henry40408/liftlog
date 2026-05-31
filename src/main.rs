@@ -50,22 +50,30 @@ async fn main() -> anyhow::Result<()> {
     let workout_repo = WorkoutRepository::new(pool.clone());
     let session_repo = SessionRepository::new(pool.clone());
 
+    // Broadcasts the shutdown request to the background sweep so it can stop
+    // cleanly before we checkpoint the WAL.
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
     // Periodic background sweep of expired session rows. validate_and_touch
     // already lazily deletes stale rows it sees, but orphans (sessions never
     // revisited) need this sweep to avoid unbounded table growth.
-    {
+    let sweep_handle = {
         let session_repo = session_repo.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
-                ticker.tick().await;
-                if let Err(e) = session_repo.cleanup_expired().await {
-                    tracing::warn!(error = ?e, "session cleanup_expired failed");
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        if let Err(e) = session_repo.cleanup_expired().await {
+                            tracing::warn!(error = ?e, "session cleanup_expired failed");
+                        }
+                    }
+                    _ = shutdown_rx.changed() => break,
                 }
             }
-        });
-    }
+        })
+    };
 
     let app_state = AppState {
         user_repo,
@@ -85,6 +93,21 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // Server has stopped accepting connections and drained in-flight requests.
+    // Stop the background sweep and wait for any current pass to finish before
+    // we touch the DB.
+    let _ = shutdown_tx.send(true);
+    if let Err(e) = sweep_handle.await {
+        tracing::warn!(error = ?e, "session sweep task did not stop cleanly");
+    }
+
+    // Checkpoint the WAL so the main DB file is self-contained. The pool (and
+    // its connections) drops at the end of main, after which SQLite removes
+    // the now-empty -wal/-shm siblings.
+    if let Err(e) = db::checkpoint(&pool) {
+        tracing::warn!(error = ?e, "WAL checkpoint on shutdown failed");
+    }
 
     tracing::info!("Server shut down gracefully");
     Ok(())
