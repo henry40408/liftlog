@@ -206,6 +206,25 @@ Then(
 );
 
 When(
+  'I select the exercise I created on the workout page',
+  async ({ page, scenarioState }) => {
+    await page.goto(`/workouts/${scenarioState.workoutId}`);
+    await page
+      .locator('select#exercise_id')
+      .selectOption({ label: scenarioState.exerciseName });
+  },
+);
+
+Then(
+  'the Last info shows {string}',
+  async ({ page }, text) => {
+    const info = page.locator('#exercise-last-weight-info');
+    await expect(info).toBeVisible();
+    await expect(info.locator('.rpe-chip')).toHaveText(text);
+  },
+);
+
+When(
   'I log another set of {int} kg for {int} reps using the same exercise',
   async ({ page, scenarioState }, weight, reps) => {
     await page.goto(`/workouts/${scenarioState.workoutId}`);

@@ -125,6 +125,7 @@ var exerciseLastWeights = {};
 {% for entry in exercise_last_weights %}
 exerciseLastWeights["{{ entry.exercise_id }}"] = {
     weight: {{ entry.weight }},
+    rpe: {% match entry.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %},
     date: "{{ entry.logged_at.format("%Y-%m-%d") }}"
 };
 {% endfor %}
@@ -135,7 +136,11 @@ var exerciseSelect = document.getElementById('exercise_id');
 function showLastWeightInfo(exerciseId) {
     if (exerciseId && exerciseLastWeights[exerciseId]) {
         var entry = exerciseLastWeights[exerciseId];
-        lastWeightInfoEl.innerHTML = "Last: " + entry.weight + " kg @ " + entry.date +
+        var rpeHtml = (entry.rpe !== null)
+            ? '<span class="rpe-chip">RPE ' + entry.rpe + '</span>'
+            : '<span class="rpe-chip rpe-chip-empty">RPE —</span>';
+        lastWeightInfoEl.innerHTML = "Last: " + entry.weight + " kg " + rpeHtml +
+            ' <span class="muted">' + entry.date + '</span>' +
             ' <button type="button" class="btn btn-sm btn-inline" style="background:var(--gold);color:var(--text-inverse);border-color:var(--gold);" onclick="fillLastWeight()">Fill</button>';
         lastWeightInfoEl.classList.add('visible');
     } else {
