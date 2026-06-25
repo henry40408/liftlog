@@ -374,6 +374,7 @@ impl WorkoutRepository {
             let mut stmt = conn.prepare(
                 "SELECT wl.exercise_id, e.name as exercise_name,
                         wl.weight as weight,
+                        wl.rpe as rpe,
                         MAX(wl.created_at) as logged_at
                  FROM workout_logs wl
                  JOIN workout_sessions ws ON wl.session_id = ws.id
@@ -1186,10 +1187,10 @@ mod tests {
         repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
             .await
             .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, None)
+        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, Some(8))
             .await
             .unwrap();
-        // Squat: single set
+        // Squat: single set, no RPE recorded
         repo.create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
             .await
             .unwrap();
@@ -1211,6 +1212,9 @@ mod tests {
         // Last logged weight, NOT the max
         assert_eq!(bench.weight, 105.0);
         assert_eq!(squat.weight, 150.0);
+        // RPE comes from the same latest row as the weight
+        assert_eq!(bench.rpe, Some(8));
+        assert_eq!(squat.rpe, None);
     }
 
     #[tokio::test]

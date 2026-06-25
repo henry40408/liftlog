@@ -57,6 +57,21 @@ Feature: Workout lifecycle
     When I log another set of 50 kg for 8 reps using the same exercise
     Then I see two sets numbered 1 and 2
 
+  Scenario: Last info shows the previous RPE when selecting an exercise
+    Given I am logged in as "lifter"
+    And I have an exercise in category "chest"
+    And I have a workout
+    When I log a set of 100 kg for 5 reps with RPE 8 using the exercise I created
+    And I select the exercise I created on the workout page
+    Then the Last info shows "RPE 8"
+
+  Scenario: Last info shows an RPE placeholder when the last set had no RPE
+    Given I am logged in as "lifter"
+    And I have an exercise in category "chest"
+    And I have a workout with a set of 60 kg for 8 reps
+    When I select the exercise I created on the workout page
+    Then the Last info shows "RPE —"
+
   Scenario: Clone-set button pre-fills the Add Set form
     Given I am logged in as "lifter"
     And I have an exercise in category "shoulders"
