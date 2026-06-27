@@ -1,3 +1,3 @@
 pub mod auth;
 
-pub use auth::{sliding_session_middleware, AdminUser, AuthUser, SuppressSessionRefresh};
+pub use auth::{AdminUser, AuthUser, SuppressSessionRefresh, sliding_session_middleware};

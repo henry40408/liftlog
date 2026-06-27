@@ -1,5 +1,5 @@
-use axum_extra::extract::cookie::Cookie;
 use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::Cookie;
 
 pub const SESSION_COOKIE_NAME: &str = "session";
 

@@ -62,10 +62,9 @@ pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
 
     let applied: HashSet<String> = {
         let mut stmt = conn.prepare("SELECT name FROM _migrations")?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<HashSet<String>>>()?;
-        rows
+
+        stmt.query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<HashSet<String>>>()?
     };
 
     for (filename, sql) in MIGRATIONS {

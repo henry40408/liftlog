@@ -2,7 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
@@ -31,7 +31,7 @@ async fn test_share_workout_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/share", workout.id))
+                .uri(format!("/workouts/{}/share", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -41,13 +41,15 @@ async fn test_share_workout_success() {
 
     // Should redirect to workout page
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert!(response
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains(&workout.id));
+    assert!(
+        response
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains(&workout.id)
+    );
 
     // Verify share_token was set
     let workout_repo = WorkoutRepository::new(pool);
@@ -87,7 +89,7 @@ async fn test_view_shared_workout_public() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(&format!("/shared/{}", share_token))
+                .uri(format!("/shared/{}", share_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -153,7 +155,7 @@ async fn test_revoke_share_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/revoke-share", workout.id))
+                .uri(format!("/workouts/{}/revoke-share", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -176,7 +178,7 @@ async fn test_revoke_share_success() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(&format!("/shared/{}", share_token))
+                .uri(format!("/shared/{}", share_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -227,7 +229,7 @@ async fn test_reshare_after_revoke_generates_new_token() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(&format!("/shared/{}", token1))
+                .uri(format!("/shared/{}", token1))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -240,7 +242,7 @@ async fn test_reshare_after_revoke_generates_new_token() {
     let response2 = app2
         .oneshot(
             Request::builder()
-                .uri(&format!("/shared/{}", token2))
+                .uri(format!("/shared/{}", token2))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -275,7 +277,7 @@ async fn test_cannot_share_others_workout() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/share", workout.id))
+                .uri(format!("/workouts/{}/share", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -313,7 +315,7 @@ async fn test_share_requires_auth() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/share", workout.id))
+                .uri(format!("/workouts/{}/share", workout.id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -343,7 +345,7 @@ async fn test_revoke_share_requires_auth() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/revoke-share", workout.id))
+                .uri(format!("/workouts/{}/revoke-share", workout.id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -386,7 +388,7 @@ async fn test_cannot_revoke_others_share() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/revoke-share", workout.id))
+                .uri(format!("/workouts/{}/revoke-share", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -426,7 +428,7 @@ async fn test_show_workout_displays_share_button() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}", workout.id))
+                .uri(format!("/workouts/{}", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -474,7 +476,7 @@ async fn test_show_workout_displays_share_link_and_revoke() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}", workout.id))
+                .uri(format!("/workouts/{}", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),

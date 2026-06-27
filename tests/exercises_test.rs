@@ -2,7 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
@@ -158,7 +158,7 @@ async fn test_edit_exercise_page_renders() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/exercises/{}/edit", exercise.id))
+                .uri(format!("/exercises/{}/edit", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -190,7 +190,7 @@ async fn test_update_exercise_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/exercises/{}", exercise.id))
+                .uri(format!("/exercises/{}", exercise.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("name=Incline%20Bench%20Press&category=chest"))
@@ -228,7 +228,7 @@ async fn test_delete_exercise_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/exercises/{}/delete", exercise.id))
+                .uri(format!("/exercises/{}/delete", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -266,7 +266,7 @@ async fn test_cannot_edit_others_exercise() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/exercises/{}/edit", exercise.id))
+                .uri(format!("/exercises/{}/edit", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -295,7 +295,7 @@ async fn test_cannot_update_others_exercise() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/exercises/{}", exercise.id))
+                .uri(format!("/exercises/{}", exercise.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("name=Hacked&category=chest"))
@@ -334,7 +334,7 @@ async fn test_cannot_delete_others_exercise() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/exercises/{}/delete", exercise.id))
+                .uri(format!("/exercises/{}/delete", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -477,7 +477,7 @@ async fn test_update_exercise_empty_name_rejected() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/exercises/{}", exercise.id))
+                .uri(format!("/exercises/{}", exercise.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("name=&category=chest"))
