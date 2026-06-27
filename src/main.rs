@@ -19,6 +19,12 @@ use migrations::run_migrations;
 use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
 use state::AppState;
 
+// The release image links musl, whose default allocator is markedly slower than
+// glibc's under concurrent load. mimalloc restores throughput for the request
+// handlers and the r2d2 SQLite pool.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
