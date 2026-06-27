@@ -10,6 +10,7 @@ LiftLog is a self-hosted workout journal: an Axum + Askama server-rendered app b
 cargo run                                 # dev server on $PORT (default 3000)
 cargo fmt --all -- --check                # formatting gate
 cargo clippy -- -D warnings               # lint gate
+cargo deny check                          # supply-chain gate (advisories/licenses/bans/sources)
 cargo nextest run                         # Rust integration + unit tests
 cargo nextest run --test workout_test     # single integration file
 cargo nextest run -p liftlog session_repo # filter by name
