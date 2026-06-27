@@ -1,8 +1,8 @@
 use askama::Template;
 use axum::{
+    Form,
     extract::{Path, Request, State},
     response::{Html, IntoResponse, Redirect, Response},
-    Form,
 };
 use axum_extra::extract::CookieJar;
 

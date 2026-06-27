@@ -1,6 +1,6 @@
 use axum::Router;
 
-use liftlog::db::{create_memory_pool, DbPool};
+use liftlog::db::{DbPool, create_memory_pool};
 use liftlog::migrations::run_migrations_for_tests;
 use liftlog::models::{User, UserRole};
 use liftlog::repositories::{SessionRepository, UserRepository};

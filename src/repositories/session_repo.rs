@@ -444,11 +444,12 @@ mod tests {
 
         repo.cleanup_expired().await.unwrap();
 
-        assert!(repo
-            .validate_and_touch(&token_valid)
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            repo.validate_and_touch(&token_valid)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         let conn = pool.get().unwrap();
         let count: i64 = conn

@@ -2,7 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
@@ -218,7 +218,7 @@ async fn test_delete_workout() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/delete", workout.id))
+                .uri(format!("/workouts/{}/delete", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -264,7 +264,7 @@ async fn test_cannot_delete_others_workout() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/delete", workout.id))
+                .uri(format!("/workouts/{}/delete", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -304,7 +304,7 @@ async fn test_view_workout_details() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}", workout.id))
+                .uri(format!("/workouts/{}", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -348,7 +348,7 @@ async fn test_cannot_view_others_workout() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}", workout.id))
+                .uri(format!("/workouts/{}", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -385,7 +385,7 @@ async fn test_edit_workout_page_renders() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}/edit", workout.id))
+                .uri(format!("/workouts/{}/edit", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -425,7 +425,7 @@ async fn test_update_workout_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}", workout.id))
+                .uri(format!("/workouts/{}", workout.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("date=2024-01-20&notes=Updated%20notes"))
@@ -474,7 +474,7 @@ async fn test_cannot_edit_others_workout_page() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}/edit", workout.id))
+                .uri(format!("/workouts/{}/edit", workout.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -510,7 +510,7 @@ async fn test_add_log_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs", workout.id))
+                .uri(format!("/workouts/{}/logs", workout.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(format!(
@@ -523,13 +523,15 @@ async fn test_add_log_success() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert!(response
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains(&workout.id));
+    assert!(
+        response
+            .headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains(&workout.id)
+    );
 
     // Verify log was created
     let workout_repo = WorkoutRepository::new(pool);
@@ -565,7 +567,7 @@ async fn test_add_log_accepts_fractional_weight() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs", workout.id))
+                .uri(format!("/workouts/{}/logs", workout.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(format!(
@@ -613,7 +615,7 @@ async fn test_add_log_requires_ownership() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs", workout.id))
+                .uri(format!("/workouts/{}/logs", workout.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(format!(
@@ -652,7 +654,7 @@ async fn test_delete_log_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs/{}/delete", workout.id, log.id))
+                .uri(format!("/workouts/{}/logs/{}/delete", workout.id, log.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -697,7 +699,7 @@ async fn test_delete_log_requires_ownership() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs/{}/delete", workout.id, log.id))
+                .uri(format!("/workouts/{}/logs/{}/delete", workout.id, log.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -739,7 +741,7 @@ async fn test_edit_log_page_renders() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/workouts/{}/logs/{}/edit", workout.id, log.id))
+                .uri(format!("/workouts/{}/logs/{}/edit", workout.id, log.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -780,7 +782,7 @@ async fn test_update_log_success() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs/{}", workout.id, log.id))
+                .uri(format!("/workouts/{}/logs/{}", workout.id, log.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("reps=12&weight=110&rpe=9"))
@@ -823,7 +825,7 @@ async fn test_update_log_accepts_fractional_weight() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs/{}", workout.id, log.id))
+                .uri(format!("/workouts/{}/logs/{}", workout.id, log.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("reps=10&weight=21.25&rpe=8"))
@@ -865,7 +867,7 @@ async fn test_update_log_requires_ownership() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/workouts/{}/logs/{}", workout.id, log.id))
+                .uri(format!("/workouts/{}/logs/{}", workout.id, log.id))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from("reps=12&weight=110&rpe=9"))

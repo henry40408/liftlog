@@ -1,13 +1,13 @@
 use askama::Template;
 use axum::{
+    Form,
     extract::{Path, State},
     response::{Html, IntoResponse, Redirect, Response},
-    Form,
 };
 
 use crate::error::Result;
 use crate::middleware::AuthUser;
-use crate::models::exercise::{ExerciseCategory, CATEGORIES};
+use crate::models::exercise::{CATEGORIES, ExerciseCategory};
 use crate::models::{CreateExercise, Exercise, UpdateExercise};
 use crate::state::AppState;
 

@@ -2,7 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
@@ -135,7 +135,7 @@ async fn test_admin_can_delete_user() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/users/{}/delete", user.id))
+                .uri(format!("/users/{}/delete", user.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -170,7 +170,7 @@ async fn test_user_cannot_delete_user() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/users/{}/delete", user2.id))
+                .uri(format!("/users/{}/delete", user2.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -203,7 +203,7 @@ async fn test_admin_cannot_self_delete() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/users/{}/delete", admin.id))
+                .uri(format!("/users/{}/delete", admin.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -237,7 +237,7 @@ async fn test_admin_can_promote_user() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/users/{}/promote", user.id))
+                .uri(format!("/users/{}/promote", user.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -272,7 +272,7 @@ async fn test_user_cannot_promote_user() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/users/{}/promote", user2.id))
+                .uri(format!("/users/{}/promote", user2.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),

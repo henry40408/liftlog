@@ -2,7 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
@@ -200,7 +200,7 @@ async fn test_exercise_stats_shows_history() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/stats/exercise/{}", exercise.id))
+                .uri(format!("/stats/exercise/{}", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -306,7 +306,7 @@ async fn test_exercise_stats_chart_renders_with_two_or_more_sessions() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/stats/exercise/{}", exercise.id))
+                .uri(format!("/stats/exercise/{}", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -362,7 +362,7 @@ async fn test_exercise_stats_chart_renders_sparse_state_with_one_session() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/stats/exercise/{}", exercise.id))
+                .uri(format!("/stats/exercise/{}", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -394,7 +394,7 @@ async fn test_exercise_stats_chart_renders_empty_state_with_no_logs() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/stats/exercise/{}", exercise.id))
+                .uri(format!("/stats/exercise/{}", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),
@@ -436,7 +436,7 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
         .router
         .oneshot(
             Request::builder()
-                .uri(&format!("/stats/exercise/{}", exercise.id))
+                .uri(format!("/stats/exercise/{}", exercise.id))
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::empty())
                 .unwrap(),

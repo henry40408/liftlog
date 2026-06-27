@@ -1,15 +1,15 @@
 use askama::Template;
 use axum::{
+    Form,
     extract::{Path, Query, State},
     response::{Html, IntoResponse, Redirect, Response},
-    Form,
 };
 use chrono::NaiveDate;
 use serde::Deserialize;
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
-use crate::models::exercise::{ExerciseCategory, CATEGORIES};
+use crate::models::exercise::{CATEGORIES, ExerciseCategory};
 use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, Exercise, LastExerciseWeight, UpdateWorkoutLog,
     WorkoutLog, WorkoutLogWithExercise, WorkoutSession,
