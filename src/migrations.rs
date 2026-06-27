@@ -5,7 +5,7 @@
 
 use crate::db::DbPool;
 
-/// All migrations in order, each as (filename, sql_content)
+/// All migrations in order, each as (filename, `sql_content`)
 pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "001_create_users.sql",

@@ -32,8 +32,10 @@ fn get_git_version() -> String {
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "dev".to_string()) // Tier 3: fallback to "dev"
+        .map_or_else(
+            || "dev".to_string(), // Tier 3: fallback to "dev"
+            |o| String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        )
 }
 
 fn render_apple_touch_icon() {
