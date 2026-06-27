@@ -68,8 +68,9 @@ impl IntoResponse for AppError {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            AppError::BadRequest(msg) | AppError::Validation(msg) => {
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
             AppError::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);
                 (

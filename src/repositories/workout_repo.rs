@@ -228,7 +228,7 @@ impl WorkoutRepository {
         Ok(log)
     }
 
-    /// Find logs by session with dynamically computed is_pr
+    /// Find logs by session with dynamically computed `is_pr`
     pub async fn find_logs_by_session_with_pr(
         &self,
         session_id: &str,
@@ -327,7 +327,7 @@ impl WorkoutRepository {
                 )
                 .optional()?
                 .flatten();
-            Ok(result.map(|n| n + 1).unwrap_or(1))
+            Ok(result.map_or(1, |n| n + 1))
         })
         .await?
     }
@@ -517,7 +517,7 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Get exercise history with dynamically computed is_pr
+    /// Get exercise history with dynamically computed `is_pr`
     pub async fn get_exercise_history_with_pr(
         &self,
         user_id: &str,

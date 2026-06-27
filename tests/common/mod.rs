@@ -36,6 +36,8 @@ pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
     TestApp { router }
 }
 
+// Shared test helper used by a subset of integration test binaries.
+#[allow(dead_code)]
 pub async fn create_test_user(
     pool: &DbPool,
     username: &str,
@@ -46,19 +48,23 @@ pub async fn create_test_user(
     user_repo.create(username, password, role).await.unwrap()
 }
 
+#[allow(dead_code)]
 pub async fn create_session_token(pool: &DbPool, user: &User) -> String {
     let session_repo = SessionRepository::new(pool.clone());
     session_repo.create(&user.id).await.unwrap()
 }
 
+#[allow(dead_code)]
 pub fn cookie_header(token: &str) -> String {
     format!("session={}", token)
 }
 
+#[allow(dead_code)]
 pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
     cookie_header(&create_session_token(pool, user).await)
 }
 
+#[allow(dead_code)]
 pub fn extract_cookie_header(set_cookie: &str) -> String {
     // Extract just the cookie name=value part for use in Cookie header
     set_cookie.split(';').next().unwrap_or("").to_string()

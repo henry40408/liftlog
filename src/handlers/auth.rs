@@ -76,18 +76,15 @@ pub async fn login_submit(
         .verify_password(&credentials.username, &credentials.password)
         .await?;
 
-    match user {
-        Some(user) => {
-            let token = state.session_repo.create(&user.id).await?;
-            let jar = jar.add(create_session_cookie(&token));
-            Ok((jar, Redirect::to("/")).into_response())
-        }
-        None => {
-            let template = LoginTemplate {
-                error: Some("Invalid username or password".to_string()),
-            };
-            Ok(Html(template.render()?).into_response())
-        }
+    if let Some(user) = user {
+        let token = state.session_repo.create(&user.id).await?;
+        let jar = jar.add(create_session_cookie(&token));
+        Ok((jar, Redirect::to("/")).into_response())
+    } else {
+        let template = LoginTemplate {
+            error: Some("Invalid username or password".to_string()),
+        };
+        Ok(Html(template.render()?).into_response())
     }
 }
 

@@ -152,7 +152,7 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let user = AuthUser::from_request_parts(parts, state)
             .await
-            .map_err(|_| AdminOrAuthRedirect::Auth)?;
+            .map_err(|_e| AdminOrAuthRedirect::Auth)?;
 
         if user.is_admin() {
             Ok(AdminUser(user))

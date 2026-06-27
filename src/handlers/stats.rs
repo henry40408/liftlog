@@ -30,9 +30,9 @@ pub(crate) struct RenderedChart {
     pub(crate) points: Vec<RenderedPoint>,
     /// Polyline `points` attribute, e.g. "10,20 50,60 ..."
     pub(crate) polyline: String,
-    /// Y-axis tick labels: (y_pixel, label_text)
+    /// Y-axis tick labels: (`y_pixel`, `label_text`)
     pub(crate) y_ticks: Vec<(f64, String)>,
-    /// X-axis tick labels: (x_pixel, label_text). Only every Nth point is labeled.
+    /// X-axis tick labels: (`x_pixel`, `label_text`). Only every Nth point is labeled.
     pub(crate) x_ticks: Vec<(f64, String)>,
 }
 

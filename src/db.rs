@@ -32,7 +32,7 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
 /// Flush the WAL back into the main database and truncate the `-wal` file.
 ///
 /// Run on graceful shutdown so the on-disk DB is self-contained; the `-wal`
-/// and `-shm` siblings are then removed by SQLite when the pool's last
+/// and `-shm` siblings are then removed by `SQLite` when the pool's last
 /// connection closes.
 pub fn checkpoint(pool: &DbPool) -> anyhow::Result<()> {
     let conn = pool.get()?;
