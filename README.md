@@ -1,13 +1,17 @@
 # LiftLog
 
+> A self-hosted workout logging application built with Rust.
+
 [![CI](https://github.com/henry40408/liftlog/actions/workflows/ci.yml/badge.svg)](https://github.com/henry40408/liftlog/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/henry40408/liftlog/graph/badge.svg)](https://codecov.io/gh/henry40408/liftlog)
+[![Release](https://img.shields.io/github/v/release/henry40408/liftlog)](https://github.com/henry40408/liftlog/releases/latest)
 [![License](https://img.shields.io/github/license/henry40408/liftlog)](LICENSE.txt)
-[![Rust](https://img.shields.io/badge/rust-1.94-blue.svg)](https://www.rust-lang.org/)
+[![Rust toolchain](https://img.shields.io/badge/dynamic/toml?url=https://raw.githubusercontent.com/henry40408/liftlog/main/rust-toolchain.toml&query=$.toolchain.channel&label=rust%20toolchain&logo=rust)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/henry40408/liftlog)
 [![Casual Maintenance Intended](https://casuallymaintained.tech/badge.svg)](https://casuallymaintained.tech/)
+[![Vibe Coded](https://img.shields.io/badge/vibe_coded-Claude-d97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 
-A self-hosted workout logging application built with Rust. Track your training sessions, monitor progress, and celebrate personal records.
+Track your training sessions, monitor progress, and celebrate personal records.
 
 ## Features
 
