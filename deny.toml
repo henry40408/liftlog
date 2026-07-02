@@ -12,10 +12,6 @@ version = 2
 # `ignore` holds advisory IDs we've reviewed and consciously accept (none yet).
 yanked = "deny"
 ignore = [
-    # memmap2 unchecked pointer offset (unsound). Fixed in 0.9.11, but that
-    # release is younger than our 7-day dependency cooldown — re-bump and drop
-    # this entry once it has aged out.
-    "RUSTSEC-2026-0186",
     # ttf-parser is unmaintained (author will not ship further fixes). It is a
     # build-time-only dependency, pulled in transitively through
     # resvg → usvg → fontdb/rustybuzz to render the app icon in build.rs, and
