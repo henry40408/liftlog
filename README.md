@@ -60,7 +60,8 @@ All configuration is done via environment variables:
 | `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `3000` | HTTP server port |
-| `RUST_LOG` | `liftlog=debug` | Log level filter |
+| `RUST_LOG` | `error,liftlog=info` | Log level filter |
+| `LOG_FORMAT` | `full` | Log output format: `full`, `compact`, `pretty`, `json` (also settable via `--log-format`) |
 
 ## Docker
 
