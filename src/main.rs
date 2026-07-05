@@ -1,5 +1,8 @@
+use clap::Parser;
 use tokio::net::TcpListener;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Layer as _, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 mod config;
 mod db;
@@ -25,16 +28,50 @@ use state::AppState;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+enum LogFormat {
+    #[default]
+    Full,
+    Compact,
+    Pretty,
+    Json,
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "liftlog")]
+struct Args {
+    /// Log output format
+    #[arg(long, env = "LOG_FORMAT", default_value = "full")]
+    log_format: LogFormat,
+}
+
+fn init_tracing(format: LogFormat) {
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error,liftlog=info"));
+    let span_events = env_filter.max_level_hint().map_or(FmtSpan::CLOSE, |l| {
+        if l >= tracing::Level::DEBUG {
+            FmtSpan::CLOSE
+        } else {
+            FmtSpan::NONE
+        }
+    });
+    let use_ansi = std::env::var_os("NO_COLOR").is_none();
+    let layer = tracing_subscriber::fmt::layer()
+        .with_span_events(span_events)
+        .with_ansi(use_ansi);
+    let layer = match format {
+        LogFormat::Full => layer.with_filter(env_filter).boxed(),
+        LogFormat::Compact => layer.compact().with_filter(env_filter).boxed(),
+        LogFormat::Pretty => layer.pretty().with_filter(env_filter).boxed(),
+        LogFormat::Json => layer.json().with_filter(env_filter).boxed(),
+    };
+    tracing_subscriber::registry().with(layer).init();
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "liftlog=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let args = Args::parse();
+    init_tracing(args.log_format);
 
     // Load environment variables
     dotenvy::dotenv().ok();
