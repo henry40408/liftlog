@@ -7,7 +7,11 @@ edition = "2024"
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
 askama = "0.16"
-time = "0.3"
+# Pinned: time 0.3.52 changed a sealed-trait internal API and broke cookie 0.18.1
+# (build failure in #118). 0.3.53 restores compilation via a deprecated shim that
+# time says it will remove — so 0.3.54+ is expected to break cookie again until it
+# ships a fix. Hold at 0.3.53 until cookie 0.18.x adapts.
+time = ">=0.3.53, <0.3.54"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
