@@ -18,6 +18,10 @@ ignore = [
     # never reaches the running server. No safe upgrade exists yet (resvg has
     # not migrated to skrifa) — drop this entry once resvg replaces ttf-parser.
     "RUSTSEC-2026-0192",
+    # rustybuzz is unmaintained — same build-time-only resvg → usvg → rustybuzz
+    # chain (text shaping for the build.rs app-icon render), never reaching the
+    # running server. Drop once resvg migrates off rustybuzz.
+    "RUSTSEC-2026-0206",
 ]
 
 [licenses]
