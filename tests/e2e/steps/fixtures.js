@@ -50,8 +50,7 @@ export const test = base.extend({
         env: {
           ...process.env,
           DATABASE_URL: `sqlite:${dbRel}?mode=rwc`,
-          HOST: '127.0.0.1',
-          PORT: String(port),
+          BIND: `127.0.0.1:${port}`,
           RUST_LOG: 'liftlog=warn',
         },
         stdio: ['ignore', 'pipe', 'pipe'],

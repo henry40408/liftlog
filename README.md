@@ -30,12 +30,12 @@ Track your training sessions, monitor progress, and celebrate personal records.
 ```bash
 docker run -d \
   --name liftlog \
-  -p 3000:3000 \
+  -p 8080:8080 \
   -v liftlog_data:/data \
   ghcr.io/henry40408/liftlog:latest
 ```
 
-Visit `http://localhost:3000` and create your account.
+Visit `http://localhost:8080` and create your account.
 
 ### Building from Source
 
@@ -58,8 +58,7 @@ All configuration is done via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
-| `HOST` | `0.0.0.0` | Server bind address |
-| `PORT` | `3000` | HTTP server port |
+| `BIND` | `0.0.0.0:8080` | HTTP server bind address (`host:port`) |
 | `RUST_LOG` | `error,liftlog=info` | Log level filter |
 | `LOG_FORMAT` | `full` | Log output format: `full`, `compact`, `pretty`, `json` (also settable via `--log-format`) |
 
@@ -72,7 +71,7 @@ services:
   liftlog:
     image: ghcr.io/henry40408/liftlog:latest
     ports:
-      - "3000:3000"
+      - "8080:8080"
     volumes:
       - liftlog_data:/data
     restart: unless-stopped
