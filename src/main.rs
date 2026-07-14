@@ -129,10 +129,10 @@ async fn main() -> anyhow::Result<()> {
     let app = routes::create_router(app_state);
 
     // Start server
-    let addr = config.server_addr();
+    let addr = config.bind;
     tracing::info!("Starting server at http://{}", addr);
 
-    let listener = TcpListener::bind(&addr).await?;
+    let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
