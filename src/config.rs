@@ -18,15 +18,16 @@ impl Config {
 }
 
 /// Resolve the `BIND` value into a [`SocketAddr`]. An unset or empty value
-/// yields the default `0.0.0.0:8080` (listen on all interfaces, so a reverse
-/// proxy in a separate container can reach it); any non-empty value must be a
-/// valid `host:port` socket address.
+/// yields the default `127.0.0.1:8080` (loopback only, so a bare-metal run is
+/// not exposed on all interfaces without opting in); any non-empty value must
+/// be a valid `host:port` socket address. The container image sets
+/// `BIND=0.0.0.0:8080` so a reverse proxy in a separate container can reach it.
 pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
     match raw {
         Some(v) if !v.is_empty() => v
             .parse::<SocketAddr>()
             .map_err(|e| format!("invalid BIND '{v}': {e}")),
-        _ => Ok(SocketAddr::from(([0, 0, 0, 0], 8080))),
+        _ => Ok(SocketAddr::from(([127, 0, 0, 1], 8080))),
     }
 }
 
@@ -37,14 +38,14 @@ mod tests {
 
     #[test]
     fn parse_bind_defaults_when_absent_or_empty() {
-        // Unset or empty → default 0.0.0.0:8080 (all interfaces).
+        // Unset or empty → default 127.0.0.1:8080 (loopback only).
         assert_eq!(
             parse_bind(None).unwrap(),
-            SocketAddr::from(([0, 0, 0, 0], 8080))
+            SocketAddr::from(([127, 0, 0, 1], 8080))
         );
         assert_eq!(
             parse_bind(Some("")).unwrap(),
-            SocketAddr::from(([0, 0, 0, 0], 8080))
+            SocketAddr::from(([127, 0, 0, 1], 8080))
         );
     }
 

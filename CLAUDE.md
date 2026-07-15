@@ -7,7 +7,7 @@ LiftLog is a self-hosted workout journal: an Axum + Askama server-rendered app b
 ## Commands
 
 ```bash
-cargo run                                 # dev server on $BIND (default 0.0.0.0:8080)
+cargo run                                 # dev server on $BIND (default 127.0.0.1:8080)
 cargo fmt --all -- --check                # formatting gate
 cargo clippy --all-targets -- -D warnings # lint gate
 cargo deny check                          # supply-chain gate (advisories/licenses/bans/sources)

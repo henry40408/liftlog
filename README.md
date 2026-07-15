@@ -58,7 +58,7 @@ All configuration is done via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
-| `BIND` | `0.0.0.0:8080` | HTTP server bind address (`host:port`) |
+| `BIND` | `127.0.0.1:8080` | HTTP server bind address (`host:port`). Defaults to loopback so a bare-metal run is not exposed on all interfaces without opting in; the container image sets `0.0.0.0:8080` so a reverse proxy can reach it. |
 | `RUST_LOG` | `error,liftlog=info` | Log level filter |
 | `LOG_FORMAT` | `full` | Log output format: `full`, `compact`, `pretty`, `json` (also settable via `--log-format`) |
 
