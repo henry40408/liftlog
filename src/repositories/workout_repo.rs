@@ -32,7 +32,7 @@ impl WorkoutRepository {
             id: id.clone(),
             user_id: user_id.to_string(),
             date,
-            notes: notes.map(|s| s.to_string()),
+            notes: notes.map(std::string::ToString::to_string),
             share_token: None,
             created_at: now,
         };
@@ -145,7 +145,7 @@ impl WorkoutRepository {
         let pool = self.pool.clone();
         let id = id.to_string();
         let user_id = user_id.to_string();
-        let notes = notes.map(|s| s.to_string());
+        let notes = notes.map(std::string::ToString::to_string);
 
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
@@ -785,6 +785,7 @@ mod tests {
     // Workout Log Tests
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_create_log() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
@@ -863,6 +864,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_update_log_success() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
@@ -889,6 +891,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_update_log_wrong_session() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
@@ -946,6 +949,7 @@ mod tests {
     // Dynamic Personal Record Tests
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_get_all_prs_by_user() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
@@ -979,6 +983,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_get_max_weight_for_exercise() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
@@ -1148,6 +1153,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_get_total_volume_this_week_empty() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
@@ -1170,6 +1176,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     async fn test_get_last_weight_per_exercise_by_user() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");

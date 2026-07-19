@@ -302,7 +302,7 @@ async fn test_sliding_session_reissues_cookie_when_throttle_elapsed() {
 
     // Artificially age last_touched_at so the next request slides expiry.
     let token = common::create_session_token(&pool, &user).await;
-    common::age_session_touch(&pool, &token, 2).await;
+    common::age_session_touch(&pool, &token, 2);
 
     let app = common::create_test_app(pool);
     let response = app
@@ -364,7 +364,7 @@ async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
 
     // Age the session so the next request triggers a touch.
     let token = common::create_session_token(&pool, &user).await;
-    common::age_session_touch(&pool, &token, 2).await;
+    common::age_session_touch(&pool, &token, 2);
 
     let app = common::create_test_app(pool);
     let response = app
@@ -390,14 +390,12 @@ async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
     assert_eq!(
         session_cookies.len(),
         1,
-        "logout should emit exactly one session Set-Cookie header, got: {:?}",
-        session_cookies
+        "logout should emit exactly one session Set-Cookie header, got: {session_cookies:?}"
     );
     let only = session_cookies[0];
     assert!(
         only.contains("Max-Age=0"),
-        "logout cookie should be the removal (Max-Age=0), got: {}",
-        only
+        "logout cookie should be the removal (Max-Age=0), got: {only}"
     );
 }
 
@@ -407,7 +405,7 @@ async fn test_expired_session_redirects_to_login() {
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
     let token = common::create_session_token(&pool, &user).await;
-    common::expire_session(&pool, &token).await;
+    common::expire_session(&pool, &token);
 
     let app = common::create_test_app(pool);
     let response = app

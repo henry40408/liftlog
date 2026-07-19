@@ -89,7 +89,7 @@ async fn test_view_shared_workout_public() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/shared/{}", share_token))
+                .uri(format!("/shared/{share_token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -178,7 +178,7 @@ async fn test_revoke_share_success() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/shared/{}", share_token))
+                .uri(format!("/shared/{share_token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -229,7 +229,7 @@ async fn test_reshare_after_revoke_generates_new_token() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/shared/{}", token1))
+                .uri(format!("/shared/{token1}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -242,7 +242,7 @@ async fn test_reshare_after_revoke_generates_new_token() {
     let response2 = app2
         .oneshot(
             Request::builder()
-                .uri(format!("/shared/{}", token2))
+                .uri(format!("/shared/{token2}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -492,7 +492,7 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     // Should show revoke button and share link
     assert!(body_str.contains("Revoke Share</button>"));
     assert!(body_str.contains("Share link:"));
-    assert!(body_str.contains(&format!("/shared/{}", share_token)));
+    assert!(body_str.contains(&format!("/shared/{share_token}")));
     // Should not show share button (only the revoke form, not the share form)
     assert!(!body_str.contains(">Share</button>"));
 }

@@ -56,7 +56,7 @@ pub async fn create_session_token(pool: &DbPool, user: &User) -> String {
 
 #[allow(dead_code)]
 pub fn cookie_header(token: &str) -> String {
-    format!("session={}", token)
+    format!("session={token}")
 }
 
 #[allow(dead_code)]
@@ -71,17 +71,16 @@ pub fn extract_cookie_header(set_cookie: &str) -> String {
 }
 
 #[allow(dead_code)]
-pub async fn age_session_touch(pool: &DbPool, token: &str, hours_ago: u32) {
+pub fn age_session_touch(pool: &DbPool, token: &str, hours_ago: u32) {
     let conn = pool.get().unwrap();
     let sql = format!(
-        "UPDATE sessions SET last_touched_at = datetime('now', '-{} hours') WHERE token = ?",
-        hours_ago
+        "UPDATE sessions SET last_touched_at = datetime('now', '-{hours_ago} hours') WHERE token = ?"
     );
     conn.execute(&sql, [token]).unwrap();
 }
 
 #[allow(dead_code)]
-pub async fn expire_session(pool: &DbPool, token: &str) {
+pub fn expire_session(pool: &DbPool, token: &str) {
     let conn = pool.get().unwrap();
     conn.execute(
         "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",

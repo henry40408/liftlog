@@ -488,6 +488,7 @@ async fn test_cannot_edit_others_workout_page() {
 // Log management tests
 
 #[tokio::test]
+#[allow(clippy::float_cmp, reason = "exact-value test assertion")]
 async fn test_add_log_success() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -545,6 +546,7 @@ async fn test_add_log_success() {
 }
 
 #[tokio::test]
+#[allow(clippy::float_cmp, reason = "exact-value test assertion")]
 async fn test_add_log_accepts_fractional_weight() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -759,6 +761,7 @@ async fn test_edit_log_page_renders() {
 }
 
 #[tokio::test]
+#[allow(clippy::float_cmp, reason = "exact-value test assertion")]
 async fn test_update_log_success() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -802,6 +805,7 @@ async fn test_update_log_success() {
 }
 
 #[tokio::test]
+#[allow(clippy::float_cmp, reason = "exact-value test assertion")]
 async fn test_update_log_accepts_fractional_weight() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -842,6 +846,7 @@ async fn test_update_log_accepts_fractional_weight() {
 }
 
 #[tokio::test]
+#[allow(clippy::float_cmp, reason = "exact-value test assertion")]
 async fn test_update_log_requires_ownership() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -897,12 +902,16 @@ async fn test_workouts_list_pagination_page_2() {
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
     // Create 15 workouts (more than one page of 10)
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "loop counter 1..=15 is always positive"
+    )]
     for i in 1..=15 {
         common::create_test_workout(
             &pool,
             &user.id,
             chrono::NaiveDate::from_ymd_opt(2024, 1, i as u32).unwrap(),
-            Some(&format!("Workout {}", i)),
+            Some(&format!("Workout {i}")),
         )
         .await;
     }
