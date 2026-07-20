@@ -12,7 +12,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/index");
 
     let git_version = get_git_version();
-    println!("cargo:rustc-env=GIT_VERSION={}", git_version);
+    println!("cargo:rustc-env=GIT_VERSION={git_version}");
 
     render_apple_touch_icon();
 }
@@ -39,13 +39,13 @@ fn get_git_version() -> String {
 }
 
 fn render_apple_touch_icon() {
-    println!("cargo:rerun-if-changed={}", FAVICON_SVG_PATH);
+    println!("cargo:rerun-if-changed={FAVICON_SVG_PATH}");
 
     let svg = std::fs::read_to_string(FAVICON_SVG_PATH)
-        .unwrap_or_else(|e| panic!("failed to read {}: {}", FAVICON_SVG_PATH, e));
+        .unwrap_or_else(|e| panic!("failed to read {FAVICON_SVG_PATH}: {e}"));
 
     let tree = usvg::Tree::from_str(&svg, &usvg::Options::default())
-        .unwrap_or_else(|e| panic!("failed to parse {}: {}", FAVICON_SVG_PATH, e));
+        .unwrap_or_else(|e| panic!("failed to parse {FAVICON_SVG_PATH}: {e}"));
 
     let mut pixmap = tiny_skia::Pixmap::new(APPLE_TOUCH_ICON_SIZE, APPLE_TOUCH_ICON_SIZE)
         .expect("failed to allocate pixmap");

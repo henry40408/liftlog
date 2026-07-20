@@ -85,7 +85,7 @@ async fn test_stats_index_shows_workout_counts() {
     let body_str = String::from_utf8_lossy(&body);
 
     // Should show workout counts (at least 2 total)
-    assert!(body_str.contains("2") || body_str.contains("Stats"));
+    assert!(body_str.contains('2') || body_str.contains("Stats"));
 }
 
 #[tokio::test]
@@ -452,6 +452,6 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
     // 5 dots total — running PRs are at index 0 (100), 2 (110), 4 (120).
     let pr_count = body_str.matches("class=\"ll-dot-pr\"").count();
     let plain_count = body_str.matches("class=\"ll-dot\"").count();
-    assert_eq!(pr_count, 3, "expected 3 PR dots, body=\n{}", body_str);
+    assert_eq!(pr_count, 3, "expected 3 PR dots, body=\n{body_str}");
     assert_eq!(plain_count, 2);
 }

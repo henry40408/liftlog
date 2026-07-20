@@ -104,6 +104,7 @@ mod tests {
     use crate::db::create_memory_pool;
 
     #[test]
+    #[allow(clippy::cast_sign_loss, reason = "SQL COUNT(*) is always >= 0")]
     fn run_migrations_creates_tracking_table_and_records_each_migration() {
         let pool = create_memory_pool().expect("memory pool");
         run_migrations(&pool).expect("first run");
@@ -116,6 +117,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_sign_loss, reason = "SQL COUNT(*) is always >= 0")]
     fn run_migrations_is_idempotent() {
         let pool = create_memory_pool().expect("memory pool");
         run_migrations(&pool).expect("first run");

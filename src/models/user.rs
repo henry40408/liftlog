@@ -13,7 +13,7 @@ pub enum UserRole {
 }
 
 impl UserRole {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             UserRole::Admin => "admin",
             UserRole::User => "user",
@@ -34,7 +34,7 @@ impl UserRole {
         }
     }
 
-    pub fn is_admin(&self) -> bool {
+    pub fn is_admin(self) -> bool {
         matches!(self, UserRole::Admin)
     }
 }
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_user_role_default() {
-        let default_role: UserRole = Default::default();
+        let default_role: UserRole = UserRole::default();
         assert_eq!(default_role, UserRole::User);
     }
 }

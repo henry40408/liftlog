@@ -57,6 +57,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
     fn chart_point_from_metric_computes_epley_e1rm() {
         let metric = ExerciseSessionMetric {
             session_id: "s1".into(),

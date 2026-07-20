@@ -84,8 +84,8 @@ fn render_default_chart(points: &[ChartPoint]) -> Option<RenderedChart> {
     }
 
     let values: Vec<f64> = slice.iter().map(|p| p.top_weight).collect();
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     // Pad y range a bit so the line isn't flush against the top.
     let (y_min, y_max) = if (max - min).abs() < 1e-9 {
         (min - 1.0, max + 1.0)
@@ -110,7 +110,7 @@ fn render_default_chart(points: &[ChartPoint]) -> Option<RenderedChart> {
         if is_pr {
             running_max = p.top_weight;
         }
-        polyline_parts.push(format!("{:.2},{:.2}", x, y));
+        polyline_parts.push(format!("{x:.2},{y:.2}"));
         rendered_points.push(RenderedPoint { x, y, is_pr });
     }
 
@@ -120,7 +120,7 @@ fn render_default_chart(points: &[ChartPoint]) -> Option<RenderedChart> {
         let frac = i as f64 / 3.0;
         let y = PAD_T + frac * plot_h;
         let value = y_max - frac * (y_max - y_min);
-        y_ticks.push((y, format!("{:.0}", value)));
+        y_ticks.push((y, format!("{value:.0}")));
     }
 
     // Up to 5 x-axis date labels, evenly sampled.

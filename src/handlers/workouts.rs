@@ -158,7 +158,7 @@ pub async fn show(
     let share_url = workout
         .share_token
         .as_ref()
-        .map(|token| format!("/shared/{}", token));
+        .map(|token| format!("/shared/{token}"));
 
     let template = ShowWorkoutTemplate {
         user: auth_user,
@@ -210,7 +210,7 @@ pub async fn update(
         .update_session(&id, &auth_user.id, Some(form.date), form.notes.as_deref())
         .await?;
 
-    Ok(Redirect::to(&format!("/workouts/{}", id)).into_response())
+    Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
 }
 
 pub async fn delete(
@@ -253,7 +253,7 @@ pub async fn add_log(
         )
         .await?;
 
-    Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
+    Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
 }
 
 pub async fn delete_log(
@@ -268,7 +268,7 @@ pub async fn delete_log(
 
     state.workout_repo.delete_log(&log_id, &session_id).await?;
 
-    Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
+    Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
 }
 
 pub async fn edit_log_page(
@@ -324,7 +324,7 @@ pub async fn update_log(
         .update_log(&log_id, &session_id, form.reps, form.weight, form.rpe)
         .await?;
 
-    Ok(Redirect::to(&format!("/workouts/{}", session_id)).into_response())
+    Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
 }
 
 pub async fn share_workout(
@@ -342,7 +342,7 @@ pub async fn share_workout(
         .set_share_token(&id, &auth_user.id)
         .await?;
 
-    Ok(Redirect::to(&format!("/workouts/{}", id)).into_response())
+    Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
 }
 
 pub async fn revoke_share(
@@ -360,7 +360,7 @@ pub async fn revoke_share(
         .revoke_share_token(&id, &auth_user.id)
         .await?;
 
-    Ok(Redirect::to(&format!("/workouts/{}", id)).into_response())
+    Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
 }
 
 pub async fn view_shared(
