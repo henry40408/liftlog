@@ -7,8 +7,36 @@ pub struct Config {
     pub bind: SocketAddr,
 }
 
+/// Env vars that were renamed under the `LIFTLOG_` prefix, paired with their
+/// current name. Old deployments that upgrade without renaming would otherwise
+/// have their value silently ignored; [`reject_legacy_env_vars`] fails startup
+/// so the misconfiguration is visible.
+const RENAMED_ENV_VARS: &[(&str, &str)] = &[
+    ("BIND", "LIFTLOG_BIND"),
+    ("LOG_FORMAT", "LIFTLOG_LOG_FORMAT"),
+];
+
+/// Refuse to start when any pre-prefix env var name is still present, pointing
+/// the operator at its replacement.
+pub fn reject_legacy_env_vars() -> anyhow::Result<()> {
+    let stale: Vec<String> = RENAMED_ENV_VARS
+        .iter()
+        .filter(|(old, _)| env::var_os(old).is_some())
+        .map(|(old, new)| format!("{old} (renamed to {new})"))
+        .collect();
+    if !stale.is_empty() {
+        anyhow::bail!(
+            "refusing to start: removed environment variable(s) still set: {}. \
+             Rename them in your deployment to the LIFTLOG_-prefixed names.",
+            stale.join(", ")
+        );
+    }
+    Ok(())
+}
+
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
+        reject_legacy_env_vars()?;
         Ok(Self {
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:liftlog.sqlite3?mode=rwc".to_string()),
@@ -84,5 +112,44 @@ mod tests {
         }
         let config = Config::from_env().expect("from_env should succeed");
         assert_eq!(config.bind, "127.0.0.1:9137".parse().unwrap());
+    }
+
+    #[test]
+    fn from_env_rejects_legacy_bind() {
+        // A pre-prefix name still set means the deployment wasn't migrated;
+        // startup must fail with a message naming both the old and new var.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("BIND", "0.0.0.0:8080");
+        }
+        assert!(
+            Config::from_env().is_err(),
+            "legacy BIND should fail startup"
+        );
+        let msg = reject_legacy_env_vars().unwrap_err().to_string();
+        assert!(msg.contains("BIND"), "got: {msg}");
+        assert!(msg.contains("LIFTLOG_BIND"), "got: {msg}");
+    }
+
+    #[test]
+    fn from_env_rejects_legacy_log_format() {
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("LOG_FORMAT", "json");
+        }
+        assert!(
+            Config::from_env().is_err(),
+            "legacy LOG_FORMAT should fail startup"
+        );
+        let msg = reject_legacy_env_vars().unwrap_err().to_string();
+        assert!(msg.contains("LOG_FORMAT"), "got: {msg}");
+        assert!(msg.contains("LIFTLOG_LOG_FORMAT"), "got: {msg}");
+    }
+
+    #[test]
+    fn reject_legacy_env_vars_passes_when_clean() {
+        // A process with no legacy names set (nextest isolates each test) is
+        // accepted.
+        reject_legacy_env_vars().expect("no legacy vars should pass");
     }
 }

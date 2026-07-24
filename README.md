@@ -62,6 +62,8 @@ All configuration is done via environment variables:
 | `RUST_LOG` | `error,liftlog=info` | Log level filter |
 | `LIFTLOG_LOG_FORMAT` | `full` | Log output format: `full`, `compact`, `pretty`, `json` (also settable via `--log-format`) |
 
+> **Migration note:** `BIND` and `LOG_FORMAT` were renamed to `LIFTLOG_BIND` and `LIFTLOG_LOG_FORMAT`. If either old name is still set in the environment, the server **refuses to start** and names the replacement, so a stale value can't be silently ignored.
+
 ## Docker
 
 ### Docker Compose
