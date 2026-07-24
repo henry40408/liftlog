@@ -41,7 +41,7 @@ enum LogFormat {
 #[command(name = "liftlog")]
 struct Args {
     /// Log output format
-    #[arg(long, env = "LOG_FORMAT", default_value = "full")]
+    #[arg(long, env = "LIFTLOG_LOG_FORMAT", default_value = "full")]
     log_format: LogFormat,
 }
 

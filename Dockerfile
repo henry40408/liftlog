@@ -59,7 +59,7 @@ COPY --from=build /out/liftlog /liftlog
 VOLUME /data
 
 ENV DATABASE_URL=/data/liftlog.sqlite3
-ENV BIND=0.0.0.0:8080
+ENV LIFTLOG_BIND=0.0.0.0:8080
 
 EXPOSE 8080
 
