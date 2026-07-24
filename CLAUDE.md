@@ -32,6 +32,8 @@ npx playwright test sharing               # filter by feature filename
 
 **Sliding session middleware.** `sliding_session_middleware` runs globally on every route (`src/middleware/auth.rs`). It reads the session cookie, calls `SessionRepository::validate_and_touch`, and on success injects a `ValidatedSession` request extension carrying the full user identity. The `AuthUser` and `AdminUser` extractors read from that extension — they never hit the DB themselves. Routes that should never refresh the cookie (e.g. logout) insert `SuppressSessionRefresh`. Expiry is also swept periodically by a background tokio task spawned in `main.rs`.
 
+**CSRF origin guard.** `csrf_origin_guard` (`src/middleware/csrf.rs`) is layered outermost — registered after the session layer so it runs *first* — and rejects any state-changing request a browser reports as cross-site (`Sec-Fetch-Site: cross-site`, or a mismatched `Origin` vs `Host`) with `403`. It is header-only (no token, no state); safe methods and header-less non-browser clients (curl, the test harness) pass through. Together with the session cookie's `SameSite=Lax` this is the full CSRF defence — there is no synchronizer token.
+
 **First-user bootstrap.** When the `users` table is empty, `/auth/login` 302s to `/auth/setup`, and `/auth/setup` POST creates the first user as `UserRole::Admin` and signs them in. Subsequent users are admin-created via `/users/new`. The E2E `support/seeding.js` mirrors this flow.
 
 **Server-rendered, classic POST→Redirect.** Templates are Askama (`templates/`), one struct per template. Forms POST to the same handler shape; success paths `Redirect::to(...)`, error paths re-render the template with an `error: Option<String>` field. There's no JSON API.
