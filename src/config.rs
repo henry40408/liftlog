@@ -12,21 +12,23 @@ impl Config {
         Ok(Self {
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:liftlog.sqlite3?mode=rwc".to_string()),
-            bind: parse_bind(env::var("BIND").ok().as_deref()).map_err(anyhow::Error::msg)?,
+            bind: parse_bind(env::var("LIFTLOG_BIND").ok().as_deref())
+                .map_err(anyhow::Error::msg)?,
         })
     }
 }
 
-/// Resolve the `BIND` value into a [`SocketAddr`]. An unset or empty value
-/// yields the default `127.0.0.1:8080` (loopback only, so a bare-metal run is
-/// not exposed on all interfaces without opting in); any non-empty value must
+/// Resolve the `LIFTLOG_BIND` value into a [`SocketAddr`]. An unset or empty
+/// value yields the default `127.0.0.1:8080` (loopback only, so a bare-metal run
+/// is not exposed on all interfaces without opting in); any non-empty value must
 /// be a valid `host:port` socket address. The container image sets
-/// `BIND=0.0.0.0:8080` so a reverse proxy in a separate container can reach it.
+/// `LIFTLOG_BIND=0.0.0.0:8080` so a reverse proxy in a separate container can
+/// reach it.
 pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
     match raw {
         Some(v) if !v.is_empty() => v
             .parse::<SocketAddr>()
-            .map_err(|e| format!("invalid BIND '{v}': {e}")),
+            .map_err(|e| format!("invalid LIFTLOG_BIND '{v}': {e}")),
         _ => Ok(SocketAddr::from(([127, 0, 0, 1], 8080))),
     }
 }
@@ -67,7 +69,7 @@ mod tests {
         // Invalid input fails with a descriptive error; a bare host with no
         // port is not a SocketAddr.
         let err = parse_bind(Some("not-an-addr")).unwrap_err();
-        assert!(err.contains("invalid BIND"), "got: {err}");
+        assert!(err.contains("invalid LIFTLOG_BIND"), "got: {err}");
         assert!(parse_bind(Some("127.0.0.1")).is_err());
     }
 
@@ -78,7 +80,7 @@ mod tests {
         // `unsafe` under edition 2024.
         #[allow(unsafe_code)]
         unsafe {
-            std::env::set_var("BIND", "127.0.0.1:9137");
+            std::env::set_var("LIFTLOG_BIND", "127.0.0.1:9137");
         }
         let config = Config::from_env().expect("from_env should succeed");
         assert_eq!(config.bind, "127.0.0.1:9137".parse().unwrap());
