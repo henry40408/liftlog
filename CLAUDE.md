@@ -38,7 +38,7 @@ npx playwright test sharing               # filter by feature filename
 
 **Server-rendered, classic POST→Redirect.** Templates are Askama (`templates/`), one struct per template. Forms POST to the same handler shape; success paths `Redirect::to(...)`, error paths re-render the template with an `error: Option<String>` field. There's no JSON API.
 
-**Migrations are baked in.** `src/migrations.rs` `include_str!`'s every file in `migrations/` and applies them at startup, tracking applied versions in a `__schema_migrations` table. Tests use `run_migrations_for_tests` against an in-memory pool. Migration filenames are gap-tolerant (numbers aren't contiguous) — just append `NNN_description.sql` and add it to the `MIGRATIONS` slice in order.
+**Migrations are baked in.** `src/migrations.rs` `include_str!`'s every file in `migrations/` and applies them at startup, tracking applied versions in a `_migrations` table. Tests use `run_migrations_for_tests` against an in-memory pool. Migration filenames are gap-tolerant (numbers aren't contiguous) — just append `NNN_description.sql` and add it to the `MIGRATIONS` slice in order.
 
 **Exercise categories are code, not data.** `CATEGORIES` in `src/models/exercise.rs` is a `&'static` slice; exercises store the category as a string column constrained to those values. Adding/renaming a category is a code change, not a migration.
 

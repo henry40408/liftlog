@@ -216,6 +216,38 @@ async fn test_admin_delete_user_removes_sessions_even_with_foreign_keys_enforced
     assert_eq!(user_count, 0, "victim's user row should be gone");
 }
 
+/// Distinct from `test_admin_delete_user_removes_their_sessions` above: that
+/// test only proves sessions are gone by the time the handler responds,
+/// which is true whether the handler's explicit cleanup or the DB cascade
+/// did it. This test isolates the cascade itself — PRAGMA `foreign_keys=ON`
+/// is now the default for every pooled connection (src/db.rs), so
+/// `sessions.user_id REFERENCES users(id) ON DELETE CASCADE` fires on the
+/// bare `DELETE FROM users` regardless of what the handler does afterwards.
+#[tokio::test]
+async fn test_deleting_user_cascades_their_sessions() {
+    let pool = common::setup_test_db();
+
+    let victim = common::create_test_user(&pool, "victim", "victimpass123", UserRole::User).await;
+    let _victim_token1 = common::create_session_token(&pool, &victim).await;
+    let _victim_token2 = common::create_session_token(&pool, &victim).await;
+
+    {
+        let conn = pool.get().unwrap();
+        conn.execute("DELETE FROM users WHERE id = ?", [&victim.id])
+            .unwrap();
+    }
+
+    let conn = pool.get().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+            [&victim.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0, "ON DELETE CASCADE should remove the sessions");
+}
+
 #[tokio::test]
 async fn test_setup_page_available_when_no_users() {
     let pool = common::setup_test_db();

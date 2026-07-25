@@ -39,6 +39,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "010_rebuild_sessions_with_last_touched_at.sql",
         include_str!("../migrations/010_rebuild_sessions_with_last_touched_at.sql"),
     ),
+    (
+        "011_cleanup_orphan_rows.sql",
+        include_str!("../migrations/011_cleanup_orphan_rows.sql"),
+    ),
 ];
 
 /// Run all pending migrations on the database pool.
@@ -79,6 +83,35 @@ pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
         conn.execute("INSERT INTO _migrations (name) VALUES (?)", [filename])?;
     }
 
+    // Migration 010 turns foreign_keys off for its table rebuild and
+    // deliberately does not turn it back on itself (see that migration's
+    // trailing comment) — only the pool's connection initialiser is allowed
+    // to be the source of truth for every *other* connection. But this
+    // particular connection came from the pool and returns to it once this
+    // function ends, so without restoring the pragma here it would sit in
+    // the pool carrying enforcement-off state and could be handed out to a
+    // real request later, silently unenforced.
+    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+
+    // Confirm 011 left no FK violations behind. Warn rather than abort:
+    // locking an operator out of their own instance at startup is worse than
+    // carrying orphan rows, and orphans are not an authentication risk —
+    // validate_and_touch INNER JOINs users, so a session whose user is gone
+    // simply fails to validate.
+    {
+        let mut stmt = conn.prepare("PRAGMA foreign_key_check")?;
+        let violations: Vec<(String, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if !violations.is_empty() {
+            tracing::warn!(
+                count = violations.len(),
+                ?violations,
+                "PRAGMA foreign_key_check reported violations after migrations"
+            );
+        }
+    }
+
     tracing::info!("Migrations completed");
     Ok(())
 }
@@ -94,6 +127,14 @@ pub fn run_migrations_for_tests(pool: &DbPool) -> Result<(), Box<dyn std::error:
     for (_filename, sql) in MIGRATIONS {
         conn.execute_batch(sql)?;
     }
+
+    // See the matching comment in `run_migrations`: migration 010 turns
+    // foreign_keys off for its rebuild and does not restore it, so this
+    // connection (reused by every later `pool.get()` call against a
+    // max_size(1) test pool — see `create_memory_pool`) must have it
+    // restored here or every test built on this helper would silently run
+    // with enforcement off.
+    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
     Ok(())
 }
@@ -130,5 +171,94 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count as usize, MIGRATIONS.len());
+    }
+
+    #[test]
+    fn foreign_key_check_is_clean_after_migrations() {
+        let pool = create_memory_pool().expect("memory pool");
+        run_migrations(&pool).expect("run migrations");
+
+        let conn = pool.get().unwrap();
+        let mut stmt = conn.prepare("PRAGMA foreign_key_check").unwrap();
+        let violation_count = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .count();
+        assert_eq!(violation_count, 0);
+    }
+
+    #[test]
+    fn cleanup_migration_removes_preexisting_orphans() {
+        // create_memory_pool() now enables PRAGMA foreign_keys, which would
+        // block inserting the orphan rows this test needs to set up. Build a
+        // raw pool without that pragma instead. Note max_size(1): every
+        // pool.get() below hands back the same physical connection, so the
+        // schema, the orphan inserts, and the cleanup migration all land on
+        // one connection with no risk of a second connection missing state.
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .expect("raw memory pool");
+
+        let conn = pool.get().unwrap();
+
+        // Build the schema with every migration except the final cleanup
+        // one, so orphans can still be inserted afterwards.
+        for (_filename, sql) in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+            conn.execute_batch(sql).unwrap();
+        }
+
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, created_at) \
+             VALUES ('u1', 'u1', 'hash', datetime('now'))",
+            [],
+        )
+        .unwrap();
+
+        // Orphan session: user_id matches no users row.
+        conn.execute(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at, last_touched_at) \
+             VALUES ('tok1', 'ghost-user', datetime('now'), datetime('now', '+1 day'), datetime('now'))",
+            [],
+        )
+        .unwrap();
+
+        // Orphan workout_log: session_id matches no workout_sessions row.
+        // (exercise_id must point at a real exercise; that FK isn't under
+        // test here.)
+        conn.execute(
+            "INSERT INTO exercises (id, name, category, user_id) \
+             VALUES ('ex1', 'Squat', 'legs', 'u1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight) \
+             VALUES ('log1', 'ghost-session', 'ex1', 1, 5, 100.0)",
+            [],
+        )
+        .unwrap();
+
+        let (_filename, cleanup_sql) = MIGRATIONS.last().expect("011 is registered");
+        conn.execute_batch(cleanup_sql).unwrap();
+
+        let session_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE token = 'tok1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_count, 0, "orphan session should be removed");
+
+        let log_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM workout_logs WHERE id = 'log1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(log_count, 0, "orphan workout log should be removed");
     }
 }

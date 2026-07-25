@@ -12,9 +12,16 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
     let path = path.split('?').next().unwrap_or(path);
 
     if path == ":memory:" {
-        return Pool::builder()
-            .max_size(1)
-            .build(SqliteConnectionManager::memory());
+        // PRAGMA foreign_keys is per-connection (SQLite defaults it to OFF
+        // on every new connection), so it must be set in each pool's
+        // connection initialiser rather than once in a migration — a
+        // migration only reaches the single connection it happens to run on.
+        // All three pool-construction paths in this file must agree on this
+        // pragma, or enforcement would depend on which pooled connection a
+        // given request happens to get.
+        let manager = SqliteConnectionManager::memory()
+            .with_init(|conn| conn.execute_batch("PRAGMA foreign_keys=ON;"));
+        return Pool::builder().max_size(1).build(manager);
     }
 
     // WAL gives concurrent readers; busy_timeout absorbs lock contention from
@@ -23,7 +30,8 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;\
              PRAGMA synchronous=NORMAL;\
-             PRAGMA busy_timeout=5000;",
+             PRAGMA busy_timeout=5000;\
+             PRAGMA foreign_keys=ON;",
         )
     });
     Pool::builder().max_size(10).build(manager)
@@ -42,7 +50,12 @@ pub fn checkpoint(pool: &DbPool) -> anyhow::Result<()> {
 
 #[allow(dead_code)]
 pub fn create_memory_pool() -> Result<DbPool, r2d2::Error> {
-    let manager = SqliteConnectionManager::memory();
+    // Must match create_pool's enforcement (see the comment there): this is
+    // the pool tests/common/mod.rs::setup_test_db and the repository unit
+    // tests build on, so if it disagreed with production, none of the
+    // cascade/restrict behaviour changes would be covered by any test.
+    let manager = SqliteConnectionManager::memory()
+        .with_init(|conn| conn.execute_batch("PRAGMA foreign_keys=ON;"));
     Pool::builder().max_size(1).build(manager)
 }
 
@@ -130,5 +143,58 @@ mod tests {
     fn create_pool_strips_query_params_and_sqlite_prefix() {
         let pool = create_pool("sqlite::memory:?mode=rwc").expect("pool");
         assert!(pool.get().is_ok());
+    }
+
+    #[test]
+    fn create_pool_enables_foreign_keys() {
+        let tmp = TempDbPath::new();
+        let pool = create_pool(&tmp.url()).expect("file pool");
+
+        let conn = pool.get().expect("get conn");
+        let enabled: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign_keys");
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn create_pool_memory_url_enables_foreign_keys() {
+        let pool = create_pool("sqlite::memory:").expect("memory pool");
+
+        let conn = pool.get().expect("get conn");
+        let enabled: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign_keys");
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn memory_pool_enables_foreign_keys() {
+        let pool = create_memory_pool().expect("memory pool");
+
+        let conn = pool.get().expect("get conn");
+        let enabled: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign_keys");
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn foreign_keys_enabled_on_every_pooled_connection() {
+        let tmp = TempDbPath::new();
+        let pool = create_pool(&tmp.url()).expect("file pool");
+
+        // Hold several connections at once so r2d2 is forced to actually
+        // create more than one, pinning that the pragma is set uniformly by
+        // the pool's connection initialiser rather than by chance on
+        // whichever single connection a test happens to grab.
+        let conns: Vec<_> = (0..5).map(|_| pool.get().expect("get conn")).collect();
+
+        for conn in &conns {
+            let enabled: i64 = conn
+                .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+                .expect("foreign_keys");
+            assert_eq!(enabled, 1);
+        }
     }
 }

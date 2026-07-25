@@ -503,3 +503,85 @@ async fn test_update_exercise_empty_name_rejected() {
         .unwrap();
     assert_eq!(found.name, "Bench Press");
 }
+
+// Foreign-key enforcement tests
+//
+// workout_logs.exercise_id REFERENCES exercises(id) ON DELETE RESTRICT is
+// enforced now that PRAGMA foreign_keys=ON (src/db.rs). These pin the
+// resulting behaviour change: a 400 for the user, not a 500.
+
+#[tokio::test]
+async fn test_delete_exercise_referenced_by_log_returns_bad_request() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, 100.0, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/exercises/{}/delete", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(body_str.contains("used by existing workout logs"));
+
+    // Verify exercise was NOT deleted
+    let exercise_repo = ExerciseRepository::new(pool);
+    let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
+    assert!(found.is_some());
+}
+
+#[tokio::test]
+async fn test_delete_unreferenced_exercise_still_succeeds() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/exercises/{}/delete", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/exercises");
+
+    let exercise_repo = ExerciseRepository::new(pool);
+    let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
+    assert!(found.is_none());
+}
