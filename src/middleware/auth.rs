@@ -10,6 +10,15 @@ use crate::models::UserRole;
 use crate::repositories::SessionRepository;
 use crate::session::{create_session_cookie, get_session_token};
 
+/// State bound to the sliding-session middleware layer. Carries the session
+/// repository plus the `Secure` flag so cookies re-issued mid-request
+/// (on touch) match what `login_submit` / `setup_submit` set at login.
+#[derive(Clone)]
+pub struct SessionLayerState {
+    pub session_repo: SessionRepository,
+    pub cookie_secure: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct AuthUser {
     pub id: String,
@@ -62,7 +71,7 @@ pub struct ValidatedSession {
 /// cookie with a fresh `Max-Age`. Applied globally; requests without a
 /// cookie pass through untouched.
 pub async fn sliding_session_middleware(
-    State(session_repo): State<SessionRepository>,
+    State(layer): State<SessionLayerState>,
     jar: CookieJar,
     mut request: Request,
     next: Next,
@@ -71,7 +80,7 @@ pub async fn sliding_session_middleware(
     let mut should_refresh_cookie: Option<String> = None;
 
     if let Some(tok) = token.as_deref() {
-        match session_repo.validate_and_touch(tok).await {
+        match layer.session_repo.validate_and_touch(tok).await {
             Ok(Some(outcome)) => {
                 request.extensions_mut().insert(ValidatedSession {
                     user_id: outcome.user_id,
@@ -103,7 +112,7 @@ pub async fn sliding_session_middleware(
             .get::<SuppressSessionRefresh>()
             .is_some();
         if !suppressed {
-            let cookie = create_session_cookie(&tok);
+            let cookie = create_session_cookie(&tok, layer.cookie_secure);
             let header_value = cookie
                 .to_string()
                 .parse()

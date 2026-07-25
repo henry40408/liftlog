@@ -5,11 +5,14 @@ use axum::{
 };
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
-use crate::middleware::{csrf_origin_guard, sliding_session_middleware};
+use crate::middleware::{SessionLayerState, csrf_origin_guard, sliding_session_middleware};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
-    let session_repo = state.session_repo.clone();
+    let session_layer_state = SessionLayerState {
+        session_repo: state.session_repo.clone(),
+        cookie_secure: state.cookie_secure,
+    };
 
     Router::new()
         // Health check
@@ -75,7 +78,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/settings/logout-others", post(settings::logout_others))
         .with_state(state)
         // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
-        .layer(from_fn_with_state(session_repo, sliding_session_middleware))
+        .layer(from_fn_with_state(
+            session_layer_state,
+            sliding_session_middleware,
+        ))
         // First-line CSRF: reject provably cross-site state-changing requests.
         // Registered last → outermost → runs before session validation.
         .layer(from_fn(csrf_origin_guard))

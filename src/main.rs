@@ -136,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
         session_repo,
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
+        cookie_secure: config.cookie_secure,
     };
 
     // Build router
@@ -144,6 +145,10 @@ async fn main() -> anyhow::Result<()> {
     // Start server
     let addr = config.bind;
     tracing::info!("Starting server at http://{}", addr);
+    tracing::info!(
+        cookie_secure = config.cookie_secure,
+        "session cookie Secure attribute"
+    );
 
     let listener = TcpListener::bind(addr).await?;
     axum::serve(

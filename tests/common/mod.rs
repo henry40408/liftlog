@@ -32,6 +32,22 @@ pub fn create_test_app_with_rate_limit(
     max_attempts: u32,
     window: std::time::Duration,
 ) -> TestApp {
+    build_test_app(pool, max_attempts, window, false)
+}
+
+#[allow(dead_code)]
+pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> TestApp {
+    build_test_app(pool, 100, std::time::Duration::from_secs(60), cookie_secure)
+}
+
+/// Single place that actually builds `AppState`; every other
+/// `create_test_app_*` helper delegates here.
+fn build_test_app(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+    cookie_secure: bool,
+) -> TestApp {
     use liftlog::rate_limit::RateLimiter;
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
     use liftlog::state::AppState;
@@ -44,6 +60,7 @@ pub fn create_test_app_with_rate_limit(
         session_repo: SessionRepository::new(pool.clone()),
         login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
         trusted_proxies: Arc::new(Vec::new()),
+        cookie_secure,
     };
 
     let router = liftlog::routes::create_router(app_state);

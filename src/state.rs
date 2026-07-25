@@ -14,4 +14,5 @@ pub struct AppState {
     pub session_repo: SessionRepository,
     pub login_rate_limiter: Arc<RateLimiter>,
     pub trusted_proxies: Arc<Vec<IpAddr>>,
+    pub cookie_secure: bool,
 }

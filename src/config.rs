@@ -6,6 +6,7 @@ pub struct Config {
     pub database_url: String,
     pub bind: SocketAddr,
     pub trusted_proxies: Vec<IpAddr>,
+    pub cookie_secure: bool,
 }
 
 /// Env vars that were renamed under the `LIFTLOG_` prefix, paired with their
@@ -45,6 +46,12 @@ impl Config {
                 .map_err(anyhow::Error::msg)?,
             trusted_proxies: parse_trusted_proxies(
                 env::var("LIFTLOG_TRUSTED_PROXIES").ok().as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?,
+            cookie_secure: parse_bool_env(
+                "LIFTLOG_COOKIE_SECURE",
+                env::var("LIFTLOG_COOKIE_SECURE").ok().as_deref(),
+                false,
             )
             .map_err(anyhow::Error::msg)?,
         })
@@ -88,6 +95,31 @@ pub fn parse_trusted_proxies(raw: Option<&str>) -> Result<Vec<IpAddr>, String> {
                 .map_err(|e| format!("invalid LIFTLOG_TRUSTED_PROXIES entry '{segment}': {e}"))
         })
         .collect()
+}
+
+/// Strict boolean env-var parser. Accepts `true` / `false` / `1` / `0`,
+/// case-insensitively, after trimming; unset or empty means unset.
+/// An unrecognised value is a hard error rather than a silent `false`.
+///
+/// Strictness is the point: the default is `false`, so if a typo like
+/// `LIFTLOG_COOKIE_SECURE=yes` were treated as "off", a correctly-configured HTTPS
+/// deployment would silently lose `Secure` — exactly what this setting
+/// exists to prevent.
+pub fn parse_bool_env(name: &str, raw: Option<&str>, default: bool) -> Result<bool, String> {
+    let Some(v) = raw else {
+        return Ok(default);
+    };
+    let trimmed = v.trim();
+    if trimmed.is_empty() {
+        return Ok(default);
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => Err(format!(
+            "invalid {name} '{v}': expected one of true, false, 1, 0"
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -212,5 +244,35 @@ mod tests {
     fn parse_trusted_proxies_rejects_garbage() {
         let err = parse_trusted_proxies(Some("10.0.0.1, not-an-ip")).unwrap_err();
         assert!(err.contains("invalid LIFTLOG_TRUSTED_PROXIES"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_bool_env_defaults_when_absent_or_empty() {
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", None, false).unwrap());
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", None, true).unwrap());
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some(""), false).unwrap());
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some(""), true).unwrap());
+        // Whitespace-only also takes the default.
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("   "), false).unwrap());
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("   "), true).unwrap());
+    }
+
+    #[test]
+    fn parse_bool_env_accepts_true_false_1_0_case_insensitively() {
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("true"), false).unwrap());
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("TRUE"), false).unwrap());
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("  true  "), false).unwrap());
+        assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("1"), false).unwrap());
+
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("false"), true).unwrap());
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("False"), true).unwrap());
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("  false  "), true).unwrap());
+        assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("0"), true).unwrap());
+    }
+
+    #[test]
+    fn parse_bool_env_rejects_unrecognised_value() {
+        let err = parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("yes"), false).unwrap_err();
+        assert!(err.contains("invalid LIFTLOG_COOKIE_SECURE"), "got: {err}");
     }
 }

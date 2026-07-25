@@ -99,7 +99,7 @@ pub async fn login_submit(
     if let Some(user) = user {
         state.login_rate_limiter.release(ip);
         let token = state.session_repo.create(&user.id).await?;
-        let jar = jar.add(create_session_cookie(&token));
+        let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
         Ok((jar, Redirect::to("/")).into_response())
     } else {
         let template = LoginTemplate {
@@ -142,7 +142,7 @@ pub async fn setup_submit(
         .await?;
 
     let token = state.session_repo.create(&user.id).await?;
-    let jar = jar.add(create_session_cookie(&token));
+    let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
 
     Ok((jar, Redirect::to("/")).into_response())
 }
@@ -153,7 +153,7 @@ pub async fn logout(
     jar: CookieJar,
 ) -> Response {
     let _ = state.session_repo.delete(&auth_user.session_token).await;
-    let jar = jar.add(remove_session_cookie());
+    let jar = jar.add(remove_session_cookie(state.cookie_secure));
     let mut response = (jar, Redirect::to("/auth/login")).into_response();
     // Tell sliding_session_middleware not to overwrite the removal cookie
     // with a refreshed one.
