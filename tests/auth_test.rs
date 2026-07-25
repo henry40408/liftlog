@@ -1231,3 +1231,61 @@ async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
     );
     assert!(set_cookie.contains("Max-Age=0"));
 }
+
+/// OWASP Session Management Cheat Sheet (Web Content Caching): authenticated
+/// responses must tell browsers/proxies not to persist them, so the back
+/// button on a shared device can't resurrect private content after logout.
+#[tokio::test]
+async fn test_authenticated_page_sets_no_store() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "no-cache, no-store, must-revalidate"
+    );
+    assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
+}
+
+/// Pins current behaviour: /auth/login holds no private content and is
+/// reached with no valid session, so `sliding_session_middleware` never sets
+/// `authenticated` and must not attach Cache-Control here. Guards against
+/// silently widening the scope of the no-store change beyond authenticated
+/// pages.
+#[tokio::test]
+async fn test_unauthenticated_login_page_has_no_cache_control() {
+    let pool = common::setup_test_db();
+    // A user must exist, otherwise /auth/login redirects to /auth/setup.
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let app = common::create_test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().get("cache-control").is_none());
+}

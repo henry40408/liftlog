@@ -82,6 +82,11 @@ pub async fn sliding_session_middleware(
 ) -> axum::response::Response {
     let token = get_session_token(&jar, layer.cookie_secure);
     let mut should_refresh_cookie: Option<String> = None;
+    // Captured before `next.run` moves `request` — this is the only place
+    // that knows whether the request carried a valid session, since it's
+    // also the branch that inserts `ValidatedSession`. Drives the
+    // Cache-Control/Pragma injection below.
+    let mut authenticated = false;
 
     if let Some(tok) = token.as_deref() {
         // Only built when there's actually a token to validate — the audit
@@ -102,6 +107,7 @@ pub async fn sliding_session_middleware(
                     should_refresh_cookie = Some(tok.to_string());
                     audit::session_renewed(&ctx, &fp, &outcome.user_id, &outcome.username);
                 }
+                authenticated = true;
                 request.extensions_mut().insert(ValidatedSession {
                     user_id: outcome.user_id,
                     username: outcome.username,
@@ -142,6 +148,31 @@ pub async fn sliding_session_middleware(
             response
                 .headers_mut()
                 .append(axum::http::header::SET_COOKIE, header_value);
+        }
+    }
+
+    // OWASP Session Management Cheat Sheet (Web Content Caching): prevent
+    // browsers/intermediate caches from persisting authenticated responses,
+    // so the back button (or a shared-device disk cache) can't resurrect
+    // private content after logout. Scoped to `authenticated` because this
+    // middleware also handles anonymous routes like /favicon.svg, which
+    // `favicon.rs` deliberately marks `public, max-age=86400` — the
+    // `contains_key` guard below is what keeps that intact even when the
+    // request is authenticated (a logged-in user's browser still fetches
+    // /favicon.svg through this same middleware), since an unconditional
+    // insert would silently overwrite the favicon handler's header and
+    // nothing in the anonymous favicon tests would catch it.
+    if authenticated {
+        let headers = response.headers_mut();
+        if !headers.contains_key(axum::http::header::CACHE_CONTROL) {
+            headers.insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            );
+            headers.insert(
+                axum::http::header::PRAGMA,
+                axum::http::HeaderValue::from_static("no-cache"),
+            );
         }
     }
 
