@@ -210,8 +210,12 @@ impl SessionRepository {
     }
 
     /// Delete every session for a user. Used when an admin deletes the
-    /// account: without this the rows would be orphaned (there is no
-    /// `ON DELETE CASCADE` on `sessions.user_id` yet).
+    /// account. `sessions.user_id` does have `ON DELETE CASCADE` and
+    /// enforcement is on for every pooled connection, so in the normal case
+    /// the cascade already removed these rows as part of the `users`
+    /// delete and this is a no-op; it exists as a backstop in case a
+    /// connection is ever handed out with `PRAGMA foreign_keys` off, since
+    /// without it those rows would be orphaned rather than cleaned up.
     pub async fn delete_all_for_user(&self, user_id: &str) -> Result<usize> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();

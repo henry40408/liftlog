@@ -28,8 +28,11 @@ async fn test_login_page_redirects_to_setup_when_no_users() {
 }
 
 /// An admin deleting a user must also delete every session belonging to
-/// that user — `sessions.user_id` has no `ON DELETE CASCADE` yet, so
-/// without an explicit cleanup those rows would be orphaned forever.
+/// that user. `sessions.user_id` does have `ON DELETE CASCADE` and
+/// enforcement is on for every pooled connection (src/db.rs), so this
+/// currently happens via the cascade; the handler's explicit cleanup is a
+/// backstop for a connection that might ever run with enforcement off, and
+/// without either one those rows would be orphaned forever.
 #[tokio::test]
 async fn test_admin_delete_user_removes_their_sessions() {
     let pool = common::setup_test_db();
@@ -1528,6 +1531,71 @@ async fn test_unauthenticated_login_page_has_no_cache_control() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.headers().get("cache-control").is_none());
+}
+
+/// OWASP Session Management Cheat Sheet (Web Content Caching): the login
+/// success response is the one place a *previously unauthenticated* request
+/// transmits a fresh session identifier (via Set-Cookie), so
+/// `sliding_session_middleware`'s request-scoped guard — which only stamps
+/// Cache-Control when the incoming request already carried a valid session —
+/// can never cover it. `login_submit` must set the headers itself.
+#[tokio::test]
+async fn test_login_success_response_is_not_cacheable() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=testuser&password=password123"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(response.headers().get(header::SET_COOKIE).is_some());
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "no-cache, no-store, must-revalidate"
+    );
+    assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
+}
+
+/// Same rationale as `test_login_success_response_is_not_cacheable`, for the
+/// first-user bootstrap path: `setup_submit`'s success response also mints
+/// and transmits a fresh session identifier from an unauthenticated request.
+#[tokio::test]
+async fn test_setup_success_response_is_not_cacheable() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/setup")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=admin&password=adminpass123"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(response.headers().get(header::SET_COOKIE).is_some());
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "no-cache, no-store, must-revalidate"
+    );
+    assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
 }
 
 /// HSTS is opt-in: a default-built app must never send

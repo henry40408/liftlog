@@ -605,6 +605,30 @@ async fn test_share_with_expiry_sets_share_expires_at() {
     let expected = chrono::Utc::now() + chrono::Duration::days(7);
     // A few seconds of drift, same tolerance neighbouring time-based tests allow.
     assert!((expires_at - expected).num_seconds().abs() < 5);
+
+    // A future (not-yet-elapsed) expiry must still resolve. Every other test
+    // in this file covers NULL expiry or a past expiry; nothing previously
+    // proved a live, unexpired share link actually works — a regression
+    // narrowing find_session_by_share_token's predicate to just
+    // `share_expires_at IS NULL` would make every expiring link dead on
+    // creation while leaving the rest of the suite green.
+    let share_token = updated.share_token.unwrap();
+    let app = common::create_test_app(pool.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/shared/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(body_str.contains("2024-01-15") || body_str.contains("testuser"));
 }
 
 #[tokio::test]

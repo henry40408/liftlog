@@ -115,7 +115,23 @@ pub async fn login_submit(
             "login",
         );
         let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
-        Ok((jar, Redirect::to("/")).into_response())
+        let mut response = (jar, Redirect::to("/")).into_response();
+        // This response's Set-Cookie carries the session identifier — the
+        // exact case OWASP's Web Content Caching guidance targets — but
+        // sliding_session_middleware only stamps Cache-Control on requests
+        // that already carried a *valid* session, and this request was
+        // unauthenticated (that's the point of logging in), so the
+        // middleware never sees a reason to touch it. Set the headers here
+        // directly instead of widening the middleware's condition.
+        response.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+        );
+        response.headers_mut().insert(
+            axum::http::header::PRAGMA,
+            axum::http::HeaderValue::from_static("no-cache"),
+        );
+        Ok(response)
     } else {
         let template = LoginTemplate {
             error: Some("Invalid username or password".to_string()),
@@ -167,7 +183,21 @@ pub async fn setup_submit(
     );
     let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
 
-    Ok((jar, Redirect::to("/")).into_response())
+    let mut response = (jar, Redirect::to("/")).into_response();
+    // Same rationale as login_submit's success path: this response's
+    // Set-Cookie carries the freshly created session identifier, and the
+    // request that produced it was unauthenticated (there was no user yet),
+    // so sliding_session_middleware's request-scoped guard never fires for
+    // it. Set the headers directly here rather than widening the middleware.
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::PRAGMA,
+        axum::http::HeaderValue::from_static("no-cache"),
+    );
+    Ok(response)
 }
 
 pub async fn logout(
@@ -270,13 +300,11 @@ pub async fn delete_user(
     }
 
     // Read the session count *before* the delete. It cannot be derived from
-    // the explicit cleanup below: `sessions.user_id` is ON DELETE CASCADE, so
-    // wherever `PRAGMA foreign_keys` is enforced the cascade removes those
-    // rows as part of the `users` delete and the cleanup finds nothing left
-    // to count — which would log `count: 0` for an action that really did
-    // destroy sessions. Enforcement is currently off on every pooled
-    // connection, but it is a per-connection setting and is intended to be
-    // enabled uniformly in `src/db.rs`, so this must be correct either way.
+    // the explicit cleanup below: `sessions.user_id` is ON DELETE CASCADE,
+    // enforcement is on for every pooled connection (`src/db.rs`), so the
+    // cascade removes those rows as part of the `users` delete and the
+    // cleanup below finds nothing left to count — which would log
+    // `count: 0` for an action that really did destroy sessions.
     let sessions_destroyed = state.session_repo.count_for_user(&user_id).await?;
 
     // The user row goes first. If it fails, `?` returns having changed
@@ -285,11 +313,13 @@ pub async fn delete_user(
     // account was deleted.
     let existed = state.user_repo.delete(&user_id).await?;
     if existed {
-        // Mop up whatever the cascade did not take. Required while FK
-        // enforcement is off on most pooled connections; a harmless no-op
-        // once it is on everywhere. Orphaned rows cannot authenticate —
-        // `validate_and_touch` INNER JOINs `users` — but they would
-        // otherwise sit until the hourly sweep retires them.
+        // Mop up whatever the cascade did not take. In the normal case the
+        // `ON DELETE CASCADE` above already removed every session and this
+        // is a harmless no-op; it only does real work if a connection ever
+        // ran with `PRAGMA foreign_keys` off (there is no such connection
+        // today, but nothing prevents a future one). Orphaned rows cannot
+        // authenticate — `validate_and_touch` INNER JOINs `users` — but they
+        // would otherwise sit until the hourly sweep retires them.
         state.session_repo.delete_all_for_user(&user_id).await?;
         let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
         audit::sessions_destroyed_bulk(

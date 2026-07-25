@@ -12,11 +12,19 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
     let path = path.split('?').next().unwrap_or(path);
 
     if path == ":memory:" {
-        // PRAGMA foreign_keys is per-connection (SQLite defaults it to OFF
-        // on every new connection), so it must be set in each pool's
-        // connection initialiser rather than once in a migration — a
-        // migration only reaches the single connection it happens to run on.
-        // All three pool-construction paths in this file must agree on this
+        // PRAGMA foreign_keys is per-connection. The bundled SQLite in this
+        // build happens to compile with SQLITE_DEFAULT_FOREIGN_KEYS, so it
+        // already defaults to ON here — but that default is a build-time
+        // compile flag, not something this crate controls or can rely on
+        // staying true (a non-bundled libsqlite3, or a different bundled
+        // build, may default it to OFF). Migration 010 also demonstrated the
+        // failure mode directly: it turns the pragma off for its own
+        // rebuild and, by design, leaves the one pooled connection that ran
+        // migrations with it off afterwards (see run_migrations' restore at
+        // the end of the loop). Setting it explicitly here, in every pool's
+        // connection initialiser, makes enforcement an invariant of this
+        // codebase rather than an accident of how SQLite was compiled. All
+        // three pool-construction paths in this file must agree on this
         // pragma, or enforcement would depend on which pooled connection a
         // given request happens to get.
         let manager = SqliteConnectionManager::memory()
