@@ -1,10 +1,22 @@
 use std::env::{self, VarError};
 use std::net::{IpAddr, SocketAddr};
 
+/// Which proxy-supplied header, if any, may be trusted to carry the real
+/// client IP.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TrustedProxyHeader {
+    /// Trust no forwarding header; always use the TCP peer address.
+    #[default]
+    None,
+    XForwardedFor,
+    XRealIp,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub database_url: String,
     pub bind: SocketAddr,
+    pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Vec<IpAddr>,
     pub cookie_secure: bool,
 }
@@ -44,6 +56,10 @@ impl Config {
                 .unwrap_or_else(|_| "sqlite:liftlog.sqlite3?mode=rwc".to_string()),
             bind: parse_bind(env::var("LIFTLOG_BIND").ok().as_deref())
                 .map_err(anyhow::Error::msg)?,
+            trusted_proxy_header: parse_trusted_proxy_header(
+                read_env_var("LIFTLOG_TRUSTED_PROXY_HEADER")?.as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?,
             trusted_proxies: parse_trusted_proxies(
                 read_env_var("LIFTLOG_TRUSTED_PROXIES")?.as_deref(),
             )
@@ -98,13 +114,20 @@ pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
 }
 
 /// Resolve the `LIFTLOG_TRUSTED_PROXIES` value into a list of bare IPs whose
-/// `X-Forwarded-For` header may be trusted for client-IP resolution (see
+/// forwarding header may be trusted for client-IP resolution (see
 /// [`crate::net::client_ip`]). Unset, empty, or whitespace-only input yields
 /// an empty `Vec` (no proxy trusted beyond loopback). Otherwise the value is
 /// a comma-separated list; each segment is trimmed and empty segments are
 /// skipped, so a trailing comma is tolerated. Any non-empty segment that
 /// does not parse as a bare IP is a hard error. No CIDR support: that would
 /// need a new dependency.
+///
+/// Each parsed IP is passed through [`IpAddr::to_canonical`] so
+/// `Config::trusted_proxies` is canonical by construction — e.g.
+/// `::ffff:10.0.0.5` becomes `10.0.0.5`, matching a plain-IPv4 peer address.
+/// Without this, comparing against a peer canonicalized by
+/// [`crate::net::client_ip`] would silently fail for entries written in
+/// IPv4-mapped-IPv6 form.
 pub fn parse_trusted_proxies(raw: Option<&str>) -> Result<Vec<IpAddr>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -116,9 +139,42 @@ pub fn parse_trusted_proxies(raw: Option<&str>) -> Result<Vec<IpAddr>, String> {
         .map(|segment| {
             segment
                 .parse::<IpAddr>()
+                .map(|ip| ip.to_canonical())
                 .map_err(|e| format!("invalid LIFTLOG_TRUSTED_PROXIES entry '{segment}': {e}"))
         })
         .collect()
+}
+
+/// Resolve the `LIFTLOG_TRUSTED_PROXY_HEADER` value into a [`TrustedProxyHeader`].
+/// Unset, empty, or whitespace-only input yields [`TrustedProxyHeader::None`]
+/// — liftlog cannot tell whether a forwarding header was written by a
+/// trusted proxy or passed through verbatim from the client, so honouring
+/// one has to be an explicit operator statement that their proxy overwrites
+/// (or strips) that header. Defaulting to trusting `X-Forwarded-For` would
+/// make the login rate limit bypassable on the extremely common minimal
+/// nginx config that only sets `X-Real-IP` and forwards a client-supplied
+/// `X-Forwarded-For` through untouched. With `None`, clients behind a proxy
+/// all share the proxy's single rate-limit bucket — a real limitation, but a
+/// safe one, and still strictly better than no throttle at all.
+///
+/// Accepts `none`, `x-forwarded-for`, `x-real-ip`, case-insensitively and
+/// trimmed. Any other non-empty value is a hard error.
+pub fn parse_trusted_proxy_header(raw: Option<&str>) -> Result<TrustedProxyHeader, String> {
+    let Some(raw) = raw else {
+        return Ok(TrustedProxyHeader::None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(TrustedProxyHeader::None);
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "none" => Ok(TrustedProxyHeader::None),
+        "x-forwarded-for" => Ok(TrustedProxyHeader::XForwardedFor),
+        "x-real-ip" => Ok(TrustedProxyHeader::XRealIp),
+        _ => Err(format!(
+            "invalid LIFTLOG_TRUSTED_PROXY_HEADER '{raw}': expected one of none, x-forwarded-for, x-real-ip"
+        )),
+    }
 }
 
 /// Strict boolean env-var parser. Accepts `true` / `false` / `1` / `0`,
@@ -269,6 +325,57 @@ mod tests {
         let err = parse_trusted_proxies(Some("10.0.0.1, not-an-ip")).unwrap_err();
         assert!(
             err.contains("invalid LIFTLOG_TRUSTED_PROXIES"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_trusted_proxies_canonicalizes_mapped_ipv6() {
+        let parsed = parse_trusted_proxies(Some("::ffff:10.0.0.5")).unwrap();
+        assert_eq!(parsed, vec!["10.0.0.5".parse::<IpAddr>().unwrap()]);
+    }
+
+    #[test]
+    fn parse_trusted_proxy_header_defaults_to_none() {
+        assert_eq!(
+            parse_trusted_proxy_header(None).unwrap(),
+            TrustedProxyHeader::None
+        );
+        assert_eq!(
+            parse_trusted_proxy_header(Some("")).unwrap(),
+            TrustedProxyHeader::None
+        );
+        assert_eq!(
+            parse_trusted_proxy_header(Some("   ")).unwrap(),
+            TrustedProxyHeader::None
+        );
+    }
+
+    #[test]
+    fn parse_trusted_proxy_header_accepts_known_values_case_insensitively() {
+        assert_eq!(
+            parse_trusted_proxy_header(Some("X-Forwarded-For")).unwrap(),
+            TrustedProxyHeader::XForwardedFor
+        );
+        assert_eq!(
+            parse_trusted_proxy_header(Some("x-real-ip")).unwrap(),
+            TrustedProxyHeader::XRealIp
+        );
+        assert_eq!(
+            parse_trusted_proxy_header(Some("NONE")).unwrap(),
+            TrustedProxyHeader::None
+        );
+        assert_eq!(
+            parse_trusted_proxy_header(Some("  x-forwarded-for  ")).unwrap(),
+            TrustedProxyHeader::XForwardedFor
+        );
+    }
+
+    #[test]
+    fn parse_trusted_proxy_header_rejects_unknown() {
+        let err = parse_trusted_proxy_header(Some("x-forwarded")).unwrap_err();
+        assert!(
+            err.contains("invalid LIFTLOG_TRUSTED_PROXY_HEADER"),
             "got: {err}"
         );
     }

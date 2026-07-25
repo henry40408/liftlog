@@ -74,7 +74,12 @@ pub async fn login_submit(
     Form(credentials): Form<LoginCredentials>,
 ) -> Result<Response> {
     let peer_addr = connect.map(|axum::Extension(axum::extract::ConnectInfo(addr))| addr.ip());
-    let ip = crate::net::client_ip(peer_addr, &headers, &state.trusted_proxies);
+    let ip = crate::net::client_ip(
+        peer_addr,
+        &headers,
+        state.trusted_proxy_header,
+        &state.trusted_proxies,
+    );
 
     if !state.login_rate_limiter.try_acquire(ip) {
         tracing::warn!(%ip, "login rate limited");

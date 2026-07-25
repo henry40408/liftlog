@@ -738,10 +738,12 @@ async fn test_distinct_peers_have_independent_login_budgets() {
 #[tokio::test]
 async fn test_untrusted_peer_forged_xff_is_ignored() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_rate_limit(
+    let test_app = common::create_test_app_with_proxy_header(
         pool.clone(),
         1,
         std::time::Duration::from_secs(60),
+        liftlog::config::TrustedProxyHeader::XForwardedFor,
+        Vec::new(),
     );
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
@@ -773,10 +775,12 @@ async fn test_untrusted_peer_forged_xff_is_ignored() {
 #[tokio::test]
 async fn test_loopback_peer_honours_rightmost_xff_hop() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_rate_limit(
+    let test_app = common::create_test_app_with_proxy_header(
         pool.clone(),
         1,
         std::time::Duration::from_secs(60),
+        liftlog::config::TrustedProxyHeader::XForwardedFor,
+        Vec::new(),
     );
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
@@ -819,14 +823,27 @@ async fn test_loopback_peer_honours_rightmost_xff_hop() {
 }
 
 /// Regression test for the confirmed bypass in Fix 1a: two separate
-/// `X-Forwarded-For` header field lines must bucket by the *last* line.
+/// `X-Forwarded-For` header field lines must bucket by the *last* line, not
+/// the first and not by ignoring the header entirely.
+///
+/// Three requests from the same peer, limit 1:
+///   1. `["1.1.1.1", "198.51.100.7"]` -> 200
+///   2. `["1.1.1.1", "198.51.100.8"]` -> 200 (different last line -> different bucket)
+///   3. `["9.9.9.9", "198.51.100.7"]` -> 429 (same last line as #1, different first line -> same bucket)
+///
+/// If the header were ignored, all three would bucket by the shared peer and
+/// #2 would be 429. If the *first* line were read instead of the last, #1
+/// and #2 would share a bucket (`1.1.1.1`) and #2 would be 429. Either
+/// regression fails this test.
 #[tokio::test]
 async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
     let pool = common::setup_test_db();
-    let test_app = common::create_test_app_with_rate_limit(
+    let test_app = common::create_test_app_with_proxy_header(
         pool.clone(),
         1,
         std::time::Duration::from_secs(60),
+        liftlog::config::TrustedProxyHeader::XForwardedFor,
+        Vec::new(),
     );
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
@@ -836,7 +853,7 @@ async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
         .oneshot(common::with_peer(
             wrong_password_login_request(&[
                 ("x-forwarded-for", "1.1.1.1"),
-                ("x-forwarded-for", "127.0.0.1"),
+                ("x-forwarded-for", "198.51.100.7"),
             ]),
             "127.0.0.1:1111",
         ))
@@ -849,9 +866,102 @@ async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
         .clone()
         .oneshot(common::with_peer(
             wrong_password_login_request(&[
-                ("x-forwarded-for", "2.2.2.2"),
-                ("x-forwarded-for", "127.0.0.1"),
+                ("x-forwarded-for", "1.1.1.1"),
+                ("x-forwarded-for", "198.51.100.8"),
             ]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[
+                ("x-forwarded-for", "9.9.9.9"),
+                ("x-forwarded-for", "198.51.100.7"),
+            ]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// Regression test for the confirmed bypass: with `TRUSTED_PROXY_HEADER`
+/// unset (the default), a forged `X-Forwarded-For` must not mint a fresh
+/// rate-limit bucket, even from a loopback peer that would have been
+/// trusted had a header been configured.
+#[tokio::test]
+async fn test_forwarding_header_ignored_when_not_configured() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "1.1.1.1")]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Different forged X-Forwarded-For, same peer: must still land in the
+    // same bucket, proving the header was never read because no header is
+    // configured.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "2.2.2.2")]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// When `TRUSTED_PROXY_HEADER` selects `X-Forwarded-For`, `X-Real-IP` must
+/// never be consulted, even when XFF is entirely absent from the request.
+#[tokio::test]
+async fn test_x_real_ip_not_honoured_when_header_is_x_forwarded_for() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_proxy_header(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+        liftlog::config::TrustedProxyHeader::XForwardedFor,
+        Vec::new(),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-real-ip", "1.1.1.1")]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Different X-Real-IP, no XFF at all: must still land in the same
+    // bucket (the peer), proving the non-selected header is never read.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-real-ip", "2.2.2.2")]),
             "127.0.0.1:1111",
         ))
         .await

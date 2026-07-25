@@ -123,10 +123,25 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
-    if config.trusted_proxies.is_empty() {
-        tracing::warn!(
-            "TRUSTED_PROXIES is empty; X-Forwarded-For is only honoured for loopback peers — behind a reverse proxy in a separate container, all clients share one login rate-limit bucket"
-        );
+    match config.trusted_proxy_header {
+        config::TrustedProxyHeader::None => {
+            tracing::warn!(
+                "TRUSTED_PROXY_HEADER is not set; forwarding headers are ignored and the TCP peer is used for login rate limiting — behind a reverse proxy every client shares one bucket. Set it to x-forwarded-for or x-real-ip once your proxy is configured to overwrite that header."
+            );
+        }
+        header if config.trusted_proxies.is_empty() => {
+            tracing::info!(
+                ?header,
+                "trusting forwarding header from loopback peers only; set TRUSTED_PROXIES if the proxy runs on another host or in another container"
+            );
+        }
+        header => {
+            tracing::info!(
+                ?header,
+                proxies = ?config.trusted_proxies,
+                "trusting forwarding header from configured proxies"
+            );
+        }
     }
 
     let app_state = AppState {
@@ -135,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
         workout_repo,
         session_repo,
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
+        trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         cookie_secure: config.cookie_secure,
     };

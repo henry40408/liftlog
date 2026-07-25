@@ -32,12 +32,41 @@ pub fn create_test_app_with_rate_limit(
     max_attempts: u32,
     window: std::time::Duration,
 ) -> TestApp {
-    build_test_app(pool, max_attempts, window, false)
+    build_test_app(
+        pool,
+        max_attempts,
+        window,
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+    )
 }
 
 #[allow(dead_code)]
 pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> TestApp {
-    build_test_app(pool, 100, std::time::Duration::from_secs(60), cookie_secure)
+    build_test_app(
+        pool,
+        100,
+        std::time::Duration::from_secs(60),
+        cookie_secure,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+    )
+}
+
+/// Like [`create_test_app_with_rate_limit`], but also selects which
+/// forwarding header (if any) is trusted, and which peers may supply it —
+/// for tests exercising `crate::net::client_ip` end to end through the
+/// router.
+#[allow(dead_code)]
+pub fn create_test_app_with_proxy_header(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+    header: liftlog::config::TrustedProxyHeader,
+    trusted_proxies: Vec<std::net::IpAddr>,
+) -> TestApp {
+    build_test_app(pool, max_attempts, window, false, header, trusted_proxies)
 }
 
 /// Single place that actually builds `AppState`; every other
@@ -47,6 +76,8 @@ fn build_test_app(
     max_attempts: u32,
     window: std::time::Duration,
     cookie_secure: bool,
+    trusted_proxy_header: liftlog::config::TrustedProxyHeader,
+    trusted_proxies: Vec<std::net::IpAddr>,
 ) -> TestApp {
     use liftlog::rate_limit::RateLimiter;
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
@@ -59,7 +90,8 @@ fn build_test_app(
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
         login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
-        trusted_proxies: Arc::new(Vec::new()),
+        trusted_proxy_header,
+        trusted_proxies: Arc::new(trusted_proxies),
         cookie_secure,
     };
 

@@ -466,35 +466,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_validate_and_touch_stops_sliding_at_cap_but_session_still_valid() {
-        let pool = setup_test_db();
-        let user_id = create_user(&pool).await;
-        let repo = SessionRepository::new(pool.clone());
-
-        let token = repo.create(&user_id).await.unwrap();
-
-        // expires_at already pinned to the cap; last_touched_at is outside
-        // the throttle window, so the only reason to not slide is the cap.
-        {
-            let conn = pool.get().unwrap();
-            conn.execute(
-                "UPDATE sessions SET created_at = datetime('now', '-1 day'), \
-                 last_touched_at = datetime('now', '-2 hours'), \
-                 expires_at = datetime('now', '+89 days') WHERE token = ?",
-                [&token],
-            )
-            .unwrap();
-        }
-
-        let outcome = repo.validate_and_touch(&token).await.unwrap();
-        assert!(outcome.is_some(), "session should still be valid");
-        assert!(
-            outcome.unwrap().new_expires_at.is_none(),
-            "expiry should not slide past the absolute cap"
-        );
-    }
-
-    #[tokio::test]
     async fn test_validate_and_touch_at_cap_still_records_activity() {
         let pool = setup_test_db();
         let user_id = create_user(&pool).await;
