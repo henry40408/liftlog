@@ -39,6 +39,8 @@ pub fn create_test_app_with_rate_limit(
         false,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
+        0,
+        false,
     )
 }
 
@@ -51,6 +53,8 @@ pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> 
         cookie_secure,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
+        0,
+        false,
     )
 }
 
@@ -66,11 +70,38 @@ pub fn create_test_app_with_proxy_header(
     header: liftlog::config::TrustedProxyHeader,
     trusted_proxies: Vec<std::net::IpAddr>,
 ) -> TestApp {
-    build_test_app(pool, max_attempts, window, false, header, trusted_proxies)
+    build_test_app(
+        pool,
+        max_attempts,
+        window,
+        false,
+        header,
+        trusted_proxies,
+        0,
+        false,
+    )
+}
+
+/// Like [`create_test_app_with_rate_limit`], but also configures the HSTS
+/// header — for tests exercising `middleware::security_headers` end to end
+/// through the router.
+#[allow(dead_code)]
+pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains: bool) -> TestApp {
+    build_test_app(
+        pool,
+        100,
+        std::time::Duration::from_secs(60),
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        max_age,
+        include_subdomains,
+    )
 }
 
 /// Single place that actually builds `AppState`; every other
 /// `create_test_app_*` helper delegates here.
+#[allow(clippy::too_many_arguments)]
 fn build_test_app(
     pool: DbPool,
     max_attempts: u32,
@@ -78,6 +109,8 @@ fn build_test_app(
     cookie_secure: bool,
     trusted_proxy_header: liftlog::config::TrustedProxyHeader,
     trusted_proxies: Vec<std::net::IpAddr>,
+    hsts_max_age: u64,
+    hsts_include_subdomains: bool,
 ) -> TestApp {
     use liftlog::rate_limit::RateLimiter;
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
@@ -93,6 +126,11 @@ fn build_test_app(
         trusted_proxy_header,
         trusted_proxies: Arc::new(trusted_proxies),
         cookie_secure,
+        // Disabled by default so every existing test keeps observing
+        // current (no-HSTS) behaviour; only `create_test_app_with_hsts`
+        // opts in.
+        hsts_max_age,
+        hsts_include_subdomains,
         // Fixed, deterministic salt (not random) so a test can assert a
         // specific fingerprint if it ever needs to; nothing in this test
         // suite currently relies on its exact value.

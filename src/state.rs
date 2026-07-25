@@ -17,6 +17,13 @@ pub struct AppState {
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Arc<Vec<IpAddr>>,
     pub cookie_secure: bool,
+    /// Seconds for the `Strict-Transport-Security` header's `max-age`; `0`
+    /// disables the header. See `middleware::security_headers` for why this
+    /// defaults off.
+    pub hsts_max_age: u64,
+    /// Whether the `Strict-Transport-Security` header, when enabled, also
+    /// carries `includeSubDomains`.
+    pub hsts_include_subdomains: bool,
     /// Per-process random salt for `session_fp` in the audit log. Regenerated
     /// on every restart: events correlate within one process lifetime, not
     /// across restarts. OWASP only requires that the raw token never be

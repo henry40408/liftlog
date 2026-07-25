@@ -1351,3 +1351,104 @@ async fn test_unauthenticated_login_page_has_no_cache_control() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.headers().get("cache-control").is_none());
 }
+
+/// HSTS is opt-in: a default-built app must never send
+/// `Strict-Transport-Security`. Pins that the feature does not leak on by
+/// accident.
+#[tokio::test]
+async fn test_no_hsts_header_by_default() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        response
+            .headers()
+            .get("strict-transport-security")
+            .is_none()
+    );
+}
+
+/// When `HSTS_MAX_AGE` is configured (without subdomains), the header carries
+/// exactly `max-age=<N>`.
+#[tokio::test]
+async fn test_hsts_header_present_when_configured() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_hsts(pool, 31_536_000, false).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.headers().get("strict-transport-security").unwrap(),
+        "max-age=31536000"
+    );
+}
+
+/// When `HSTS_INCLUDE_SUBDOMAINS` is also configured, the header carries
+/// `includeSubDomains` as well.
+#[tokio::test]
+async fn test_hsts_header_includes_subdomains_when_configured() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_hsts(pool, 31_536_000, true).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.headers().get("strict-transport-security").unwrap(),
+        "max-age=31536000; includeSubDomains"
+    );
+}
+
+/// Layer-ordering regression guard: HSTS must be the *outermost* layer so it
+/// still lands on a response that `csrf_origin_guard` rejects before the
+/// request reaches session validation or a handler. If the HSTS layer were
+/// registered inside the CSRF guard instead of outside it, this would fail.
+#[tokio::test]
+async fn test_hsts_header_present_on_csrf_rejection() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_hsts(pool, 31_536_000, false).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workouts")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("sec-fetch-site", "cross-site")
+                .body(Body::from("date=2024-01-15&notes=Leg%20day"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        response.headers().get("strict-transport-security").unwrap(),
+        "max-age=31536000"
+    );
+}

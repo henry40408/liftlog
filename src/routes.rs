@@ -5,7 +5,9 @@ use axum::{
 };
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
-use crate::middleware::{SessionLayerState, csrf_origin_guard, sliding_session_middleware};
+use crate::middleware::{
+    HstsHeader, SessionLayerState, csrf_origin_guard, hsts_middleware, sliding_session_middleware,
+};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -16,6 +18,9 @@ pub fn create_router(state: AppState) -> Router {
         trusted_proxy_header: state.trusted_proxy_header,
         trusted_proxies: state.trusted_proxies.clone(),
     };
+    // Read off `state` before `.with_state(state)` moves it below.
+    let hsts_max_age = state.hsts_max_age;
+    let hsts_include_subdomains = state.hsts_include_subdomains;
 
     Router::new()
         // Health check
@@ -86,6 +91,16 @@ pub fn create_router(state: AppState) -> Router {
             sliding_session_middleware,
         ))
         // First-line CSRF: reject provably cross-site state-changing requests.
-        // Registered last → outermost → runs before session validation.
+        // Registered before HSTS below → runs before session validation, and
+        // after HSTS in request order (outer layers run first).
         .layer(from_fn(csrf_origin_guard))
+        // HSTS must be the outermost layer: it is registered last, after the
+        // CSRF guard, so it also stamps responses that short-circuit inside
+        // that guard (its 403) or inside session validation (the AuthRedirect
+        // 302) rather than only ones that reach a handler. Any layer inside
+        // this one that returns early would ship without the header.
+        .layer(from_fn_with_state(
+            HstsHeader::new(hsts_max_age, hsts_include_subdomains),
+            hsts_middleware,
+        ))
 }

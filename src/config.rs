@@ -19,6 +19,8 @@ pub struct Config {
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Vec<IpAddr>,
     pub cookie_secure: bool,
+    pub hsts_max_age: u64,
+    pub hsts_include_subdomains: bool,
 }
 
 /// Env vars that were renamed under the `LIFTLOG_` prefix, paired with their
@@ -67,6 +69,14 @@ impl Config {
             cookie_secure: parse_bool_env(
                 "LIFTLOG_COOKIE_SECURE",
                 read_env_var("LIFTLOG_COOKIE_SECURE")?.as_deref(),
+                false,
+            )
+            .map_err(anyhow::Error::msg)?,
+            hsts_max_age: parse_hsts_max_age(read_env_var("LIFTLOG_HSTS_MAX_AGE")?.as_deref())
+                .map_err(anyhow::Error::msg)?,
+            hsts_include_subdomains: parse_bool_env(
+                "LIFTLOG_HSTS_INCLUDE_SUBDOMAINS",
+                read_env_var("LIFTLOG_HSTS_INCLUDE_SUBDOMAINS")?.as_deref(),
                 false,
             )
             .map_err(anyhow::Error::msg)?,
@@ -200,6 +210,32 @@ pub fn parse_bool_env(name: &str, raw: Option<&str>, default: bool) -> Result<bo
             "invalid {name} '{v}': expected one of true, false, 1, 0"
         )),
     }
+}
+
+/// Resolve `LIFTLOG_HSTS_MAX_AGE` (seconds). Unset, empty, or `0` means no
+/// `Strict-Transport-Security` header is sent.
+///
+/// Default-off is deliberate: liftlog never terminates TLS (see the README),
+/// so it cannot tell whether a request actually arrived over HTTPS — it can
+/// only trust that the operator's proxy is doing the right thing. HSTS is a
+/// browser-enforced promise that this domain is HTTPS-only for `max_age`
+/// seconds, and a wrong promise cannot be withdrawn from the server side —
+/// there is no "un-send" a `Strict-Transport-Security` header already cached
+/// by a browser; the only fix is waiting out the `max-age`. The layer that
+/// actually terminates TLS (the reverse proxy) is the layer that can vouch
+/// for HTTPS and the layer operators should prefer for sending this header;
+/// see the README for the fuller rationale.
+pub fn parse_hsts_max_age(raw: Option<&str>) -> Result<u64, String> {
+    let Some(raw) = raw else {
+        return Ok(0);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(0);
+    }
+    trimmed
+        .parse::<u64>()
+        .map_err(|e| format!("invalid LIFTLOG_HSTS_MAX_AGE '{raw}': {e}"))
 }
 
 #[cfg(test)]
@@ -455,5 +491,29 @@ mod tests {
         unsafe {
             std::env::remove_var(name);
         }
+    }
+
+    #[test]
+    fn parse_hsts_max_age_defaults_to_zero() {
+        assert_eq!(parse_hsts_max_age(None).unwrap(), 0);
+        assert_eq!(parse_hsts_max_age(Some("")).unwrap(), 0);
+        assert_eq!(parse_hsts_max_age(Some("   ")).unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_hsts_max_age_accepts_seconds() {
+        assert_eq!(parse_hsts_max_age(Some("31536000")).unwrap(), 31_536_000);
+        assert_eq!(parse_hsts_max_age(Some(" 0 ")).unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_hsts_max_age_rejects_garbage() {
+        let err = parse_hsts_max_age(Some("not-a-number")).unwrap_err();
+        assert!(err.contains("invalid LIFTLOG_HSTS_MAX_AGE"), "got: {err}");
+
+        // Must not silently wrap to a huge u64 — a negative value is a hard
+        // error, not "unsigned integer parsing accepts it somehow".
+        let err = parse_hsts_max_age(Some("-1")).unwrap_err();
+        assert!(err.contains("invalid LIFTLOG_HSTS_MAX_AGE"), "got: {err}");
     }
 }

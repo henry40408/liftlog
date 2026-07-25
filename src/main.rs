@@ -161,6 +161,8 @@ async fn main() -> anyhow::Result<()> {
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         cookie_secure: config.cookie_secure,
+        hsts_max_age: config.hsts_max_age,
+        hsts_include_subdomains: config.hsts_include_subdomains,
         log_salt: Arc::new(log_salt),
     };
 
@@ -174,6 +176,13 @@ async fn main() -> anyhow::Result<()> {
         cookie_secure = config.cookie_secure,
         "session cookie Secure attribute"
     );
+    if config.hsts_max_age > 0 {
+        tracing::info!(
+            max_age = config.hsts_max_age,
+            include_subdomains = config.hsts_include_subdomains,
+            "HSTS enabled"
+        );
+    }
 
     let listener = TcpListener::bind(addr).await?;
     axum::serve(
