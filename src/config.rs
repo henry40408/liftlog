@@ -1,10 +1,11 @@
 use std::env;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 #[derive(Clone)]
 pub struct Config {
     pub database_url: String,
     pub bind: SocketAddr,
+    pub trusted_proxies: Vec<IpAddr>,
 }
 
 /// Env vars that were renamed under the `LIFTLOG_` prefix, paired with their
@@ -42,6 +43,10 @@ impl Config {
                 .unwrap_or_else(|_| "sqlite:liftlog.sqlite3?mode=rwc".to_string()),
             bind: parse_bind(env::var("LIFTLOG_BIND").ok().as_deref())
                 .map_err(anyhow::Error::msg)?,
+            trusted_proxies: parse_trusted_proxies(
+                env::var("LIFTLOG_TRUSTED_PROXIES").ok().as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?,
         })
     }
 }
@@ -59,6 +64,30 @@ pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
             .map_err(|e| format!("invalid LIFTLOG_BIND '{v}': {e}")),
         _ => Ok(SocketAddr::from(([127, 0, 0, 1], 8080))),
     }
+}
+
+/// Resolve the `LIFTLOG_TRUSTED_PROXIES` value into a list of bare IPs whose
+/// `X-Forwarded-For` header may be trusted for client-IP resolution (see
+/// [`crate::net::client_ip`]). Unset, empty, or whitespace-only input yields
+/// an empty `Vec` (no proxy trusted beyond loopback). Otherwise the value is
+/// a comma-separated list; each segment is trimmed and empty segments are
+/// skipped, so a trailing comma is tolerated. Any non-empty segment that
+/// does not parse as a bare IP is a hard error. No CIDR support: that would
+/// need a new dependency.
+pub fn parse_trusted_proxies(raw: Option<&str>) -> Result<Vec<IpAddr>, String> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+
+    raw.split(',')
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            segment
+                .parse::<IpAddr>()
+                .map_err(|e| format!("invalid LIFTLOG_TRUSTED_PROXIES entry '{segment}': {e}"))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -151,5 +180,37 @@ mod tests {
         // A process with no legacy names set (nextest isolates each test) is
         // accepted.
         reject_legacy_env_vars().expect("no legacy vars should pass");
+    }
+
+    #[test]
+    fn parse_trusted_proxies_defaults_empty() {
+        assert_eq!(parse_trusted_proxies(None).unwrap(), Vec::<IpAddr>::new());
+        assert_eq!(
+            parse_trusted_proxies(Some("")).unwrap(),
+            Vec::<IpAddr>::new()
+        );
+        assert_eq!(
+            parse_trusted_proxies(Some("   ")).unwrap(),
+            Vec::<IpAddr>::new()
+        );
+    }
+
+    #[test]
+    fn parse_trusted_proxies_accepts_comma_separated_ips() {
+        let parsed = parse_trusted_proxies(Some(" 10.0.0.1 , ::1, 192.168.1.1 , ")).unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                "::1".parse::<IpAddr>().unwrap(),
+                "192.168.1.1".parse::<IpAddr>().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_trusted_proxies_rejects_garbage() {
+        let err = parse_trusted_proxies(Some("10.0.0.1, not-an-ip")).unwrap_err();
+        assert!(err.contains("invalid LIFTLOG_TRUSTED_PROXIES"), "got: {err}");
     }
 }

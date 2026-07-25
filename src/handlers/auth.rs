@@ -68,15 +68,36 @@ pub async fn login_page(State(state): State<AppState>, request: Request) -> Resu
 
 pub async fn login_submit(
     State(state): State<AppState>,
+    connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    headers: axum::http::HeaderMap,
     jar: CookieJar,
     Form(credentials): Form<LoginCredentials>,
 ) -> Result<Response> {
+    let ip = crate::net::client_ip(
+        connect.map(|c| c.0.0.ip()),
+        &headers,
+        &state.trusted_proxies,
+    );
+
+    if !state.login_rate_limiter.try_acquire(ip) {
+        tracing::warn!(%ip, "login rate limited");
+        let template = LoginTemplate {
+            error: Some("Too many login attempts. Please try again later.".to_string()),
+        };
+        return Ok((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Html(template.render()?),
+        )
+            .into_response());
+    }
+
     let user = state
         .user_repo
         .verify_password(&credentials.username, &credentials.password)
         .await?;
 
     if let Some(user) = user {
+        state.login_rate_limiter.release(ip);
         let token = state.session_repo.create(&user.id).await?;
         let jar = jar.add(create_session_cookie(&token));
         Ok((jar, Redirect::to("/")).into_response())

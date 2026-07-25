@@ -5,6 +5,8 @@ pub mod handlers;
 pub mod middleware;
 pub mod migrations;
 pub mod models;
+pub mod net;
+pub mod rate_limit;
 pub mod repositories;
 pub mod routes;
 pub mod session;

@@ -21,14 +21,29 @@ pub fn create_test_app(pool: DbPool) -> Router {
 }
 
 pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
+    // A generous default so existing tests (which don't exercise rate
+    // limiting) can't trip it.
+    create_test_app_with_rate_limit(pool, 100, std::time::Duration::from_secs(60))
+}
+
+#[allow(dead_code)]
+pub fn create_test_app_with_rate_limit(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+) -> TestApp {
+    use liftlog::rate_limit::RateLimiter;
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
     use liftlog::state::AppState;
+    use std::sync::Arc;
 
     let app_state = AppState {
         user_repo: UserRepository::new(pool.clone()),
         exercise_repo: ExerciseRepository::new(pool.clone()),
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
+        login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
+        trusted_proxies: Arc::new(Vec::new()),
     };
 
     let router = liftlog::routes::create_router(app_state);

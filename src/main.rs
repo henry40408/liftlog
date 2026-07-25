@@ -11,6 +11,8 @@ mod handlers;
 mod middleware;
 mod migrations;
 mod models;
+mod net;
+mod rate_limit;
 mod repositories;
 mod routes;
 mod session;
@@ -19,8 +21,11 @@ mod version;
 
 use config::Config;
 use migrations::run_migrations;
+use rate_limit::RateLimiter;
 use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
 use state::AppState;
+use std::sync::Arc;
+use std::time::Duration;
 
 // The release image links musl, whose default allocator is markedly slower than
 // glibc's under concurrent load. mimalloc restores throughput for the request
@@ -118,11 +123,19 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
+    if config.trusted_proxies.is_empty() {
+        tracing::warn!(
+            "TRUSTED_PROXIES is empty; X-Forwarded-For is only honoured for loopback peers — behind a reverse proxy in a separate container, all clients share one login rate-limit bucket"
+        );
+    }
+
     let app_state = AppState {
         user_repo,
         exercise_repo,
         workout_repo,
         session_repo,
+        login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
+        trusted_proxies: Arc::new(config.trusted_proxies.clone()),
     };
 
     // Build router
@@ -133,9 +146,12 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting server at http://{}", addr);
 
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     // Server has stopped accepting connections and drained in-flight requests.
     // Stop the background sweep and wait for any current pass to finish before

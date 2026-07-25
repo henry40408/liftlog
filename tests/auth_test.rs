@@ -424,6 +424,107 @@ async fn test_expired_session_redirects_to_login() {
 }
 
 #[tokio::test]
+async fn test_login_rate_limited_after_max_attempts() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        3,
+        std::time::Duration::from_secs(60),
+    );
+
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    for _ in 0..3 {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("username=testuser&password=wrongpassword"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=testuser&password=wrongpassword"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(body_str.contains("Too many login attempts"));
+}
+
+#[tokio::test]
+async fn test_successful_login_releases_its_attempt() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        2,
+        std::time::Duration::from_secs(60),
+    );
+
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    for _ in 0..5 {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("username=testuser&password=password123"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    }
+}
+
+#[tokio::test]
+async fn test_login_succeeds_when_under_limit() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=testuser&password=password123"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/");
+}
+
+#[tokio::test]
 async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
