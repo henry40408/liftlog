@@ -424,6 +424,32 @@ async fn test_expired_session_redirects_to_login() {
 }
 
 #[tokio::test]
+async fn test_over_age_session_redirects_to_login() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let token = common::create_session_token(&pool, &user).await;
+    // Over the 90-day absolute cap even though expires_at (created as
+    // now + 7d idle TTL) is still in the future.
+    common::age_session_creation(&pool, &token, 91);
+
+    let app = common::create_test_app(pool);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, common::cookie_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
+}
+
+#[tokio::test]
 async fn test_login_rate_limited_after_max_attempts() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_rate_limit(

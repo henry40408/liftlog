@@ -126,6 +126,15 @@ pub fn expire_session(pool: &DbPool, token: &str) {
     .unwrap();
 }
 
+#[allow(dead_code)]
+pub fn age_session_creation(pool: &DbPool, token: &str, days_ago: u32) {
+    let conn = pool.get().unwrap();
+    let sql = format!(
+        "UPDATE sessions SET created_at = datetime('now', '-{days_ago} days') WHERE token = ?"
+    );
+    conn.execute(&sql, [token]).unwrap();
+}
+
 // Test data creation helpers
 #[allow(dead_code)]
 pub async fn create_test_exercise(
