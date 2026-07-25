@@ -1,11 +1,12 @@
 //! Session lifecycle audit logging (OWASP Session Management Cheat Sheet,
 //! *Logging Sessions Life Cycle*).
 //!
-//! Every session creation, renewal, destruction, expiry, and rejection is
-//! emitted as a structured `tracing` event under the `liftlog::audit`
-//! target, so an operator piping `LOG_FORMAT=json` into a log collector can
-//! reconstruct a session's life cycle and correlate it with the requests
-//! that drove it.
+//! Session creation, renewal, destruction, expiry and rejection are emitted
+//! as structured `tracing` events under the `liftlog::audit` target; request-scoped
+//! events carry `client_ip`, `user_agent` and `path`, while the hourly background
+//! sweep's expiry event is not request-scoped and reports only a `count`, so an
+//! operator piping `LOG_FORMAT=json` into a log collector can reconstruct a
+//! session's life cycle and correlate it with the requests that drove it.
 //!
 //! OWASP is explicit that the session identifier itself must never be
 //! written to a log — a leaked log line must not be equivalent to a leaked
@@ -177,6 +178,22 @@ pub fn session_expired(ctx: &AuditContext, session_fp: &str, reason: &str) {
         path = %ctx.path,
         reason,
         "session expired"
+    );
+}
+
+/// Emitted by the hourly background sweep, not by a request, so it has no
+/// `client_ip` / `user_agent` / `path` and no per-session fingerprint: the
+/// sweep deletes in bulk without reading the tokens back, and fetching them
+/// purely to fingerprint them would add a query per pass for no security
+/// benefit. `count` is what an operator actually needs — a sudden spike is
+/// the signal worth alerting on.
+pub fn sessions_expired_sweep(count: usize) {
+    tracing::info!(
+        target: "liftlog::audit",
+        event = "session.expired",
+        count,
+        reason = "sweep",
+        "expired sessions retired by the background sweep"
     );
 }
 

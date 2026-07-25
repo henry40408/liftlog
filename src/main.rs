@@ -115,8 +115,15 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 tokio::select! {
                     _ = ticker.tick() => {
-                        if let Err(e) = session_repo.cleanup_expired().await {
-                            tracing::warn!(error = ?e, "session cleanup_expired failed");
+                        match session_repo.cleanup_expired().await {
+                            // Only when something was actually retired: an
+                            // idle deployment would otherwise emit one empty
+                            // line an hour, forever.
+                            Ok(0) => {}
+                            Ok(n) => audit::sessions_expired_sweep(n),
+                            Err(e) => {
+                                tracing::warn!(error = ?e, "session cleanup_expired failed");
+                            }
                         }
                     }
                     _ = shutdown_rx.changed() => break,

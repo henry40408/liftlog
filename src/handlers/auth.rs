@@ -269,19 +269,37 @@ pub async fn delete_user(
         ));
     }
 
-    // Sessions have no ON DELETE CASCADE on user_id yet, so they'd be
-    // orphaned rows otherwise; clean them up before removing the user.
-    let deleted_sessions = state.session_repo.delete_all_for_user(&user_id).await?;
-    let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
-    audit::sessions_destroyed_bulk(
-        &audit_ctx,
-        &actor_fp,
-        &user_id,
-        deleted_sessions,
-        "admin_user_delete",
-    );
+    // Read the session count *before* the delete. It cannot be derived from
+    // the explicit cleanup below: `sessions.user_id` is ON DELETE CASCADE, so
+    // wherever `PRAGMA foreign_keys` is enforced the cascade removes those
+    // rows as part of the `users` delete and the cleanup finds nothing left
+    // to count — which would log `count: 0` for an action that really did
+    // destroy sessions. Enforcement is currently off on every pooled
+    // connection, but it is a per-connection setting and is intended to be
+    // enabled uniformly in `src/db.rs`, so this must be correct either way.
+    let sessions_destroyed = state.session_repo.count_for_user(&user_id).await?;
 
-    state.user_repo.delete(&user_id).await?;
+    // The user row goes first. If it fails, `?` returns having changed
+    // nothing — whereas cleaning sessions up first would leave a surviving
+    // account with every session destroyed and an audit line claiming the
+    // account was deleted.
+    let existed = state.user_repo.delete(&user_id).await?;
+    if existed {
+        // Mop up whatever the cascade did not take. Required while FK
+        // enforcement is off on most pooled connections; a harmless no-op
+        // once it is on everywhere. Orphaned rows cannot authenticate —
+        // `validate_and_touch` INNER JOINs `users` — but they would
+        // otherwise sit until the hourly sweep retires them.
+        state.session_repo.delete_all_for_user(&user_id).await?;
+        let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
+        audit::sessions_destroyed_bulk(
+            &audit_ctx,
+            &actor_fp,
+            &user_id,
+            sessions_destroyed,
+            "admin_user_delete",
+        );
+    }
 
     Ok(Redirect::to("/users").into_response())
 }

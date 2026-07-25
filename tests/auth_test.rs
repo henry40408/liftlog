@@ -70,6 +70,152 @@ async fn test_admin_delete_user_removes_their_sessions() {
     assert_eq!(count, 0, "deleted user's sessions should all be gone");
 }
 
+/// When the user delete fails partway through, sessions must not be cleaned up
+/// or logged as destroyed — only the user row deletion is attempted, so if it
+/// fails, nothing changes. This regression test reproduces the bug: sessions
+/// were deleted before the user row delete, so a failed delete left the user
+/// alive but all their sessions orphaned.
+#[tokio::test]
+async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass123", UserRole::Admin).await;
+    let admin_cookie = common::create_session_cookie(&pool, &admin).await;
+    let admin_cookie_header = common::extract_cookie_header(&admin_cookie);
+
+    let victim = common::create_test_user(&pool, "victim", "victimpass123", UserRole::User).await;
+    let _victim_token1 = common::create_session_token(&pool, &victim).await;
+    let _victim_token2 = common::create_session_token(&pool, &victim).await;
+
+    // Install a trigger that blocks deletion of the victim user
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            &format!(
+                "CREATE TRIGGER block_victim_delete BEFORE DELETE ON users \
+                 WHEN OLD.id = '{}' \
+                 BEGIN SELECT RAISE(ABORT, 'blocked'); END",
+                victim.id
+            ),
+            [],
+        )
+        .unwrap();
+    }
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/delete", victim.id))
+                .header(header::COOKIE, &admin_cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The delete should have failed. Database error → INTERNAL_SERVER_ERROR.
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    // Victim's sessions should still exist.
+    {
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+                [&victim.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 2,
+            "victim's sessions should still exist since user delete failed"
+        );
+    }
+
+    // Victim's user row should still exist.
+    {
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE id = ?",
+                [&victim.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "victim's user row should still exist since delete failed"
+        );
+    }
+}
+
+/// Pins that `delete_user` is correct whether `SQLite`'s cascade deletes the
+/// sessions or the handler's explicit cleanup does. `setup_test_db` builds
+/// its pool via `create_memory_pool` (`src/db.rs`), which is `max_size(1)`
+/// — a single physical connection shared by every `pool.get()` call in this
+/// test process, including the one the request handler will use inside
+/// `spawn_blocking`. So enabling `PRAGMA foreign_keys = ON` on the
+/// connection we grab here reaches the request's connection too; there is
+/// no second connection for it to miss.
+#[tokio::test]
+async fn test_admin_delete_user_removes_sessions_even_with_foreign_keys_enforced() {
+    let pool = common::setup_test_db();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    }
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass123", UserRole::Admin).await;
+    let admin_cookie = common::create_session_cookie(&pool, &admin).await;
+    let admin_cookie_header = common::extract_cookie_header(&admin_cookie);
+
+    let victim = common::create_test_user(&pool, "victim", "victimpass123", UserRole::User).await;
+    let _victim_token1 = common::create_session_token(&pool, &victim).await;
+    let _victim_token2 = common::create_session_token(&pool, &victim).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/delete", victim.id))
+                .header(header::COOKIE, &admin_cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/users");
+
+    let conn = pool.get().unwrap();
+    let session_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+            [&victim.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        session_count, 0,
+        "victim's sessions should be gone whether the cascade or the explicit cleanup did it"
+    );
+
+    let user_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE id = ?",
+            [&victim.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(user_count, 0, "victim's user row should be gone");
+}
+
 #[tokio::test]
 async fn test_setup_page_available_when_no_users() {
     let pool = common::setup_test_db();

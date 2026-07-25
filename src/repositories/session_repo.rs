@@ -263,6 +263,34 @@ impl SessionRepository {
         .await?
     }
 
+    /// Number of session rows a user currently has.
+    ///
+    /// Read before an admin deletes the account so the audit event can report
+    /// how many sessions that action destroyed. Deriving the number from the
+    /// subsequent `DELETE`'s row count instead would understate it whenever
+    /// `SQLite`'s per-connection `foreign_keys` enforcement is active: the
+    /// `ON DELETE CASCADE` on `sessions.user_id` removes the rows as part of
+    /// the `users` delete, leaving the explicit cleanup nothing to count.
+    pub async fn count_for_user(&self, user_id: &str) -> Result<usize> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+                [&user_id],
+                |row| row.get(0),
+            )?;
+            // COUNT(*) can never be negative, so try_from can never actually
+            // fail here; unwrap_or(0) just avoids an `as` cast (a sign-loss
+            // cast under this crate's pedantic lint config) without a panic
+            // path for a case that cannot occur.
+            Ok(usize::try_from(count).unwrap_or(0))
+        })
+        .await?
+    }
+
     /// Batch delete all expired sessions.
     ///
     /// The `created_at` arm exists because `validate_and_touch` slid
@@ -271,7 +299,9 @@ impl SessionRepository {
     /// even though it is now over the 90-day absolute cap. This lets the
     /// hourly background sweep (`sweep_handle` in `main.rs`) retire those
     /// legacy rows without a data migration.
-    pub async fn cleanup_expired(&self) -> Result<()> {
+    ///
+    /// Returns the number of rows retired so the caller can log it.
+    pub async fn cleanup_expired(&self) -> Result<usize> {
         let pool = self.pool.clone();
         let now = Utc::now();
         let oldest_allowed_creation =
@@ -279,11 +309,11 @@ impl SessionRepository {
 
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            conn.execute(
+            let count = conn.execute(
                 "DELETE FROM sessions WHERE expires_at <= ? OR created_at <= ?",
                 rusqlite::params![now, oldest_allowed_creation],
             )?;
-            Ok(())
+            Ok(count)
         })
         .await?
     }
@@ -661,6 +691,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_count_for_user_counts_only_that_users_sessions() {
+        let pool = setup_test_db();
+        let user1 = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let user_repo = UserRepository::new(pool.clone());
+        let user2 = user_repo
+            .create("otheruser", "password", UserRole::User)
+            .await
+            .unwrap()
+            .id;
+
+        let _t1 = repo.create(&user1).await.unwrap();
+        let _t2 = repo.create(&user1).await.unwrap();
+        let _t3 = repo.create(&user2).await.unwrap();
+
+        assert_eq!(repo.count_for_user(&user1).await.unwrap(), 2);
+        assert_eq!(repo.count_for_user(&user2).await.unwrap(), 1);
+        assert_eq!(repo.count_for_user("no-such-user").await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn test_validate_and_touch_distinguishes_idle_from_absolute_expiry() {
         let pool = setup_test_db();
         let user_id = create_user(&pool).await;
@@ -877,5 +929,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_expired_returns_the_number_of_rows_retired() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let _token_valid = repo.create(&user_id).await.unwrap();
+        let token_expired1 = repo.create(&user_id).await.unwrap();
+        let token_expired2 = repo.create(&user_id).await.unwrap();
+
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+                [&token_expired1],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+                [&token_expired2],
+            )
+            .unwrap();
+        }
+
+        let count = repo.cleanup_expired().await.unwrap();
+        assert_eq!(count, 2);
+
+        // The valid session should still be there.
+        let conn = pool.get().unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1);
     }
 }
