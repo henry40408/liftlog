@@ -33,6 +33,25 @@ pub struct SessionListRow {
     pub last_touched_at: chrono::DateTime<Utc>,
 }
 
+/// The result of validating a session token, with enough detail for the
+/// caller to emit a correct audit event. `Ok(None)` previously collapsed
+/// "no such token" and "expired" into one case, which made it impossible
+/// to distinguish a scanner probing random cookies from a real user whose
+/// session aged out.
+pub enum ValidateOutcome {
+    /// Session is valid. Boxed because the payload is much larger than the
+    /// other variants (`clippy::large_enum_variant`).
+    Valid(Box<ValidateAndTouchOutcome>),
+    /// `expires_at` had passed (idle timeout). The row has been deleted.
+    ExpiredIdle,
+    /// `created_at + SESSION_ABSOLUTE_TTL_SECS` had passed (absolute
+    /// timeout). The row has been deleted.
+    ExpiredAbsolute,
+    /// The token is not in `sessions`, or its `user_id` no longer has a
+    /// matching `users` row (the INNER JOIN missed).
+    Unknown,
+}
+
 impl SessionRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
@@ -62,7 +81,7 @@ impl SessionRepository {
     /// Validate the session for a given token and, if the throttle window has
     /// elapsed, slide both `expires_at` and `last_touched_at` forward.
     /// Expired rows are lazily deleted.
-    pub async fn validate_and_touch(&self, token: &str) -> Result<Option<ValidateAndTouchOutcome>> {
+    pub async fn validate_and_touch(&self, token: &str) -> Result<ValidateOutcome> {
         let pool = self.pool.clone();
         let token = token.to_string();
         let now = Utc::now();
@@ -99,13 +118,13 @@ impl SessionRepository {
 
             let Some((user_id, created_at, expires_at, last_touched_at, username, role_str)) = row
             else {
-                return Ok::<_, AppError>(None);
+                return Ok::<_, AppError>(ValidateOutcome::Unknown);
             };
             let role = UserRole::parse(&role_str);
 
             if expires_at <= now {
                 conn.execute("DELETE FROM sessions WHERE token = ?", [&token])?;
-                return Ok(None);
+                return Ok(ValidateOutcome::ExpiredIdle);
             }
 
             // Checked second (not first) purely because `expires_at <= now` is
@@ -114,7 +133,7 @@ impl SessionRepository {
             // doesn't affect correctness.
             if now >= crate::session::absolute_cap(created_at) {
                 conn.execute("DELETE FROM sessions WHERE token = ?", [&token])?;
-                return Ok(None);
+                return Ok(ValidateOutcome::ExpiredAbsolute);
             }
 
             match crate::session::compute_touch_action(created_at, last_touched_at, expires_at, now)
@@ -131,12 +150,12 @@ impl SessionRepository {
                         "UPDATE sessions SET last_touched_at = ?, expires_at = ? WHERE token = ?",
                         rusqlite::params![now, new_expires, token],
                     )?;
-                    return Ok(Some(ValidateAndTouchOutcome {
+                    return Ok(ValidateOutcome::Valid(Box::new(ValidateAndTouchOutcome {
                         user_id,
                         username,
                         role,
                         new_expires_at: Some(new_expires),
-                    }));
+                    })));
                 }
             }
 
@@ -145,12 +164,12 @@ impl SessionRepository {
             // sliding `expires_at` this time (inside the throttle window, or
             // already pinned to the absolute cap). Do NOT treat this as
             // invalid.
-            Ok(Some(ValidateAndTouchOutcome {
+            Ok(ValidateOutcome::Valid(Box::new(ValidateAndTouchOutcome {
                 user_id,
                 username,
                 role,
                 new_expires_at: None,
-            }))
+            })))
         })
         .await?
     }
@@ -169,18 +188,38 @@ impl SessionRepository {
     }
 
     /// Delete all sessions for a user except the given token (for password change).
-    pub async fn delete_all_for_user_except(&self, user_id: &str, keep_token: &str) -> Result<()> {
+    /// Returns the number of rows deleted, for the audit log.
+    pub async fn delete_all_for_user_except(
+        &self,
+        user_id: &str,
+        keep_token: &str,
+    ) -> Result<usize> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         let keep_token = keep_token.to_string();
 
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            conn.execute(
+            let count = conn.execute(
                 "DELETE FROM sessions WHERE user_id = ? AND token != ?",
                 rusqlite::params![user_id, keep_token],
             )?;
-            Ok(())
+            Ok(count)
+        })
+        .await?
+    }
+
+    /// Delete every session for a user. Used when an admin deletes the
+    /// account: without this the rows would be orphaned (there is no
+    /// `ON DELETE CASCADE` on `sessions.user_id` yet).
+    pub async fn delete_all_for_user(&self, user_id: &str) -> Result<usize> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let count = conn.execute("DELETE FROM sessions WHERE user_id = ?", [&user_id])?;
+            Ok(count)
         })
         .await?
     }
@@ -283,7 +322,10 @@ mod tests {
         assert!(!token.is_empty());
 
         // Fresh session: last_touched_at is "now" so we are inside the throttle window.
-        let outcome = repo.validate_and_touch(&token).await.unwrap().unwrap();
+        let outcome = repo.validate_and_touch(&token).await.unwrap();
+        let ValidateOutcome::Valid(outcome) = outcome else {
+            panic!("expected Valid outcome");
+        };
         assert_eq!(outcome.user_id, user_id);
         assert!(
             outcome.new_expires_at.is_none(),
@@ -297,7 +339,7 @@ mod tests {
         let repo = SessionRepository::new(pool);
 
         let found = repo.validate_and_touch("nonexistent-token").await.unwrap();
-        assert!(found.is_none());
+        assert!(matches!(found, ValidateOutcome::Unknown));
     }
 
     #[tokio::test]
@@ -319,7 +361,7 @@ mod tests {
         }
 
         let outcome = repo.validate_and_touch(&token).await.unwrap();
-        assert!(outcome.is_none());
+        assert!(matches!(outcome, ValidateOutcome::ExpiredIdle));
 
         // Row is gone.
         {
@@ -365,7 +407,10 @@ mod tests {
             .unwrap()
         };
 
-        let outcome = repo.validate_and_touch(&token).await.unwrap().unwrap();
+        let outcome = repo.validate_and_touch(&token).await.unwrap();
+        let ValidateOutcome::Valid(outcome) = outcome else {
+            panic!("expected Valid outcome");
+        };
         assert_eq!(outcome.user_id, user_id);
         let new_expires = outcome
             .new_expires_at
@@ -411,7 +456,7 @@ mod tests {
         }
 
         let outcome = repo.validate_and_touch(&token).await.unwrap();
-        assert!(outcome.is_none());
+        assert!(matches!(outcome, ValidateOutcome::ExpiredAbsolute));
 
         let conn = pool.get().unwrap();
         let count: i64 = conn
@@ -453,7 +498,10 @@ mod tests {
             .unwrap()
         };
 
-        let outcome = repo.validate_and_touch(&token).await.unwrap().unwrap();
+        let outcome = repo.validate_and_touch(&token).await.unwrap();
+        let ValidateOutcome::Valid(outcome) = outcome else {
+            panic!("expected Valid outcome");
+        };
         let new_expires = outcome
             .new_expires_at
             .expect("touch should still slide when below the cap");
@@ -498,9 +546,11 @@ mod tests {
         };
 
         let outcome = repo.validate_and_touch(&token).await.unwrap();
-        assert!(outcome.is_some(), "session should still be valid");
+        let ValidateOutcome::Valid(outcome) = outcome else {
+            panic!("session should still be valid");
+        };
         assert!(
-            outcome.unwrap().new_expires_at.is_none(),
+            outcome.new_expires_at.is_none(),
             "expiry should not slide past the absolute cap"
         );
 
@@ -541,7 +591,7 @@ mod tests {
         repo.delete(&token).await.unwrap();
 
         let found = repo.validate_and_touch(&token).await.unwrap();
-        assert!(found.is_none());
+        assert!(matches!(found, ValidateOutcome::Unknown));
     }
 
     #[tokio::test]
@@ -558,9 +608,122 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(repo.validate_and_touch(&token1).await.unwrap().is_none());
-        assert!(repo.validate_and_touch(&token2).await.unwrap().is_some());
-        assert!(repo.validate_and_touch(&token3).await.unwrap().is_none());
+        assert!(matches!(
+            repo.validate_and_touch(&token1).await.unwrap(),
+            ValidateOutcome::Unknown
+        ));
+        assert!(matches!(
+            repo.validate_and_touch(&token2).await.unwrap(),
+            ValidateOutcome::Valid(_)
+        ));
+        assert!(matches!(
+            repo.validate_and_touch(&token3).await.unwrap(),
+            ValidateOutcome::Unknown
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_delete_all_for_user_except_returns_deleted_count() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool);
+
+        let _token1 = repo.create(&user_id).await.unwrap();
+        let token2 = repo.create(&user_id).await.unwrap();
+        let _token3 = repo.create(&user_id).await.unwrap();
+
+        let count = repo
+            .delete_all_for_user_except(&user_id, &token2)
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_delete_all_for_user_returns_count_and_removes_every_row() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool);
+
+        let token1 = repo.create(&user_id).await.unwrap();
+        let token2 = repo.create(&user_id).await.unwrap();
+        let token3 = repo.create(&user_id).await.unwrap();
+
+        let count = repo.delete_all_for_user(&user_id).await.unwrap();
+        assert_eq!(count, 3);
+
+        for token in [&token1, &token2, &token3] {
+            assert!(matches!(
+                repo.validate_and_touch(token).await.unwrap(),
+                ValidateOutcome::Unknown
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validate_and_touch_distinguishes_idle_from_absolute_expiry() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let idle_token = repo.create(&user_id).await.unwrap();
+        let absolute_token = repo.create(&user_id).await.unwrap();
+
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+                [&idle_token],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = datetime('now', '-91 days'), \
+                 expires_at = datetime('now', '+1 day') WHERE token = ?",
+                [&absolute_token],
+            )
+            .unwrap();
+        }
+
+        assert!(matches!(
+            repo.validate_and_touch(&idle_token).await.unwrap(),
+            ValidateOutcome::ExpiredIdle
+        ));
+        assert!(matches!(
+            repo.validate_and_touch(&absolute_token).await.unwrap(),
+            ValidateOutcome::ExpiredAbsolute
+        ));
+
+        let conn = pool.get().unwrap();
+        for token in [&idle_token, &absolute_token] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE token = ?",
+                    [token],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "row for {token} should be deleted");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validate_and_touch_unknown_when_user_row_is_gone() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let token = repo.create(&user_id).await.unwrap();
+
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("DELETE FROM users WHERE id = ?", [&user_id])
+                .unwrap();
+        }
+
+        assert!(matches!(
+            repo.validate_and_touch(&token).await.unwrap(),
+            ValidateOutcome::Unknown
+        ));
     }
 
     #[tokio::test]
@@ -660,12 +823,10 @@ mod tests {
 
         repo.cleanup_expired().await.unwrap();
 
-        assert!(
-            repo.validate_and_touch(&token_valid)
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(matches!(
+            repo.validate_and_touch(&token_valid).await.unwrap(),
+            ValidateOutcome::Valid(_)
+        ));
 
         let conn = pool.get().unwrap();
         let count: i64 = conn
@@ -702,12 +863,10 @@ mod tests {
 
         repo.cleanup_expired().await.unwrap();
 
-        assert!(
-            repo.validate_and_touch(&token_valid)
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(matches!(
+            repo.validate_and_touch(&token_valid).await.unwrap(),
+            ValidateOutcome::Valid(_)
+        ));
 
         let conn = pool.get().unwrap();
         let count: i64 = conn

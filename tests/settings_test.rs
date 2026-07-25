@@ -261,11 +261,17 @@ async fn test_change_password_invalidates_other_sessions() {
         .validate_and_touch(&token_current)
         .await
         .unwrap();
-    assert!(current_valid.is_some());
+    assert!(matches!(
+        current_valid,
+        liftlog::repositories::ValidateOutcome::Valid(_)
+    ));
 
     // Other session should be invalidated
     let other_valid = session_repo.validate_and_touch(&token_other).await.unwrap();
-    assert!(other_valid.is_none());
+    assert!(matches!(
+        other_valid,
+        liftlog::repositories::ValidateOutcome::Unknown
+    ));
 }
 
 #[tokio::test]
@@ -326,19 +332,23 @@ async fn test_logout_others_deletes_siblings_only() {
 
     // Sibling is gone, current survives.
     assert!(
-        session_repo
-            .validate_and_touch(&sibling_token)
-            .await
-            .unwrap()
-            .is_none(),
+        matches!(
+            session_repo
+                .validate_and_touch(&sibling_token)
+                .await
+                .unwrap(),
+            liftlog::repositories::ValidateOutcome::Unknown
+        ),
         "sibling session should be deleted"
     );
     assert!(
-        session_repo
-            .validate_and_touch(&current_token)
-            .await
-            .unwrap()
-            .is_some(),
+        matches!(
+            session_repo
+                .validate_and_touch(&current_token)
+                .await
+                .unwrap(),
+            liftlog::repositories::ValidateOutcome::Valid(_)
+        ),
         "current session should survive"
     );
 }

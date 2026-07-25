@@ -4,6 +4,7 @@ use tracing_subscriber::{
     EnvFilter, Layer as _, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
+mod audit;
 mod config;
 mod db;
 mod error;
@@ -21,6 +22,7 @@ mod version;
 
 use config::Config;
 use migrations::run_migrations;
+use rand_core::RngCore;
 use rate_limit::RateLimiter;
 use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
 use state::AppState;
@@ -144,6 +146,12 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Per-process salt for audit-log session fingerprints. Generated fresh
+    // on every startup — never logged, never persisted — so a leaked log
+    // line can never be used to recover or replay a session token.
+    let mut log_salt = [0u8; 32];
+    rand_core::OsRng.fill_bytes(&mut log_salt);
+
     let app_state = AppState {
         user_repo,
         exercise_repo,
@@ -153,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         cookie_secure: config.cookie_secure,
+        log_salt: Arc::new(log_salt),
     };
 
     // Build router

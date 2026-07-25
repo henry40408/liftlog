@@ -27,6 +27,49 @@ async fn test_login_page_redirects_to_setup_when_no_users() {
     assert_eq!(response.headers().get("location").unwrap(), "/auth/setup");
 }
 
+/// An admin deleting a user must also delete every session belonging to
+/// that user — `sessions.user_id` has no `ON DELETE CASCADE` yet, so
+/// without an explicit cleanup those rows would be orphaned forever.
+#[tokio::test]
+async fn test_admin_delete_user_removes_their_sessions() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass123", UserRole::Admin).await;
+    let admin_cookie = common::create_session_cookie(&pool, &admin).await;
+    let admin_cookie_header = common::extract_cookie_header(&admin_cookie);
+
+    let victim = common::create_test_user(&pool, "victim", "victimpass123", UserRole::User).await;
+    let _victim_token1 = common::create_session_token(&pool, &victim).await;
+    let _victim_token2 = common::create_session_token(&pool, &victim).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/delete", victim.id))
+                .header(header::COOKIE, &admin_cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/users");
+
+    let conn = pool.get().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+            [&victim.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0, "deleted user's sessions should all be gone");
+}
+
 #[tokio::test]
 async fn test_setup_page_available_when_no_users() {
     let pool = common::setup_test_db();

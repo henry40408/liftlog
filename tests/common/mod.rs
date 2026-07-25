@@ -93,6 +93,10 @@ fn build_test_app(
         trusted_proxy_header,
         trusted_proxies: Arc::new(trusted_proxies),
         cookie_secure,
+        // Fixed, deterministic salt (not random) so a test can assert a
+        // specific fingerprint if it ever needs to; nothing in this test
+        // suite currently relies on its exact value.
+        log_salt: Arc::new([7u8; 32]),
     };
 
     let router = liftlog::routes::create_router(app_state);

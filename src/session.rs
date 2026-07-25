@@ -132,6 +132,28 @@ pub fn get_session_token(jar: &CookieJar, secure: bool) -> Option<String> {
         .map(|cookie| cookie.value().to_string())
 }
 
+/// Salted-hash fingerprint of a session token, for log correlation.
+///
+/// OWASP requires that the session ID never be written to a log; a salted
+/// hash lets events for the same session be correlated without disclosing
+/// the token. 16 hex chars (64 bits) is ample to avoid collisions at a
+/// single deployment's session volume while keeping log lines readable.
+pub fn token_fingerprint(token: &str, salt: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+
+    let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update(token.as_bytes());
+    let digest = hasher.finalize();
+
+    let mut out = String::with_capacity(16);
+    for byte in &digest[..8] {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
 /// Builds the cookie used to clear a session on logout. Its attributes
 /// (`secure`, `http_only`, `same_site`, `path`) MUST match the create-side
 /// cookie exactly, and not because a non-`Secure` removal cookie fails to
@@ -294,5 +316,48 @@ mod tests {
         let created_at = DateTime::<Utc>::MAX_UTC - chrono::Duration::days(1);
         let cap = absolute_cap(created_at);
         assert_eq!(cap, DateTime::<Utc>::MAX_UTC);
+    }
+
+    #[test]
+    fn token_fingerprint_is_deterministic_for_same_salt_and_token() {
+        let token = "b6b1c1f4-6e1a-4e2a-9c2d-7f1a6d2e3b4c";
+        let salt = [1u8; 32];
+        assert_eq!(
+            token_fingerprint(token, &salt),
+            token_fingerprint(token, &salt)
+        );
+    }
+
+    #[test]
+    fn token_fingerprint_differs_for_different_salt() {
+        let token = "b6b1c1f4-6e1a-4e2a-9c2d-7f1a6d2e3b4c";
+        let salt_a = [1u8; 32];
+        let salt_b = [2u8; 32];
+        assert_ne!(
+            token_fingerprint(token, &salt_a),
+            token_fingerprint(token, &salt_b)
+        );
+    }
+
+    #[test]
+    fn token_fingerprint_differs_for_different_token() {
+        let salt = [1u8; 32];
+        let fp_a = token_fingerprint("b6b1c1f4-6e1a-4e2a-9c2d-7f1a6d2e3b4c", &salt);
+        let fp_b = token_fingerprint("a1a1a1a1-1111-2222-3333-444455556666", &salt);
+        assert_ne!(fp_a, fp_b);
+    }
+
+    /// The most important assertion in this task: it turns "must not log the
+    /// raw token" into an executable constraint rather than a convention
+    /// that could silently rot.
+    #[test]
+    fn token_fingerprint_never_contains_the_raw_token() {
+        let token = "b6b1c1f4-6e1a-4e2a-9c2d-7f1a6d2e3b4c";
+        let salt = [7u8; 32];
+        let fp = token_fingerprint(token, &salt);
+
+        assert!(!fp.contains(token));
+        assert_eq!(fp.len(), 16);
+        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

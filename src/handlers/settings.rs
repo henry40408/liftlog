@@ -6,9 +6,11 @@ use axum::{
 };
 use serde::Deserialize;
 
+use crate::audit::{self, AuditContext};
 use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::repositories::SessionListRow;
+use crate::session::token_fingerprint;
 use crate::state::AppState;
 use crate::version::GIT_VERSION;
 
@@ -53,6 +55,7 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
 pub async fn change_password(
     State(state): State<AppState>,
     auth_user: AuthUser,
+    audit_ctx: AuditContext,
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
     let validation_error = if form.new_password != form.confirm_password {
@@ -87,10 +90,18 @@ pub async fn change_password(
         .change_password(&auth_user.id, &form.new_password)
         .await?;
 
-    state
+    let deleted_sessions = state
         .session_repo
         .delete_all_for_user_except(&auth_user.id, &auth_user.session_token)
         .await?;
+    let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
+    audit::sessions_destroyed_bulk(
+        &audit_ctx,
+        &actor_fp,
+        &auth_user.id,
+        deleted_sessions,
+        "password_change",
+    );
 
     render_page(
         &state,
@@ -101,11 +112,23 @@ pub async fn change_password(
     .await
 }
 
-pub async fn logout_others(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
-    state
+pub async fn logout_others(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    audit_ctx: AuditContext,
+) -> Result<Response> {
+    let deleted_sessions = state
         .session_repo
         .delete_all_for_user_except(&auth_user.id, &auth_user.session_token)
         .await?;
+    let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
+    audit::sessions_destroyed_bulk(
+        &audit_ctx,
+        &actor_fp,
+        &auth_user.id,
+        deleted_sessions,
+        "logout_others",
+    );
 
     render_page(
         &state,

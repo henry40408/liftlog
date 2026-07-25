@@ -6,11 +6,12 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 
+use crate::audit::{self, AuditContext};
 use crate::error::{AppError, Result};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
 use crate::models::{CreateUser, LoginCredentials, User, UserRole};
-use crate::session::{create_session_cookie, remove_session_cookie};
+use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
 
 #[derive(Template)]
@@ -71,6 +72,7 @@ pub async fn login_submit(
     connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
     headers: axum::http::HeaderMap,
     jar: CookieJar,
+    audit_ctx: AuditContext,
     Form(credentials): Form<LoginCredentials>,
 ) -> Result<Response> {
     let peer_addr = connect.map(|axum::Extension(axum::extract::ConnectInfo(addr))| addr.ip());
@@ -105,6 +107,13 @@ pub async fn login_submit(
         // never actually completed.
         let token = state.session_repo.create(&user.id).await?;
         state.login_rate_limiter.release(ip);
+        audit::session_created(
+            &audit_ctx,
+            &token_fingerprint(&token, state.log_salt.as_ref()),
+            &user.id,
+            &user.username,
+            "login",
+        );
         let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
         Ok((jar, Redirect::to("/")).into_response())
     } else {
@@ -128,6 +137,7 @@ pub async fn setup_page(State(state): State<AppState>) -> Result<Response> {
 pub async fn setup_submit(
     State(state): State<AppState>,
     jar: CookieJar,
+    audit_ctx: AuditContext,
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
     let user_count = state.user_repo.count().await?;
@@ -148,6 +158,13 @@ pub async fn setup_submit(
         .await?;
 
     let token = state.session_repo.create(&user.id).await?;
+    audit::session_created(
+        &audit_ctx,
+        &token_fingerprint(&token, state.log_salt.as_ref()),
+        &user.id,
+        &user.username,
+        "setup",
+    );
     let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
 
     Ok((jar, Redirect::to("/")).into_response())
@@ -156,9 +173,14 @@ pub async fn setup_submit(
 pub async fn logout(
     State(state): State<AppState>,
     auth_user: AuthUser,
+    audit_ctx: AuditContext,
     jar: CookieJar,
 ) -> Response {
-    let _ = state.session_repo.delete(&auth_user.session_token).await;
+    let fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
+    match state.session_repo.delete(&auth_user.session_token).await {
+        Ok(()) => audit::session_destroyed(&audit_ctx, &fp, &auth_user.id, "logout"),
+        Err(e) => tracing::warn!(error = ?e, "logout: session delete failed"),
+    }
     let jar = jar.add(remove_session_cookie(state.cookie_secure));
     let mut response = (jar, Redirect::to("/auth/login")).into_response();
     // Tell sliding_session_middleware not to overwrite the removal cookie
@@ -221,6 +243,7 @@ pub async fn users_list(State(state): State<AppState>, auth_user: AuthUser) -> R
 pub async fn delete_user(
     State(state): State<AppState>,
     admin_user: AdminUser,
+    audit_ctx: AuditContext,
     Path(user_id): Path<String>,
 ) -> Result<Response> {
     if admin_user.id == user_id {
@@ -228,6 +251,18 @@ pub async fn delete_user(
             "Cannot delete your own account".to_string(),
         ));
     }
+
+    // Sessions have no ON DELETE CASCADE on user_id yet, so they'd be
+    // orphaned rows otherwise; clean them up before removing the user.
+    let deleted_sessions = state.session_repo.delete_all_for_user(&user_id).await?;
+    let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
+    audit::sessions_destroyed_bulk(
+        &audit_ctx,
+        &actor_fp,
+        &user_id,
+        deleted_sessions,
+        "admin_user_delete",
+    );
 
     state.user_repo.delete(&user_id).await?;
 

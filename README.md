@@ -67,6 +67,24 @@ All configuration is done via environment variables:
 
 > **Migration note:** `BIND` and `LOG_FORMAT` were renamed to `LIFTLOG_BIND` and `LIFTLOG_LOG_FORMAT`. If either old name is still set in the environment, the server **refuses to start** and names the replacement, so a stale value can't be silently ignored.
 
+## Audit Log
+
+Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Sessions Life Cycle*) are logged as structured `tracing` events under the `liftlog::audit` target, so they can be filtered out of general application logs and shipped to a log collector:
+
+| Event | Level | Meaning |
+|-------|-------|---------|
+| `session.created` | info | Login or first-user setup created a session (`reason`: `login` or `setup`) |
+| `session.renewed` | info | The sliding-expiry touch extended a session's lifetime |
+| `session.destroyed` | info | A session (or, for a bulk delete, a batch of sessions) was deleted — logout, password change, "log out other devices", or an admin deleting the user (`reason` says which) |
+| `session.expired` | info | A session was found dead on use and lazily deleted (`reason`: `idle` or `absolute`) |
+| `session.rejected` | debug | An unrecognised session token was presented |
+
+Every event carries `client_ip`, `user_agent` (truncated to 256 chars), and `path`, plus a `session_fp` field — a salted SHA-256 fingerprint of the session token, never the raw token itself. The salt is generated fresh at process startup and is never logged, so `session_fp` values let you correlate events for the same session **within one process's lifetime**, but they do NOT correlate across restarts. Bulk-delete events carry `actor_session_fp` (the session that performed the action) and `count` instead of a single `session_fp`, since there's no one session to name.
+
+`session.rejected` is logged at `debug`, not `info`, because liftlog is typically internet-facing and scanners probing random cookie values would otherwise drown the genuinely useful events; set `RUST_LOG` to include `debug` to see them.
+
+Set `LOG_FORMAT=json` to emit these (and all other logs) as JSON, one event per line, ready for ingestion by a log collector.
+
 ## Docker
 
 ### Docker Compose

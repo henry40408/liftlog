@@ -12,6 +12,9 @@ pub fn create_router(state: AppState) -> Router {
     let session_layer_state = SessionLayerState {
         session_repo: state.session_repo.clone(),
         cookie_secure: state.cookie_secure,
+        log_salt: state.log_salt.clone(),
+        trusted_proxy_header: state.trusted_proxy_header,
+        trusted_proxies: state.trusted_proxies.clone(),
     };
 
     Router::new()

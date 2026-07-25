@@ -6,8 +6,9 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 
+use crate::audit::{self, AuditContext};
 use crate::models::UserRole;
-use crate::repositories::SessionRepository;
+use crate::repositories::{SessionRepository, ValidateOutcome};
 use crate::session::{create_session_cookie, get_session_token};
 
 /// State bound to the sliding-session middleware layer. Carries the session
@@ -17,6 +18,9 @@ use crate::session::{create_session_cookie, get_session_token};
 pub struct SessionLayerState {
     pub session_repo: SessionRepository,
     pub cookie_secure: bool,
+    pub log_salt: std::sync::Arc<[u8; 32]>,
+    pub trusted_proxy_header: crate::config::TrustedProxyHeader,
+    pub trusted_proxies: std::sync::Arc<Vec<std::net::IpAddr>>,
 }
 
 #[derive(Clone, Debug)]
@@ -80,21 +84,39 @@ pub async fn sliding_session_middleware(
     let mut should_refresh_cookie: Option<String> = None;
 
     if let Some(tok) = token.as_deref() {
+        // Only built when there's actually a token to validate — the audit
+        // events are the only consumer, so anonymous requests shouldn't pay
+        // for it.
+        let ctx = AuditContext::from_request_pieces(
+            request.extensions(),
+            request.headers(),
+            request.uri().path(),
+            layer.trusted_proxy_header,
+            &layer.trusted_proxies,
+        );
+        let fp = crate::session::token_fingerprint(tok, layer.log_salt.as_ref());
+
         match layer.session_repo.validate_and_touch(tok).await {
-            Ok(Some(outcome)) => {
+            Ok(ValidateOutcome::Valid(outcome)) => {
+                if outcome.new_expires_at.is_some() {
+                    should_refresh_cookie = Some(tok.to_string());
+                    audit::session_renewed(&ctx, &fp, &outcome.user_id, &outcome.username);
+                }
                 request.extensions_mut().insert(ValidatedSession {
                     user_id: outcome.user_id,
                     username: outcome.username,
                     role: outcome.role,
                     session_token: tok.to_string(),
                 });
-                if outcome.new_expires_at.is_some() {
-                    should_refresh_cookie = Some(tok.to_string());
-                }
             }
-            Ok(None) => {
-                // Invalid / expired token: do not insert ValidatedSession. The
-                // downstream extractor (AuthUser) will redirect to /auth/login.
+            Ok(ValidateOutcome::ExpiredIdle) => {
+                audit::session_expired(&ctx, &fp, "idle");
+            }
+            Ok(ValidateOutcome::ExpiredAbsolute) => {
+                audit::session_expired(&ctx, &fp, "absolute");
+            }
+            Ok(ValidateOutcome::Unknown) => {
+                audit::session_rejected(&ctx, &fp);
             }
             Err(e) => {
                 tracing::warn!(error = ?e, "sliding_session_middleware: validate_and_touch failed");
