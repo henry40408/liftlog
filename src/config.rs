@@ -1,4 +1,4 @@
-use std::env;
+use std::env::{self, VarError};
 use std::net::{IpAddr, SocketAddr};
 
 #[derive(Clone)]
@@ -45,12 +45,12 @@ impl Config {
             bind: parse_bind(env::var("LIFTLOG_BIND").ok().as_deref())
                 .map_err(anyhow::Error::msg)?,
             trusted_proxies: parse_trusted_proxies(
-                env::var("LIFTLOG_TRUSTED_PROXIES").ok().as_deref(),
+                read_env_var("LIFTLOG_TRUSTED_PROXIES")?.as_deref(),
             )
             .map_err(anyhow::Error::msg)?,
             cookie_secure: parse_bool_env(
                 "LIFTLOG_COOKIE_SECURE",
-                env::var("LIFTLOG_COOKIE_SECURE").ok().as_deref(),
+                read_env_var("LIFTLOG_COOKIE_SECURE")?.as_deref(),
                 false,
             )
             .map_err(anyhow::Error::msg)?,
@@ -58,12 +58,36 @@ impl Config {
     }
 }
 
-/// Resolve the `LIFTLOG_BIND` value into a [`SocketAddr`]. An unset or empty
-/// value yields the default `127.0.0.1:8080` (loopback only, so a bare-metal run
-/// is not exposed on all interfaces without opting in); any non-empty value must
+/// Reads an environment variable, distinguishing "unset" from "set but not
+/// valid UTF-8" instead of collapsing both into `None` the way
+/// `env::var(name).ok()` does. Collapsing them is dangerous for a strict
+/// boolean flag like `LIFTLOG_COOKIE_SECURE`: `env::var` returns
+/// `Err(VarError::NotUnicode(..))` for a non-UTF-8 value, and `.ok()` maps
+/// that to `None`, which every caller here treats as "unset" and falls back
+/// to its default. For `LIFTLOG_COOKIE_SECURE` the default is `false`, so a
+/// non-UTF-8 value (a stray control character from a misconfigured secrets
+/// manager, say) would silently deploy without the `Secure` cookie
+/// attribute — exactly the misconfiguration `parse_bool_env`'s strictness
+/// exists to catch. This surfaces `NotUnicode` as a hard error instead.
+///
+/// `LIFTLOG_BIND` and `DATABASE_URL` intentionally still use `env::var(..).ok()`
+/// directly and are not routed through this helper: that is pre-existing
+/// behaviour and out of scope for this change.
+fn read_env_var(name: &str) -> anyhow::Result<Option<String>> {
+    match env::var(name) {
+        Ok(v) => Ok(Some(v)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(VarError::NotUnicode(_)) => {
+            anyhow::bail!("environment variable {name} is not valid UTF-8")
+        }
+    }
+}
+
+/// Resolve the `LIFTLOG_BIND` value into a [`SocketAddr`]. An unset or empty value
+/// yields the default `127.0.0.1:8080` (loopback only, so a bare-metal run is
+/// not exposed on all interfaces without opting in); any non-empty value must
 /// be a valid `host:port` socket address. The container image sets
-/// `LIFTLOG_BIND=0.0.0.0:8080` so a reverse proxy in a separate container can
-/// reach it.
+/// `LIFTLOG_BIND=0.0.0.0:8080` so a reverse proxy in a separate container can reach it.
 pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
     match raw {
         Some(v) if !v.is_empty() => v
@@ -243,7 +267,10 @@ mod tests {
     #[test]
     fn parse_trusted_proxies_rejects_garbage() {
         let err = parse_trusted_proxies(Some("10.0.0.1, not-an-ip")).unwrap_err();
-        assert!(err.contains("invalid LIFTLOG_TRUSTED_PROXIES"), "got: {err}");
+        assert!(
+            err.contains("invalid LIFTLOG_TRUSTED_PROXIES"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -274,5 +301,52 @@ mod tests {
     fn parse_bool_env_rejects_unrecognised_value() {
         let err = parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("yes"), false).unwrap_err();
         assert!(err.contains("invalid LIFTLOG_COOKIE_SECURE"), "got: {err}");
+    }
+
+    #[test]
+    fn read_env_var_returns_none_when_unset() {
+        // nextest runs each test in its own process, so this name is safe to
+        // assume absent.
+        assert!(
+            read_env_var("LIFTLOG_TEST_DEFINITELY_UNSET_VAR")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn read_env_var_returns_value_when_present() {
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("LIFTLOG_TEST_READ_ENV_VAR_PRESENT", "hello");
+        }
+        assert_eq!(
+            read_env_var("LIFTLOG_TEST_READ_ENV_VAR_PRESENT").unwrap(),
+            Some("hello".to_string())
+        );
+    }
+
+    // Only unix lets a test construct a non-UTF-8 `OsString` to exercise the
+    // `VarError::NotUnicode` branch; there is no portable, safe way to do
+    // this, so the test is unix-only rather than skipped entirely.
+    #[cfg(unix)]
+    #[test]
+    fn read_env_var_errors_on_non_utf8() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let name = "LIFTLOG_TEST_NON_UTF8_CONFIG_VAR";
+        let invalid = std::ffi::OsString::from_vec(vec![0x66, 0x6f, 0x80, 0x6f]);
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var(name, &invalid);
+        }
+
+        let err = read_env_var(name).unwrap_err();
+        assert!(err.to_string().contains(name), "got: {err}");
+
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var(name);
+        }
     }
 }

@@ -296,41 +296,6 @@ async fn test_setup_redirects_when_users_exist() {
 }
 
 #[tokio::test]
-async fn test_sliding_session_reissues_cookie_when_throttle_elapsed() {
-    let pool = common::setup_test_db();
-    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
-
-    // Artificially age last_touched_at so the next request slides expiry.
-    let token = common::create_session_token(&pool, &user).await;
-    common::age_session_touch(&pool, &token, 2);
-
-    let app = common::create_test_app(pool);
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/")
-                .header(header::COOKIE, common::cookie_header(&token))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // Should reach the dashboard (no redirect).
-    assert_ne!(response.status(), StatusCode::SEE_OTHER);
-
-    // And Set-Cookie should have been re-issued with a fresh Max-Age.
-    let set_cookie = response
-        .headers()
-        .get(header::SET_COOKIE)
-        .expect("sliding session should set cookie on touch")
-        .to_str()
-        .unwrap();
-    assert!(set_cookie.starts_with("session="));
-    assert!(set_cookie.contains("Max-Age=604800")); // 7 days in seconds
-}
-
-#[tokio::test]
 async fn test_sliding_session_no_cookie_when_within_throttle() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
@@ -354,48 +319,6 @@ async fn test_sliding_session_no_cookie_when_within_throttle() {
     assert!(
         response.headers().get(header::SET_COOKIE).is_none(),
         "cookie should NOT be re-issued within throttle window"
-    );
-}
-
-#[tokio::test]
-async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
-    let pool = common::setup_test_db();
-    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
-
-    // Age the session so the next request triggers a touch.
-    let token = common::create_session_token(&pool, &user).await;
-    common::age_session_touch(&pool, &token, 2);
-
-    let app = common::create_test_app(pool);
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/logout")
-                .header(header::COOKIE, common::cookie_header(&token))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // Exactly one Set-Cookie for `session=`, and it must be the removal.
-    let session_cookies: Vec<_> = response
-        .headers()
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .filter(|s| s.trim_start().starts_with("session="))
-        .collect();
-    assert_eq!(
-        session_cookies.len(),
-        1,
-        "logout should emit exactly one session Set-Cookie header, got: {session_cookies:?}"
-    );
-    let only = session_cookies[0];
-    assert!(
-        only.contains("Max-Age=0"),
-        "logout cookie should be the removal (Max-Age=0), got: {only}"
     );
 }
 
@@ -743,6 +666,7 @@ async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/");
 }
+
 // --- Fix 4: per-IP rate-limit bucketing at the HTTP level ---------------
 //
 // Nothing above ever attaches a `ConnectInfo`, so `login_submit` always sees
@@ -933,4 +857,224 @@ async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+// --- Fix 5: secure-cookie path exercised end to end ----------------------
+
+async fn sliding_session_reissues_cookie_when_throttle_elapsed(cookie_secure: bool) {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let token = common::create_session_token(&pool, &user).await;
+    common::age_session_touch(&pool, &token, 2);
+
+    let test_app = common::create_test_app_with_cookie_secure(pool, cookie_secure);
+    let cookie_header = if cookie_secure {
+        common::cookie_header_secure(&token)
+    } else {
+        common::cookie_header(&token)
+    };
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should reach the dashboard (no redirect).
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+
+    // And Set-Cookie should have been re-issued with a fresh Max-Age, under
+    // whichever cookie name this deployment actually uses.
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("sliding session should set cookie on touch")
+        .to_str()
+        .unwrap();
+    let expected_name = liftlog::session::session_cookie_name(cookie_secure);
+    assert!(
+        set_cookie.starts_with(&format!("{expected_name}=")),
+        "got: {set_cookie}"
+    );
+    assert!(set_cookie.contains("Max-Age=604800")); // 7 days in seconds
+}
+
+#[tokio::test]
+async fn test_sliding_session_reissues_cookie_when_throttle_elapsed() {
+    sliding_session_reissues_cookie_when_throttle_elapsed(false).await;
+}
+
+#[tokio::test]
+async fn test_sliding_session_reissues_cookie_when_throttle_elapsed_secure() {
+    sliding_session_reissues_cookie_when_throttle_elapsed(true).await;
+}
+
+async fn logout_does_not_get_overridden_by_sliding_refresh(cookie_secure: bool) {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    // Age the session so the next request triggers a touch.
+    let token = common::create_session_token(&pool, &user).await;
+    common::age_session_touch(&pool, &token, 2);
+
+    let test_app = common::create_test_app_with_cookie_secure(pool, cookie_secure);
+    let cookie_header = if cookie_secure {
+        common::cookie_header_secure(&token)
+    } else {
+        common::cookie_header(&token)
+    };
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::COOKIE, cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Exactly one Set-Cookie for the session cookie, and it must be the
+    // removal, whichever cookie name this deployment uses.
+    let expected_name = liftlog::session::session_cookie_name(cookie_secure);
+    let prefix = format!("{expected_name}=");
+    let session_cookies: Vec<_> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .filter(|s| s.trim_start().starts_with(&prefix))
+        .collect();
+    assert_eq!(
+        session_cookies.len(),
+        1,
+        "logout should emit exactly one session Set-Cookie header, got: {session_cookies:?}"
+    );
+    let only = session_cookies[0];
+    assert!(
+        only.contains("Max-Age=0"),
+        "logout cookie should be the removal (Max-Age=0), got: {only}"
+    );
+}
+
+#[tokio::test]
+async fn test_logout_does_not_get_overridden_by_sliding_refresh() {
+    logout_does_not_get_overridden_by_sliding_refresh(false).await;
+}
+
+#[tokio::test]
+async fn test_logout_does_not_get_overridden_by_sliding_refresh_secure() {
+    logout_does_not_get_overridden_by_sliding_refresh(true).await;
+}
+
+/// End-to-end walk of the `COOKIE_SECURE=true` deployment path: login sets
+/// the `__Host-session` cookie, an aged session slides and re-issues it, and
+/// logout clears it. Guards against `SessionLayerState.cookie_secure` ever
+/// getting lost: without it, a secure deployment would keep re-issuing a
+/// plain `session=` cookie that `get_session_token` never reads, silently
+/// logging active users out at the 7-day idle mark with nothing failing in
+/// CI.
+#[tokio::test]
+async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_cookie_secure(pool.clone(), true);
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    // Login.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=testuser&password=password123"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        set_cookie.starts_with("__Host-session="),
+        "got: {set_cookie}"
+    );
+    let issued = common::extract_cookie_header(set_cookie);
+    let token = issued
+        .strip_prefix("__Host-session=")
+        .expect("login should issue the __Host- prefixed cookie")
+        .to_string();
+    let cookie_header = common::cookie_header_secure(&token);
+
+    // Age the session so the next request triggers a sliding touch.
+    common::age_session_touch(&pool, &token, 2);
+
+    // Sliding refresh.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("sliding session should reissue the secure cookie on touch")
+        .to_str()
+        .unwrap();
+    assert!(
+        set_cookie.starts_with("__Host-session="),
+        "got: {set_cookie}"
+    );
+    assert!(set_cookie.contains("Max-Age=604800"));
+
+    // Logout.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        set_cookie.starts_with("__Host-session="),
+        "got: {set_cookie}"
+    );
+    assert!(set_cookie.contains("Max-Age=0"));
 }

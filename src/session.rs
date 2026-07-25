@@ -31,37 +31,68 @@ pub const SESSION_ABSOLUTE_TTL_SECS: i64 = 60 * 60 * 24 * 90; // 90 days
 
 /// The absolute expiry instant for a session created at `created_at`. Past
 /// this instant the session is dead regardless of activity.
+///
+/// Uses `checked_add_signed` rather than plain `+` because `created_at` is
+/// read straight out of `SQLite`: a corrupt or absurd row (e.g. a `created_at`
+/// near `DateTime::<Utc>::MAX_UTC`) must not panic every request that
+/// carries its session token. Saturates to `DateTime::<Utc>::MAX_UTC`
+/// instead, which is safe: it just makes an already-degenerate session's cap
+/// unreachably far away rather than crashing the request.
 pub fn absolute_cap(created_at: DateTime<Utc>) -> DateTime<Utc> {
-    created_at + chrono::Duration::seconds(SESSION_ABSOLUTE_TTL_SECS)
+    created_at
+        .checked_add_signed(chrono::Duration::seconds(SESSION_ABSOLUTE_TTL_SECS))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
-/// Decides whether a touch on a session should write a new `expires_at`.
+/// What a touch on a session should write back to its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchAction {
+    /// Inside the touch-throttle window: write nothing.
+    Nothing,
+    /// Outside the throttle, but `expires_at` is already pinned to the
+    /// absolute cap: record the activity without extending the lifetime.
+    TouchOnly,
+    /// Outside the throttle and below the cap: slide `expires_at` to this
+    /// instant, which is always `<= absolute_cap(created_at)`.
+    Slide(DateTime<Utc>),
+}
+
+/// Decides what a touch on a session should do.
 ///
-/// Returns `None` for two distinct reasons: the touch landed inside the
-/// throttle window (nothing to do yet), or `expires_at` is already pinned to
-/// the absolute cap (further touches cannot extend it, so there is nothing
-/// left to slide). Callers must not conflate `None` with "session invalid" —
-/// in both cases the session is still valid, it simply doesn't get a new
-/// `expires_at` on this call.
+/// The throttle check runs first, unconditionally — including when the
+/// session is already pinned at the absolute cap. Without that ordering, a
+/// pinned session would run `UPDATE sessions SET last_touched_at = ?` on
+/// every single request instead of at most once per throttle window, which
+/// defeats the point of throttling.
 ///
-/// When `Some` is returned, the value is always `<= absolute_cap(created_at)`.
-pub fn compute_touched_expiry(
+/// Once outside the throttle window: a session already pinned to
+/// `absolute_cap(created_at)` cannot slide any further, but the request
+/// still happened, so [`TouchAction::TouchOnly`] records that activity
+/// (`last_touched_at`) without touching `expires_at`. `/settings`'s session
+/// list orders and displays by `last_touched_at`, so skipping this write
+/// entirely — as the old `compute_touched_expiry` did — froze "last active"
+/// at the moment a session hit the cap, for up to the final 7 days of its
+/// 90-day lifetime, even while the user kept using it.
+///
+/// Below the cap, [`TouchAction::Slide`] carries the new `expires_at`.
+pub fn compute_touch_action(
     created_at: DateTime<Utc>,
     last_touched_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
     now: DateTime<Utc>,
-) -> Option<DateTime<Utc>> {
-    let idle_ttl = chrono::Duration::seconds(SESSION_IDLE_TTL_SECS);
+) -> TouchAction {
     let throttle = chrono::Duration::seconds(SESSION_TOUCH_THROTTLE_SECS);
+    if now - last_touched_at <= throttle {
+        return TouchAction::Nothing;
+    }
 
     let cap = absolute_cap(created_at);
     if expires_at >= cap {
-        return None;
+        return TouchAction::TouchOnly;
     }
-    if now - last_touched_at <= throttle {
-        return None;
-    }
-    Some((now + idle_ttl).min(cap))
+
+    let idle_ttl = chrono::Duration::seconds(SESSION_IDLE_TTL_SECS);
+    TouchAction::Slide((now + idle_ttl).min(cap))
 }
 
 /// Name to use for the session cookie. Switching on `secure` here is
@@ -135,8 +166,11 @@ mod tests {
 
     #[test]
     fn create_session_cookie_omits_secure_when_disabled() {
-        let cookie = create_session_cookie("tok", false);
-        assert_eq!(cookie.secure(), Some(false));
+        assert!(
+            !create_session_cookie("tok", false)
+                .to_string()
+                .contains("Secure")
+        );
     }
 
     #[test]
@@ -183,35 +217,33 @@ mod tests {
     }
 
     #[test]
-    fn compute_touched_expiry_none_inside_throttle_window() {
+    fn compute_touch_action_nothing_inside_throttle_window() {
         let now = Utc::now();
         let created_at = now - chrono::Duration::days(1);
         let last_touched_at = now - chrono::Duration::minutes(5);
         let expires_at = now + chrono::Duration::days(6);
 
         assert_eq!(
-            compute_touched_expiry(created_at, last_touched_at, expires_at, now),
-            None
+            compute_touch_action(created_at, last_touched_at, expires_at, now),
+            TouchAction::Nothing
         );
     }
 
     #[test]
-    fn compute_touched_expiry_slides_full_idle_ttl_for_young_session() {
+    fn compute_touch_action_slides_full_idle_ttl_for_young_session() {
         let now = Utc::now();
         let created_at = now - chrono::Duration::days(1);
         let last_touched_at = now - chrono::Duration::hours(2);
         let expires_at = now + chrono::Duration::days(6);
 
-        let new_expires = compute_touched_expiry(created_at, last_touched_at, expires_at, now)
-            .expect("outside throttle window should slide");
         assert_eq!(
-            new_expires,
-            now + chrono::Duration::seconds(SESSION_IDLE_TTL_SECS)
+            compute_touch_action(created_at, last_touched_at, expires_at, now),
+            TouchAction::Slide(now + chrono::Duration::seconds(SESSION_IDLE_TTL_SECS))
         );
     }
 
     #[test]
-    fn compute_touched_expiry_clamps_to_cap_near_the_limit() {
+    fn compute_touch_action_clamps_to_cap_near_the_limit() {
         let now = Utc::now();
         let created_at = now - chrono::Duration::days(89);
         let last_touched_at = now - chrono::Duration::hours(2);
@@ -220,25 +252,47 @@ mod tests {
         // short-circuit.
         let expires_at = now + chrono::Duration::hours(3);
 
-        let new_expires = compute_touched_expiry(created_at, last_touched_at, expires_at, now)
-            .expect("outside throttle window should slide");
-        assert_eq!(new_expires, absolute_cap(created_at));
+        let action = compute_touch_action(created_at, last_touched_at, expires_at, now);
+        assert_eq!(action, TouchAction::Slide(absolute_cap(created_at)));
         assert_ne!(
-            new_expires,
-            now + chrono::Duration::seconds(SESSION_IDLE_TTL_SECS)
+            action,
+            TouchAction::Slide(now + chrono::Duration::seconds(SESSION_IDLE_TTL_SECS))
         );
     }
 
     #[test]
-    fn compute_touched_expiry_none_when_expires_at_already_at_cap() {
+    fn compute_touch_action_touch_only_when_pinned_at_cap() {
         let now = Utc::now();
         let created_at = now - chrono::Duration::days(89);
         let last_touched_at = now - chrono::Duration::hours(2);
         let expires_at = absolute_cap(created_at);
 
         assert_eq!(
-            compute_touched_expiry(created_at, last_touched_at, expires_at, now),
-            None
+            compute_touch_action(created_at, last_touched_at, expires_at, now),
+            TouchAction::TouchOnly
         );
+    }
+
+    /// Proves the throttle check runs *before* the cap check: even a
+    /// session pinned at the absolute cap must not write on every request,
+    /// only once the throttle window has elapsed.
+    #[test]
+    fn compute_touch_action_nothing_inside_throttle_even_when_pinned_at_cap() {
+        let now = Utc::now();
+        let created_at = now - chrono::Duration::days(89);
+        let last_touched_at = now - chrono::Duration::minutes(5);
+        let expires_at = absolute_cap(created_at);
+
+        assert_eq!(
+            compute_touch_action(created_at, last_touched_at, expires_at, now),
+            TouchAction::Nothing
+        );
+    }
+
+    #[test]
+    fn absolute_cap_saturates_instead_of_panicking_near_datetime_max() {
+        let created_at = DateTime::<Utc>::MAX_UTC - chrono::Duration::days(1);
+        let cap = absolute_cap(created_at);
+        assert_eq!(cap, DateTime::<Utc>::MAX_UTC);
     }
 }

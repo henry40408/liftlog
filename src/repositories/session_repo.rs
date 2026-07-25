@@ -18,8 +18,11 @@ pub struct ValidateAndTouchOutcome {
     pub user_id: String,
     pub username: String,
     pub role: UserRole,
-    /// `Some(new_expires)` iff this call wrote a new `last_touched_at` /
-    /// `expires_at`. `None` means the call landed inside the throttle window.
+    /// `Some(new_expires)` iff this call slid `expires_at` forward.
+    /// `None` means the call did not extend the lifetime — either it landed
+    /// inside the throttle window, or `expires_at` is already pinned to
+    /// `absolute_cap(created_at)`. In both cases the session is still
+    /// valid; `None` here must never be read as "session invalid".
     pub new_expires_at: Option<chrono::DateTime<Utc>>,
 }
 
@@ -114,25 +117,34 @@ impl SessionRepository {
                 return Ok(None);
             }
 
-            if let Some(new_expires) =
-                crate::session::compute_touched_expiry(created_at, last_touched_at, expires_at, now)
+            match crate::session::compute_touch_action(created_at, last_touched_at, expires_at, now)
             {
-                conn.execute(
-                    "UPDATE sessions SET last_touched_at = ?, expires_at = ? WHERE token = ?",
-                    rusqlite::params![now, new_expires, token],
-                )?;
-                return Ok(Some(ValidateAndTouchOutcome {
-                    user_id,
-                    username,
-                    role,
-                    new_expires_at: Some(new_expires),
-                }));
+                crate::session::TouchAction::Nothing => {}
+                crate::session::TouchAction::TouchOnly => {
+                    conn.execute(
+                        "UPDATE sessions SET last_touched_at = ? WHERE token = ?",
+                        rusqlite::params![now, token],
+                    )?;
+                }
+                crate::session::TouchAction::Slide(new_expires) => {
+                    conn.execute(
+                        "UPDATE sessions SET last_touched_at = ?, expires_at = ? WHERE token = ?",
+                        rusqlite::params![now, new_expires, token],
+                    )?;
+                    return Ok(Some(ValidateAndTouchOutcome {
+                        user_id,
+                        username,
+                        role,
+                        new_expires_at: Some(new_expires),
+                    }));
+                }
             }
 
-            // `compute_touched_expiry` returning `None` here means the
-            // session is still valid — it just isn't sliding this time
-            // (inside the throttle window, or already pinned to the
-            // absolute cap). Do NOT treat this as invalid.
+            // `TouchAction::Nothing` and `TouchAction::TouchOnly` both fall
+            // through here: the session is still valid, it just isn't
+            // sliding `expires_at` this time (inside the throttle window, or
+            // already pinned to the absolute cap). Do NOT treat this as
+            // invalid.
             Ok(Some(ValidateAndTouchOutcome {
                 user_id,
                 username,
@@ -479,6 +491,72 @@ mod tests {
         assert!(
             outcome.unwrap().new_expires_at.is_none(),
             "expiry should not slide past the absolute cap"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_and_touch_at_cap_still_records_activity() {
+        let pool = setup_test_db();
+        let user_id = create_user(&pool).await;
+        let repo = SessionRepository::new(pool.clone());
+
+        let token = repo.create(&user_id).await.unwrap();
+
+        // expires_at already pinned to the cap, last_touched_at stale (>1h
+        // throttle): this is the exact scenario that used to freeze
+        // last_touched_at forever once a session hit the cap.
+        {
+            let conn = pool.get().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = datetime('now', '-1 day'), \
+                 last_touched_at = datetime('now', '-2 hours'), \
+                 expires_at = datetime('now', '+89 days') WHERE token = ?",
+                [&token],
+            )
+            .unwrap();
+        }
+
+        let expires_before: chrono::DateTime<chrono::Utc> = {
+            let conn = pool.get().unwrap();
+            conn.query_row(
+                "SELECT expires_at FROM sessions WHERE token = ?",
+                [&token],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        let outcome = repo.validate_and_touch(&token).await.unwrap();
+        assert!(outcome.is_some(), "session should still be valid");
+        assert!(
+            outcome.unwrap().new_expires_at.is_none(),
+            "expiry should not slide past the absolute cap"
+        );
+
+        let conn = pool.get().unwrap();
+        let last_touched: chrono::DateTime<chrono::Utc> = conn
+            .query_row(
+                "SELECT last_touched_at FROM sessions WHERE token = ?",
+                [&token],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let age = chrono::Utc::now() - last_touched;
+        assert!(
+            age.num_seconds().abs() < 5,
+            "last_touched_at should be recorded as ~now even when pinned at the cap"
+        );
+
+        let expires_after: chrono::DateTime<chrono::Utc> = conn
+            .query_row(
+                "SELECT expires_at FROM sessions WHERE token = ?",
+                [&token],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            expires_after, expires_before,
+            "expires_at must be unchanged when pinned at the cap"
         );
     }
 
