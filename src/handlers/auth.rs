@@ -73,11 +73,8 @@ pub async fn login_submit(
     jar: CookieJar,
     Form(credentials): Form<LoginCredentials>,
 ) -> Result<Response> {
-    let ip = crate::net::client_ip(
-        connect.map(|c| c.0.0.ip()),
-        &headers,
-        &state.trusted_proxies,
-    );
+    let peer_addr = connect.map(|axum::Extension(axum::extract::ConnectInfo(addr))| addr.ip());
+    let ip = crate::net::client_ip(peer_addr, &headers, &state.trusted_proxies);
 
     if !state.login_rate_limiter.try_acquire(ip) {
         tracing::warn!(%ip, "login rate limited");
@@ -97,8 +94,12 @@ pub async fn login_submit(
         .await?;
 
     if let Some(user) = user {
-        state.login_rate_limiter.release(ip);
+        // Create the session before releasing the rate-limit reservation:
+        // if `session_repo.create` fails, `?` below returns early and the
+        // attempt stays charged instead of being refunded for a login that
+        // never actually completed.
         let token = state.session_repo.create(&user.id).await?;
+        state.login_rate_limiter.release(ip);
         let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
         Ok((jar, Redirect::to("/")).into_response())
     } else {

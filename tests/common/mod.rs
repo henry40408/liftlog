@@ -101,6 +101,21 @@ pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
     cookie_header(&create_session_token(pool, user).await)
 }
 
+/// Attach a `ConnectInfo` extension so `login_submit` sees a TCP peer, the way
+/// `into_make_service_with_connect_info` does in production. `oneshot` does not
+/// go through that layer.
+#[allow(dead_code)]
+pub fn with_peer(
+    mut request: axum::http::Request<axum::body::Body>,
+    peer: &str,
+) -> axum::http::Request<axum::body::Body> {
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        peer.parse::<std::net::SocketAddr>()
+            .expect("valid peer socket address"),
+    ));
+    request
+}
+
 #[allow(dead_code)]
 pub fn extract_cookie_header(set_cookie: &str) -> String {
     // Extract just the cookie name=value part for use in Cookie header

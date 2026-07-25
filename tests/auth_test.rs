@@ -743,3 +743,194 @@ async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/");
 }
+// --- Fix 4: per-IP rate-limit bucketing at the HTTP level ---------------
+//
+// Nothing above ever attaches a `ConnectInfo`, so `login_submit` always sees
+// `peer = None` and every request falls into the single "no peer" bucket.
+// `oneshot` doesn't run the `into_make_service_with_connect_info` layer that
+// does this in production, so these tests attach it manually via
+// `common::with_peer` to actually exercise the per-IP dimension of
+// `crate::net::client_ip` (Fixes 1a-1e) end to end.
+
+/// Builds a login POST with a wrong password (so `release` never fires) and
+/// the given extra headers.
+fn wrong_password_login_request(headers: &[(&str, &str)]) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri("/auth/login")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    builder
+        .body(Body::from("username=testuser&password=wrongpassword"))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_distinct_peers_have_independent_login_budgets() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[]),
+            "203.0.113.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[]),
+            "203.0.113.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[]),
+            "203.0.113.2:2222",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_untrusted_peer_forged_xff_is_ignored() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "1.1.1.1")]),
+            "203.0.113.9:1234",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Same (untrusted) peer, different forged X-Forwarded-For: must still
+    // land in the same bucket, proving the header was ignored.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "2.2.2.2")]),
+            "203.0.113.9:1234",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn test_loopback_peer_honours_rightmost_xff_hop() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "9.9.9.9, 10.1.1.1")]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Different rightmost hop -> a different bucket -> still allowed.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "9.9.9.9, 10.1.1.2")]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Same rightmost hop as the first request, different leftmost -> same
+    // bucket -> refused. This is what fails if the leftmost hop is ever
+    // read instead of the rightmost.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[("x-forwarded-for", "8.8.8.8, 10.1.1.1")]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// Regression test for the confirmed bypass in Fix 1a: two separate
+/// `X-Forwarded-For` header field lines must bucket by the *last* line.
+#[tokio::test]
+async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[
+                ("x-forwarded-for", "1.1.1.1"),
+                ("x-forwarded-for", "127.0.0.1"),
+            ]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(common::with_peer(
+            wrong_password_login_request(&[
+                ("x-forwarded-for", "2.2.2.2"),
+                ("x-forwarded-for", "127.0.0.1"),
+            ]),
+            "127.0.0.1:1111",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
