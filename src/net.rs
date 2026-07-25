@@ -8,7 +8,7 @@ use crate::config::TrustedProxyHeader;
 /// Resolves the client IP to use for per-IP rate limiting.
 ///
 /// Which forwarding header (if any) may be trusted is an explicit operator
-/// choice (`header`, from `TRUSTED_PROXY_HEADER`), never inferred from
+/// choice (`header`, from `LIFTLOG_TRUSTED_PROXY_HEADER`), never inferred from
 /// which headers happen to be present. The mere presence of an
 /// `X-Forwarded-For` line is not proof a trusted proxy wrote it: nginx
 /// forwards a client-supplied `X-Forwarded-For` upstream verbatim unless the
@@ -234,7 +234,7 @@ mod tests {
     /// read, even from a trusted (loopback) peer with a header present.
     /// This is the missing opt-out from the confirmed bypass: an operator
     /// whose proxy does not sanitise forwarding headers can leave
-    /// `TRUSTED_PROXY_HEADER` unset and get the safe TCP-peer behaviour.
+    /// `LIFTLOG_TRUSTED_PROXY_HEADER` unset and get the safe TCP-peer behaviour.
     #[test]
     fn header_none_never_reads_any_header() {
         let peer: IpAddr = "127.0.0.1".parse().unwrap();

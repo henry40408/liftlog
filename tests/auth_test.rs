@@ -1176,7 +1176,7 @@ async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// Regression test for the confirmed bypass: with `TRUSTED_PROXY_HEADER`
+/// Regression test for the confirmed bypass: with `LIFTLOG_TRUSTED_PROXY_HEADER`
 /// unset (the default), a forged `X-Forwarded-For` must not mint a fresh
 /// rate-limit bucket, even from a loopback peer that would have been
 /// trusted had a header been configured.
@@ -1216,7 +1216,7 @@ async fn test_forwarding_header_ignored_when_not_configured() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// When `TRUSTED_PROXY_HEADER` selects `X-Forwarded-For`, `X-Real-IP` must
+/// When `LIFTLOG_TRUSTED_PROXY_HEADER` selects `X-Forwarded-For`, `X-Real-IP` must
 /// never be consulted, even when XFF is entirely absent from the request.
 #[tokio::test]
 async fn test_x_real_ip_not_honoured_when_header_is_x_forwarded_for() {
@@ -1373,7 +1373,7 @@ async fn test_logout_does_not_get_overridden_by_sliding_refresh_secure() {
     logout_does_not_get_overridden_by_sliding_refresh(true).await;
 }
 
-/// End-to-end walk of the `COOKIE_SECURE=true` deployment path: login sets
+/// End-to-end walk of the `LIFTLOG_COOKIE_SECURE=true` deployment path: login sets
 /// the `__Host-session` cookie, an aged session slides and re-issues it, and
 /// logout clears it. Guards against `SessionLayerState.cookie_secure` ever
 /// getting lost: without it, a secure deployment would keep re-issuing a
@@ -1624,7 +1624,7 @@ async fn test_no_hsts_header_by_default() {
     );
 }
 
-/// When `HSTS_MAX_AGE` is configured (without subdomains), the header carries
+/// When `LIFTLOG_HSTS_MAX_AGE` is configured (without subdomains), the header carries
 /// exactly `max-age=<N>`.
 #[tokio::test]
 async fn test_hsts_header_present_when_configured() {
@@ -1647,7 +1647,7 @@ async fn test_hsts_header_present_when_configured() {
     );
 }
 
-/// When `HSTS_INCLUDE_SUBDOMAINS` is also configured, the header carries
+/// When `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS` is also configured, the header carries
 /// `includeSubDomains` as well.
 #[tokio::test]
 async fn test_hsts_header_includes_subdomains_when_configured() {

@@ -152,13 +152,13 @@ async fn main() -> anyhow::Result<()> {
     match config.trusted_proxy_header {
         config::TrustedProxyHeader::None => {
             tracing::warn!(
-                "TRUSTED_PROXY_HEADER is not set; forwarding headers are ignored and the TCP peer is used for login rate limiting — behind a reverse proxy every client shares one bucket. Set it to x-forwarded-for or x-real-ip once your proxy is configured to overwrite that header."
+                "LIFTLOG_TRUSTED_PROXY_HEADER is not set; forwarding headers are ignored and the TCP peer is used for login rate limiting — behind a reverse proxy every client shares one bucket. Set it to x-forwarded-for or x-real-ip once your proxy is configured to overwrite that header."
             );
         }
         header if config.trusted_proxies.is_empty() => {
             tracing::info!(
                 ?header,
-                "trusting forwarding header from loopback peers only; set TRUSTED_PROXIES if the proxy runs on another host or in another container"
+                "trusting forwarding header from loopback peers only; set LIFTLOG_TRUSTED_PROXIES if the proxy runs on another host or in another container"
             );
         }
         header => {

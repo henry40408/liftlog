@@ -125,7 +125,7 @@ pub fn create_session_cookie(token: &str, secure: bool) -> Cookie<'static> {
 /// name — accepting a bare `session` while `secure = true` would forfeit
 /// the whole point of `__Host-`, since an attacker able to write cookies on
 /// a sibling subdomain could just inject the unprefixed name. The cost is
-/// that flipping `COOKIE_SECURE` logs everyone out once, which is a one-off
+/// that flipping `LIFTLOG_COOKIE_SECURE` logs everyone out once, which is a one-off
 /// and acceptable.
 pub fn get_session_token(jar: &CookieJar, secure: bool) -> Option<String> {
     jar.get(session_cookie_name(secure))

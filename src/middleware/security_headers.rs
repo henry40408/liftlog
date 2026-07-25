@@ -21,9 +21,9 @@
 //!
 //! Per RFC 6797 §7.2, a user agent MUST ignore any `Strict-Transport-Security`
 //! header received over a non-secure transport (plain HTTP). So enabling
-//! `HSTS_MAX_AGE` on a deployment that is not actually served over HTTPS is
+//! `LIFTLOG_HSTS_MAX_AGE` on a deployment that is not actually served over HTTPS is
 //! merely ineffective, not harmful in itself — but operators must not read
-//! "I set `HSTS_MAX_AGE`" as "my site is secure": the header only does
+//! "I set `LIFTLOG_HSTS_MAX_AGE`" as "my site is secure": the header only does
 //! anything once HTTPS is genuinely in place end to end.
 
 use axum::extract::State;
