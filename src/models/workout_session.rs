@@ -11,6 +11,8 @@ pub struct WorkoutSession {
     pub date: NaiveDate,
     pub notes: Option<String>,
     pub share_token: Option<String>,
+    /// NULL means the share link (if any) never expires — see migration 012.
+    pub share_expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -22,6 +24,7 @@ impl FromSqliteRow for WorkoutSession {
             date: row.get("date")?,
             notes: row.get("notes")?,
             share_token: row.get("share_token")?,
+            share_expires_at: row.get("share_expires_at")?,
             created_at: row.get("created_at")?,
         })
     }

@@ -34,6 +34,7 @@ impl WorkoutRepository {
             date,
             notes: notes.map(std::string::ToString::to_string),
             share_token: None,
+            share_expires_at: None,
             created_at: now,
         };
         let session_clone = session.clone();
@@ -557,19 +558,26 @@ impl WorkoutRepository {
 
     // Share functionality
 
-    /// Set share token for a workout session (creates a new token)
-    pub async fn set_share_token(&self, id: &str, user_id: &str) -> Result<String> {
+    /// Set share token for a workout session (creates a new token). `ttl` of
+    /// `None` means the link never expires (see migration 012's rationale).
+    pub async fn set_share_token(
+        &self,
+        id: &str,
+        user_id: &str,
+        ttl: Option<chrono::Duration>,
+    ) -> Result<String> {
         let pool = self.pool.clone();
         let id = id.to_string();
         let user_id = user_id.to_string();
         let token = Uuid::new_v4().to_string();
         let token_clone = token.clone();
+        let expires_at = ttl.map(|d| Utc::now() + d);
 
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let rows = conn.execute(
-                "UPDATE workout_sessions SET share_token = ? WHERE id = ? AND user_id = ?",
-                rusqlite::params![token_clone, id, user_id],
+                "UPDATE workout_sessions SET share_token = ?, share_expires_at = ? WHERE id = ? AND user_id = ?",
+                rusqlite::params![token_clone, expires_at, id, user_id],
             )?;
             if rows > 0 {
                 Ok(token_clone)
@@ -580,7 +588,10 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Revoke share token for a workout session
+    /// Revoke share token for a workout session. Clears `share_expires_at`
+    /// too — leaving a dangling expiry on a row with no token would be
+    /// confusing state (a share that's simultaneously "off" and "due to
+    /// expire").
     pub async fn revoke_share_token(&self, id: &str, user_id: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();
@@ -589,7 +600,7 @@ impl WorkoutRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let rows = conn.execute(
-                "UPDATE workout_sessions SET share_token = NULL WHERE id = ? AND user_id = ?",
+                "UPDATE workout_sessions SET share_token = NULL, share_expires_at = NULL WHERE id = ? AND user_id = ?",
                 rusqlite::params![id, user_id],
             )?;
             Ok(rows > 0)
@@ -597,17 +608,43 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Find a workout session by share token
+    /// Find a workout session by share token. The expiry check is done in
+    /// SQL, not in Rust, so an expired token and a nonexistent token are
+    /// literally the same case to the caller — both come back `None` and
+    /// both become `AppError::NotFound` in the handler — so the response
+    /// cannot reveal that a given token once existed.
     pub async fn find_session_by_share_token(&self, token: &str) -> Result<Option<WorkoutSession>> {
         let pool = self.pool.clone();
         let token = token.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare("SELECT * FROM workout_sessions WHERE share_token = ?")?;
+            let mut stmt = conn.prepare(
+                "SELECT * FROM workout_sessions WHERE share_token = ? AND (share_expires_at IS NULL OR share_expires_at > ?)",
+            )?;
             let result = stmt
-                .query_row([&token], WorkoutSession::from_row)
+                .query_row(rusqlite::params![token, Utc::now()], WorkoutSession::from_row)
                 .optional()?;
             Ok(result)
+        })
+        .await?
+    }
+
+    /// Clear share tokens whose expiry has passed. Returns the number of rows
+    /// cleared.
+    ///
+    /// This is not what makes expiry *effective* — the SQL filter in
+    /// `find_session_by_share_token` already does that on every lookup. It
+    /// exists so the owner's workout page shows "not shared" rather than
+    /// "shared, but the link is dead" once the row is stale.
+    pub async fn cleanup_expired_share_tokens(&self) -> Result<usize> {
+        let pool = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE workout_sessions SET share_token = NULL, share_expires_at = NULL WHERE share_expires_at IS NOT NULL AND share_expires_at <= ?",
+                rusqlite::params![Utc::now()],
+            )?;
+            Ok(rows)
         })
         .await?
     }
@@ -1250,7 +1287,10 @@ mod tests {
         let session = repo.create_session("user1", date, None).await.unwrap();
         assert!(session.share_token.is_none());
 
-        let token = repo.set_share_token(&session.id, "user1").await.unwrap();
+        let token = repo
+            .set_share_token(&session.id, "user1", None)
+            .await
+            .unwrap();
         assert!(!token.is_empty());
 
         let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
@@ -1267,7 +1307,7 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        let result = repo.set_share_token(&session.id, "user2").await;
+        let result = repo.set_share_token(&session.id, "user2", None).await;
         assert!(result.is_err());
     }
 
@@ -1280,7 +1320,10 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        let token = repo.set_share_token(&session.id, "user1").await.unwrap();
+        let token = repo
+            .set_share_token(&session.id, "user1", None)
+            .await
+            .unwrap();
         assert!(!token.is_empty());
 
         let revoked = repo.revoke_share_token(&session.id, "user1").await.unwrap();
@@ -1299,7 +1342,9 @@ mod tests {
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
-        repo.set_share_token(&session.id, "user1").await.unwrap();
+        repo.set_share_token(&session.id, "user1", None)
+            .await
+            .unwrap();
 
         let revoked = repo.revoke_share_token(&session.id, "user2").await.unwrap();
         assert!(!revoked);
@@ -1317,7 +1362,10 @@ mod tests {
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
-        let token = repo.set_share_token(&session.id, "user1").await.unwrap();
+        let token = repo
+            .set_share_token(&session.id, "user1", None)
+            .await
+            .unwrap();
 
         let found = repo
             .find_session_by_share_token(&token)
@@ -1372,9 +1420,15 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        let token1 = repo.set_share_token(&session.id, "user1").await.unwrap();
+        let token1 = repo
+            .set_share_token(&session.id, "user1", None)
+            .await
+            .unwrap();
         repo.revoke_share_token(&session.id, "user1").await.unwrap();
-        let token2 = repo.set_share_token(&session.id, "user1").await.unwrap();
+        let token2 = repo
+            .set_share_token(&session.id, "user1", None)
+            .await
+            .unwrap();
 
         assert_ne!(token1, token2);
     }

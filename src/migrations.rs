@@ -43,6 +43,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "011_cleanup_orphan_rows.sql",
         include_str!("../migrations/011_cleanup_orphan_rows.sql"),
     ),
+    (
+        "012_add_workout_share_expires_at.sql",
+        include_str!("../migrations/012_add_workout_share_expires_at.sql"),
+    ),
 ];
 
 /// Run all pending migrations on the database pool.
@@ -203,9 +207,15 @@ mod tests {
 
         let conn = pool.get().unwrap();
 
-        // Build the schema with every migration except the final cleanup
+        // Locate 011 by name rather than assuming it's `MIGRATIONS.last()` —
+        // that assumption broke once 012 was appended after it. Build the
+        // schema with every migration up to (not including) the cleanup
         // one, so orphans can still be inserted afterwards.
-        for (_filename, sql) in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+        let cleanup_idx = MIGRATIONS
+            .iter()
+            .position(|(name, _)| *name == "011_cleanup_orphan_rows.sql")
+            .expect("011 is registered");
+        for (_filename, sql) in &MIGRATIONS[..cleanup_idx] {
             conn.execute_batch(sql).unwrap();
         }
 
@@ -240,7 +250,7 @@ mod tests {
         )
         .unwrap();
 
-        let (_filename, cleanup_sql) = MIGRATIONS.last().expect("011 is registered");
+        let (_filename, cleanup_sql) = &MIGRATIONS[cleanup_idx];
         conn.execute_batch(cleanup_sql).unwrap();
 
         let session_count: i64 = conn

@@ -109,6 +109,9 @@ async fn main() -> anyhow::Result<()> {
     // revisited) need this sweep to avoid unbounded table growth.
     let sweep_handle = {
         let session_repo = session_repo.clone();
+        // Cloned here (not moved) because `workout_repo` is also captured by
+        // value in `app_state` below.
+        let workout_repo = workout_repo.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -123,6 +126,20 @@ async fn main() -> anyhow::Result<()> {
                             Ok(n) => audit::sessions_expired_sweep(n),
                             Err(e) => {
                                 tracing::warn!(error = ?e, "session cleanup_expired failed");
+                            }
+                        }
+                        // A separate match, not `?` or an early return: a
+                        // failure clearing dead share tokens must not skip
+                        // (or be skipped by) the session sweep above — the
+                        // two are unrelated lifecycles sharing one ticker.
+                        match workout_repo.cleanup_expired_share_tokens().await {
+                            Ok(0) => {}
+                            // Not a session lifecycle event, so this stays
+                            // off the `liftlog::audit` target and is just a
+                            // plain info log.
+                            Ok(n) => tracing::info!(count = n, "cleared expired workout share tokens"),
+                            Err(e) => {
+                                tracing::warn!(error = ?e, "workout cleanup_expired_share_tokens failed");
                             }
                         }
                     }
