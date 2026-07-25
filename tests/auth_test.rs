@@ -589,9 +589,10 @@ async fn test_logout_removal_cookie_has_secure_when_enabled() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_cookie_secure(pool.clone(), true);
 
+    // The secure app only accepts the __Host- prefixed cookie name.
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    let session_cookie = common::create_session_cookie(&pool, &user).await;
-    let cookie_header = common::extract_cookie_header(&session_cookie);
+    let token = common::create_session_token(&pool, &user).await;
+    let cookie_header = common::cookie_header_secure(&token);
 
     let response = test_app
         .router
@@ -614,6 +615,84 @@ async fn test_logout_removal_cookie_has_secure_when_enabled() {
         .to_str()
         .unwrap();
     assert!(set_cookie.contains("Secure"), "got: {set_cookie}");
+}
+
+#[tokio::test]
+async fn test_login_uses_host_prefixed_cookie_when_secure() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_cookie_secure(pool.clone(), true);
+
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=testuser&password=password123"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        set_cookie.starts_with("__Host-session="),
+        "got: {set_cookie}"
+    );
+}
+
+#[tokio::test]
+async fn test_host_prefixed_cookie_is_accepted_on_subsequent_request() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+    let token = common::create_session_token(&pool, &user).await;
+
+    let test_app = common::create_test_app_with_cookie_secure(pool, true);
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, common::cookie_header_secure(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_plain_session_cookie_rejected_by_secure_app() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+    let token = common::create_session_token(&pool, &user).await;
+
+    let test_app = common::create_test_app_with_cookie_secure(pool, true);
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, common::cookie_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
 
 #[tokio::test]

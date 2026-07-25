@@ -88,7 +88,12 @@ pub async fn create_session_token(pool: &DbPool, user: &User) -> String {
 
 #[allow(dead_code)]
 pub fn cookie_header(token: &str) -> String {
-    format!("session={token}")
+    format!("{}={token}", liftlog::session::session_cookie_name(false))
+}
+
+#[allow(dead_code)]
+pub fn cookie_header_secure(token: &str) -> String {
+    format!("{}={token}", liftlog::session::session_cookie_name(true))
 }
 
 #[allow(dead_code)]

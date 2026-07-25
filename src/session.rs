@@ -1,7 +1,8 @@
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
 
-pub const SESSION_COOKIE_NAME: &str = "session";
+const SESSION_COOKIE_NAME_PLAIN: &str = "session";
+const SESSION_COOKIE_NAME_HOST: &str = "__Host-session";
 
 /// How long a session survives without activity. A request within this
 /// window (and outside the touch throttle) slides the expiry forward.
@@ -11,8 +12,23 @@ pub const SESSION_IDLE_TTL_SECS: i64 = 60 * 60 * 24 * 7; // 7 days
 /// same session. Keeps write load to at most one UPDATE per session per hour.
 pub const SESSION_TOUCH_THROTTLE_SECS: i64 = 60 * 60; // 1 hour
 
+/// Name to use for the session cookie. Switching on `secure` here is
+/// **mandatory**, not cosmetic: applying the `__Host-` prefix unconditionally
+/// on a plain-HTTP deployment makes the browser discard the entire
+/// `Set-Cookie` line (the prefix requires `Secure`, and a `Secure` cookie
+/// cannot arrive over HTTP), so users cannot log in at all and get no error
+/// message. This is the easiest mistake to make here and the hardest to
+/// diagnose.
+pub fn session_cookie_name(secure: bool) -> &'static str {
+    if secure {
+        SESSION_COOKIE_NAME_HOST
+    } else {
+        SESSION_COOKIE_NAME_PLAIN
+    }
+}
+
 pub fn create_session_cookie(token: &str, secure: bool) -> Cookie<'static> {
-    Cookie::build((SESSION_COOKIE_NAME, token.to_string()))
+    Cookie::build((session_cookie_name(secure), token.to_string()))
         .path("/")
         .http_only(true)
         .same_site(axum_extra::extract::cookie::SameSite::Lax)
@@ -21,8 +37,15 @@ pub fn create_session_cookie(token: &str, secure: bool) -> Cookie<'static> {
         .build()
 }
 
-pub fn get_session_token(jar: &CookieJar) -> Option<String> {
-    jar.get(SESSION_COOKIE_NAME)
+/// Looks up the session token under exactly one cookie name:
+/// `session_cookie_name(secure)`. Deliberately no fallback to the other
+/// name — accepting a bare `session` while `secure = true` would forfeit
+/// the whole point of `__Host-`, since an attacker able to write cookies on
+/// a sibling subdomain could just inject the unprefixed name. The cost is
+/// that flipping `COOKIE_SECURE` logs everyone out once, which is a one-off
+/// and acceptable.
+pub fn get_session_token(jar: &CookieJar, secure: bool) -> Option<String> {
+    jar.get(session_cookie_name(secure))
         .map(|cookie| cookie.value().to_string())
 }
 
@@ -39,7 +62,7 @@ pub fn get_session_token(jar: &CookieJar) -> Option<String> {
 /// the cookie is never cleared: "I clicked log out but the cookie is still
 /// there."
 pub fn remove_session_cookie(secure: bool) -> Cookie<'static> {
-    Cookie::build((SESSION_COOKIE_NAME, ""))
+    Cookie::build((session_cookie_name(secure), ""))
         .path("/")
         .http_only(true)
         .same_site(axum_extra::extract::cookie::SameSite::Lax)
@@ -76,5 +99,27 @@ mod tests {
             assert_eq!(removed.same_site(), created.same_site());
             assert_eq!(removed.max_age(), Some(time::Duration::ZERO));
         }
+    }
+
+    #[test]
+    fn session_cookie_name_uses_host_prefix_only_when_secure() {
+        assert_eq!(session_cookie_name(true), "__Host-session");
+        assert_eq!(session_cookie_name(false), "session");
+    }
+
+    #[test]
+    fn create_session_cookie_secure_satisfies_host_prefix_requirements() {
+        let cookie = create_session_cookie("tok", true);
+        assert!(cookie.name().starts_with("__Host-"));
+        assert_eq!(cookie.secure(), Some(true));
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.domain(), None);
+    }
+
+    #[test]
+    fn create_session_cookie_plain_has_no_host_prefix() {
+        let cookie = create_session_cookie("tok", false);
+        assert!(!cookie.name().starts_with("__Host-"));
+        assert_eq!(cookie.name(), "session");
     }
 }

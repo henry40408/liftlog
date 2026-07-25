@@ -76,7 +76,7 @@ pub async fn sliding_session_middleware(
     mut request: Request,
     next: Next,
 ) -> axum::response::Response {
-    let token = get_session_token(&jar);
+    let token = get_session_token(&jar, layer.cookie_secure);
     let mut should_refresh_cookie: Option<String> = None;
 
     if let Some(tok) = token.as_deref() {
