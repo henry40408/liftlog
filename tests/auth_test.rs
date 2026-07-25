@@ -228,6 +228,68 @@ async fn test_logout_clears_session() {
 }
 
 #[tokio::test]
+async fn test_logout_sets_clear_site_data() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Byte-for-byte: unquoted directives make browsers silently ignore the
+    // whole header, so a loose `contains` check wouldn't catch that mistake.
+    let clear_site_data = response
+        .headers()
+        .get("clear-site-data")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(clear_site_data, "\"cache\", \"cookies\", \"storage\"");
+}
+
+#[tokio::test]
+async fn test_logout_still_sends_removal_cookie() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should clear the session cookie (max-age=0 or empty value)
+    let set_cookie = response.headers().get(header::SET_COOKIE);
+    assert!(set_cookie.is_some());
+    let cookie_str = set_cookie.unwrap().to_str().unwrap();
+    assert!(cookie_str.contains("Max-Age=0") || cookie_str.contains("session=;"));
+}
+
+#[tokio::test]
 async fn test_setup_creates_admin_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());

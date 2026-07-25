@@ -186,6 +186,23 @@ pub async fn logout(
     // Tell sliding_session_middleware not to overwrite the removal cookie
     // with a refreshed one.
     response.extensions_mut().insert(SuppressSessionRefresh);
+    // OWASP Session Management Cheat Sheet (Manual Session Expiration): ask
+    // the browser to drop the site's cookies, cache and local storage on
+    // logout, not just the one session cookie above — covers anything else
+    // an XSS or a shared machine could have stashed. The quotes around each
+    // directive are required syntax (a comma-separated list of quoted
+    // strings) — sending `cache, cookies, storage` unquoted makes browsers
+    // ignore the header entirely, silently. Deliberately omitting
+    // "executionContexts": it asks the browser to reload the associated
+    // browsing contexts, which interacts inconsistently across browsers with
+    // the redirect this handler already issues. Sent unconditionally
+    // (not gated on `state.cookie_secure`) because browsers already ignore
+    // this header on non-secure origins, so a conditional here would only
+    // add a branch without changing behaviour.
+    response.headers_mut().insert(
+        axum::http::HeaderName::from_static("clear-site-data"),
+        axum::http::HeaderValue::from_static("\"cache\", \"cookies\", \"storage\""),
+    );
     response
 }
 
