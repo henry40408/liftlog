@@ -128,6 +128,12 @@ pub async fn sliding_session_middleware(
                 tracing::warn!(error = ?e, "sliding_session_middleware: validate_and_touch failed");
             }
         }
+
+        // Handlers that emit their own audit events (logout, password change,
+        // "log out other devices", admin user delete) take an `AuditContext`
+        // extractor. Hand them the one already built here so a request has a
+        // single audit context rather than one per consumer.
+        request.extensions_mut().insert(ctx);
     }
 
     let mut response = next.run(request).await;

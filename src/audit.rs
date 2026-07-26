@@ -82,6 +82,15 @@ impl FromRequestParts<AppState> for AuditContext {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        // `sliding_session_middleware` already built one for every request that
+        // carried a session token, so reuse it rather than recomputing the same
+        // client-IP resolution and `User-Agent` truncation. The fallback is not
+        // dead: the anonymous routes that take this extractor (login and first-user
+        // setup) have no session token, so the middleware never built one for them.
+        if let Some(ctx) = parts.extensions.get::<Self>() {
+            return Ok(ctx.clone());
+        }
+
         Ok(Self::from_request_pieces(
             &parts.extensions,
             &parts.headers,
@@ -236,6 +245,61 @@ mod tests {
 
         let got = ctx.user_agent.expect("user agent should be present");
         assert!(got.chars().count() <= MAX_USER_AGENT_LEN);
+    }
+
+    /// The extractor must reuse the context `sliding_session_middleware`
+    /// already put in the request extensions, not rebuild its own. Proven by
+    /// making the two disagree: the stored context carries values the request's
+    /// own headers and URI would never produce, so a rebuild is detectable.
+    #[tokio::test]
+    async fn audit_context_extractor_prefers_the_one_the_middleware_built() {
+        let pool = crate::db::create_memory_pool().expect("memory pool");
+        let state = AppState {
+            user_repo: crate::repositories::UserRepository::new(pool.clone()),
+            exercise_repo: crate::repositories::ExerciseRepository::new(pool.clone()),
+            workout_repo: crate::repositories::WorkoutRepository::new(pool.clone()),
+            session_repo: crate::repositories::SessionRepository::new(pool),
+            login_rate_limiter: std::sync::Arc::new(crate::rate_limit::RateLimiter::new(
+                5,
+                std::time::Duration::from_secs(60),
+            )),
+            trusted_proxy_header: TrustedProxyHeader::None,
+            trusted_proxies: std::sync::Arc::new(vec![]),
+            cookie_secure: false,
+            hsts_max_age: 0,
+            hsts_include_subdomains: false,
+            log_salt: std::sync::Arc::new([0u8; 32]),
+        };
+
+        let stored = AuditContext {
+            client_ip: "203.0.113.7".parse().unwrap(),
+            user_agent: Some("middleware-built".to_string()),
+            path: "/built-by-middleware".to_string(),
+        };
+
+        let request = axum::http::Request::builder()
+            .uri("/rebuilt-by-extractor")
+            .header(axum::http::header::USER_AGENT, "rebuilt-by-extractor")
+            .extension(stored)
+            .body(())
+            .unwrap();
+        let (mut parts, ()) = request.into_parts();
+
+        let ctx = AuditContext::from_request_parts(&mut parts, &state)
+            .await
+            .expect("extractor is infallible");
+
+        assert_eq!(ctx.path, "/built-by-middleware", "path was rebuilt");
+        assert_eq!(
+            ctx.user_agent.as_deref(),
+            Some("middleware-built"),
+            "user_agent was rebuilt"
+        );
+        assert_eq!(
+            ctx.client_ip.to_string(),
+            "203.0.113.7",
+            "client_ip was rebuilt"
+        );
     }
 
     #[test]
