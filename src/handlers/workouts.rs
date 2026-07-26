@@ -239,6 +239,14 @@ pub async fn add_log(
         .find_owned_session(&session_id, &auth_user.id)
         .await?;
 
+    // `exercise_id` arrives from the form body, so owning the session is not
+    // enough — without this a caller could attach a log to another user's
+    // exercise, which the UI's own <select> would never offer.
+    state
+        .exercise_repo
+        .find_owned(&form.exercise_id, &auth_user.id)
+        .await?;
+
     let set_number = state
         .workout_repo
         .get_next_set_number(&session_id, &form.exercise_id)

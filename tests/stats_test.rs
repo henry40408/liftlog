@@ -455,3 +455,42 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
     assert_eq!(pr_count, 3, "expected 3 PR dots, body=\n{body_str}");
     assert_eq!(plain_count, 2);
 }
+
+#[tokio::test]
+async fn test_exercise_stats_rejects_exercise_owned_by_another_user() {
+    // The history, PR and metrics queries are scoped by the caller, but the
+    // exercise record itself is rendered into the page — fetching it unscoped
+    // disclosed another user's exercise name and category.
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let snooper = common::create_test_user(&pool, "snooper", "password123", UserRole::User).await;
+    let victim = common::create_test_user(&pool, "victim", "password123", UserRole::User).await;
+
+    let session_cookie = common::create_session_cookie(&pool, &snooper).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let victim_exercise =
+        common::create_test_exercise(&pool, &victim.id, "Victim Deadlift", "back").await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}", victim_exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        !body_str.contains("Victim Deadlift"),
+        "the other user's exercise name must not be disclosed, body=\n{body_str}"
+    );
+}
