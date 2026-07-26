@@ -23,7 +23,7 @@
         </form>
         {% match share_url %}
         {% when None %}
-        <form action="/workouts/{{ workout.id }}/share" method="post" style="display:inline;">
+        <form action="/workouts/{{ workout.id }}/share" method="post" class="share-form">
             <select id="expires_in_days" name="expires_in_days" aria-label="Share link expiry">
                 <option value="" selected>Never expires</option>
                 <option value="7">7 days</option>

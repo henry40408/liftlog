@@ -858,6 +858,22 @@
             color: white;
         }
 
+        /* The share form pairs an expiry <select> with its submit button. The
+           global full-width input sizing would stretch the select to 400px and
+           wrap the button onto a second line, out of the actions row. */
+        .actions .share-form {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+        }
+
+        .actions .share-form select {
+            width: auto;
+            padding: var(--sp-2) var(--sp-4);
+            font-size: var(--font-xs);
+            border-left-width: 1px;
+        }
+
         /* ============================================
            EMPTY STATE
            ============================================ */
@@ -1180,6 +1196,12 @@
             .actions a,
             .actions button,
             .actions .btn {
+                padding: var(--sp-3) var(--sp-4);
+                font-size: var(--font-sm);
+            }
+
+            /* Keep the expiry select the same height as the buttons it sits next to */
+            .actions .share-form select {
                 padding: var(--sp-3) var(--sp-4);
                 font-size: var(--font-sm);
             }
