@@ -194,11 +194,13 @@ pub async fn exercise_stats(
     auth_user: AuthUser,
     Path(exercise_id): Path<String>,
 ) -> Result<Response> {
+    // The history/PR/metrics queries below are all scoped by `auth_user.id`, but
+    // the exercise record itself is rendered, so fetching it unscoped disclosed
+    // another user's exercise name and category.
     let exercise = state
         .exercise_repo
-        .find_by_id(&exercise_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
+        .find_owned(&exercise_id, &auth_user.id)
+        .await?;
 
     let history = state
         .workout_repo

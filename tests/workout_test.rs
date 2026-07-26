@@ -546,6 +546,62 @@ async fn test_add_log_success() {
 }
 
 #[tokio::test]
+async fn test_add_log_rejects_exercise_owned_by_another_user() {
+    // Owning the workout session does not entitle the caller to reference an
+    // exercise belonging to somebody else: `exercise_id` comes straight from the
+    // form body, so it has to be authorized independently of the session.
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let attacker = common::create_test_user(&pool, "attacker", "password123", UserRole::User).await;
+    let victim = common::create_test_user(&pool, "victim", "password123", UserRole::User).await;
+
+    let session_cookie = common::create_session_cookie(&pool, &attacker).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let victim_exercise =
+        common::create_test_exercise(&pool, &victim.id, "Victim Squat", "legs").await;
+    let workout = common::create_test_workout(
+        &pool,
+        &attacker.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workouts/{}/logs", workout.id))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::from(format!(
+                    "exercise_id={}&reps=10&weight=100&rpe=8",
+                    victim_exercise.id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    // The write must not have happened at all, not merely been reported as denied.
+    let workout_repo = WorkoutRepository::new(pool);
+    let logs = workout_repo
+        .find_logs_by_session_with_pr(&workout.id, &attacker.id)
+        .await
+        .unwrap();
+    assert!(
+        logs.is_empty(),
+        "no log should have been created, got {} log(s)",
+        logs.len()
+    );
+}
+
+#[tokio::test]
 #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
 async fn test_add_log_accepts_fractional_weight() {
     let pool = common::setup_test_db();
