@@ -59,8 +59,35 @@ All configuration is done via environment variables:
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
 | `LIFTLOG_BIND` | `127.0.0.1:8080` | HTTP server bind address (`host:port`). Defaults to loopback so a bare-metal run is not exposed on all interfaces without opting in; the container image sets `0.0.0.0:8080` so a reverse proxy can reach it. |
+| `LIFTLOG_TRUSTED_PROXY_HEADER` | (unset / `none`) | Which proxy-supplied header, if any, liftlog trusts to carry the real client IP for per-IP login rate limiting (`POST /auth/login` allows 5 attempts per 60 seconds): `x-forwarded-for` or `x-real-ip`. This is a deliberate operator choice, not inferred from which headers happen to be present — the mere presence of an `X-Forwarded-For` line is not proof a trusted proxy wrote it. **Whichever header you select, your reverse proxy MUST overwrite it (or strip any client-supplied copy)**, e.g. nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (appends the peer; liftlog reads the rightmost hop) or `proxy_set_header X-Real-IP $remote_addr;`. If the proxy merely passes a client-supplied header through untouched, an attacker can forge their source IP and the login rate limit is bypassable. Left unset, no header is ever read and all clients behind a proxy share one login rate-limit bucket — a real limitation, but a safe default. |
+| `LIFTLOG_TRUSTED_PROXIES` | (empty) | Comma-separated bare IPs of reverse proxies allowed to supply the header selected by `LIFTLOG_TRUSTED_PROXY_HEADER`; only consulted when that variable is set. The **rightmost** hop in `X-Forwarded-For` is used, since that's the one the trusted proxy itself appended. Loopback peers are always trusted regardless of this setting, so it's unnecessary when the proxy connects from loopback. If a reverse proxy runs in a separate container, its IP must be listed here, or every client will appear to share a single loopback peer address and thus one shared rate-limit bucket. |
+| `LIFTLOG_COOKIE_SECURE` | `false` | Whether the session cookie carries the `Secure` attribute. Set `true` for HTTPS deployments, including behind a TLS-terminating reverse proxy. Leave `false` for plain-HTTP LAN deployments — otherwise the browser silently drops the cookie and login becomes impossible, with no error message. Setting it `true` also renames the cookie to `__Host-session` (the browser then enforces `Secure` + `Path=/` + no `Domain` at the protocol level), so flipping this setting invalidates existing logins once. |
+| `LIFTLOG_HSTS_MAX_AGE` | `0` (disabled) | Seconds for the `Strict-Transport-Security` header's `max-age`. `0`, unset, or empty sends no header. |
+| `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS` | `false` | Whether the `Strict-Transport-Security` header, when `LIFTLOG_HSTS_MAX_AGE` is set, also carries `includeSubDomains`. |
 | `RUST_LOG` | `error,liftlog=info` | Log level filter |
 | `LIFTLOG_LOG_FORMAT` | `full` | Log output format: `full`, `compact`, `pretty`, `json` (also settable via `--log-format`) |
+
+On logout, liftlog sends `Clear-Site-Data: "cache", "cookies", "storage"` so the browser drops more than just the session cookie. The `"cookies"` directive's scope is the whole **registrable domain**, not just this origin — if liftlog shares a domain with other services (e.g. `liftlog.example.com` alongside `wiki.example.com`), logging out of liftlog will also log the user out of those. Browsers ignore the header entirely on non-secure (plain HTTP) origins.
+
+Prefer sending HSTS from your reverse proxy. liftlog does not terminate TLS and cannot tell whether a request really arrived over HTTPS; the layer that terminates TLS does. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch for deployments that cannot set headers at the proxy. Before enabling it, make sure the whole domain — and, with `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS`, every subdomain — serves working HTTPS: this declaration cannot be withdrawn from the server side, only waited out until `max-age` expires. There is deliberately no `preload` option; configure that on your proxy if you want it. Browsers ignore the header on plain-HTTP origins, so setting it there achieves nothing. If your proxy also sends HSTS, set it in only one place.
+
+## Audit Log
+
+Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Sessions Life Cycle*) are logged as structured `tracing` events under the `liftlog::audit` target, so they can be filtered out of general application logs and shipped to a log collector:
+
+| Event | Level | Meaning |
+|-------|-------|---------|
+| `session.created` | info | Login or first-user setup created a session (`reason`: `login` or `setup`) |
+| `session.renewed` | info | The sliding-expiry touch extended a session's lifetime |
+| `session.destroyed` | info | A session (or, for a bulk delete, a batch of sessions) was deleted — logout, password change, "log out other devices", or an admin deleting the user (`reason` says which) |
+| `session.expired` | info | A session was found dead on use and lazily deleted (`reason`: `idle` or `absolute`), or a batch of abandoned sessions was retired by the hourly background sweep (`reason`: `sweep`, which carries only a `count` and no request fields) |
+| `session.rejected` | debug | An unrecognised session token was presented |
+
+Every request-scoped event carries `client_ip`, `user_agent` (truncated to 256 chars), and `path`, plus a `session_fp` field — a salted SHA-256 fingerprint of the session token, never the raw token itself. The salt is generated fresh at process startup and is never logged, so `session_fp` values let you correlate events for the same session **within one process's lifetime**, but they do NOT correlate across restarts. Bulk-delete events carry `actor_session_fp` (the session that performed the action) and `count` instead of a single `session_fp`, since there's no one session to name. The sweep event is an exception: it has no request context and carries only `count`.
+
+`session.rejected` is logged at `debug`, not `info`, because liftlog is typically internet-facing and scanners probing random cookie values would otherwise drown the genuinely useful events; set `RUST_LOG` to include `debug` to see them.
+
+Set `LIFTLOG_LOG_FORMAT=json` to emit these (and all other logs) as JSON, one event per line, ready for ingestion by a log collector.
 
 > **Migration note:** `BIND` and `LOG_FORMAT` were renamed to `LIFTLOG_BIND` and `LIFTLOG_LOG_FORMAT`. If either old name is still set in the environment, the server **refuses to start** and names the replacement, so a stale value can't be silently ignored.
 

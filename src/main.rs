@@ -4,6 +4,7 @@ use tracing_subscriber::{
     EnvFilter, Layer as _, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
+mod audit;
 mod config;
 mod db;
 mod error;
@@ -11,6 +12,8 @@ mod handlers;
 mod middleware;
 mod migrations;
 mod models;
+mod net;
+mod rate_limit;
 mod repositories;
 mod routes;
 mod session;
@@ -19,8 +22,12 @@ mod version;
 
 use config::Config;
 use migrations::run_migrations;
+use rand_core::RngCore;
+use rate_limit::RateLimiter;
 use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
 use state::AppState;
+use std::sync::Arc;
+use std::time::Duration;
 
 // The release image links musl, whose default allocator is markedly slower than
 // glibc's under concurrent load. mimalloc restores throughput for the request
@@ -102,14 +109,38 @@ async fn main() -> anyhow::Result<()> {
     // revisited) need this sweep to avoid unbounded table growth.
     let sweep_handle = {
         let session_repo = session_repo.clone();
+        // Cloned here (not moved) because `workout_repo` is also captured by
+        // value in `app_state` below.
+        let workout_repo = workout_repo.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     _ = ticker.tick() => {
-                        if let Err(e) = session_repo.cleanup_expired().await {
-                            tracing::warn!(error = ?e, "session cleanup_expired failed");
+                        match session_repo.cleanup_expired().await {
+                            // Only when something was actually retired: an
+                            // idle deployment would otherwise emit one empty
+                            // line an hour, forever.
+                            Ok(0) => {}
+                            Ok(n) => audit::sessions_expired_sweep(n),
+                            Err(e) => {
+                                tracing::warn!(error = ?e, "session cleanup_expired failed");
+                            }
+                        }
+                        // A separate match, not `?` or an early return: a
+                        // failure clearing dead share tokens must not skip
+                        // (or be skipped by) the session sweep above — the
+                        // two are unrelated lifecycles sharing one ticker.
+                        match workout_repo.cleanup_expired_share_tokens().await {
+                            Ok(0) => {}
+                            // Not a session lifecycle event, so this stays
+                            // off the `liftlog::audit` target and is just a
+                            // plain info log.
+                            Ok(n) => tracing::info!(count = n, "cleared expired workout share tokens"),
+                            Err(e) => {
+                                tracing::warn!(error = ?e, "workout cleanup_expired_share_tokens failed");
+                            }
                         }
                     }
                     _ = shutdown_rx.changed() => break,
@@ -118,11 +149,45 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
+    match config.trusted_proxy_header {
+        config::TrustedProxyHeader::None => {
+            tracing::warn!(
+                "LIFTLOG_TRUSTED_PROXY_HEADER is not set; forwarding headers are ignored and the TCP peer is used for login rate limiting — behind a reverse proxy every client shares one bucket. Set it to x-forwarded-for or x-real-ip once your proxy is configured to overwrite that header."
+            );
+        }
+        header if config.trusted_proxies.is_empty() => {
+            tracing::info!(
+                ?header,
+                "trusting forwarding header from loopback peers only; set LIFTLOG_TRUSTED_PROXIES if the proxy runs on another host or in another container"
+            );
+        }
+        header => {
+            tracing::info!(
+                ?header,
+                proxies = ?config.trusted_proxies,
+                "trusting forwarding header from configured proxies"
+            );
+        }
+    }
+
+    // Per-process salt for audit-log session fingerprints. Generated fresh
+    // on every startup — never logged, never persisted — so a leaked log
+    // line can never be used to recover or replay a session token.
+    let mut log_salt = [0u8; 32];
+    rand_core::OsRng.fill_bytes(&mut log_salt);
+
     let app_state = AppState {
         user_repo,
         exercise_repo,
         workout_repo,
         session_repo,
+        login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
+        trusted_proxy_header: config.trusted_proxy_header,
+        trusted_proxies: Arc::new(config.trusted_proxies.clone()),
+        cookie_secure: config.cookie_secure,
+        hsts_max_age: config.hsts_max_age,
+        hsts_include_subdomains: config.hsts_include_subdomains,
+        log_salt: Arc::new(log_salt),
     };
 
     // Build router
@@ -131,11 +196,25 @@ async fn main() -> anyhow::Result<()> {
     // Start server
     let addr = config.bind;
     tracing::info!("Starting server at http://{}", addr);
+    tracing::info!(
+        cookie_secure = config.cookie_secure,
+        "session cookie Secure attribute"
+    );
+    if config.hsts_max_age > 0 {
+        tracing::info!(
+            max_age = config.hsts_max_age,
+            include_subdomains = config.hsts_include_subdomains,
+            "HSTS enabled"
+        );
+    }
 
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     // Server has stopped accepting connections and drained in-flight requests.
     // Stop the background sweep and wait for any current pass to finish before

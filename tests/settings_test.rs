@@ -261,11 +261,17 @@ async fn test_change_password_invalidates_other_sessions() {
         .validate_and_touch(&token_current)
         .await
         .unwrap();
-    assert!(current_valid.is_some());
+    assert!(matches!(
+        current_valid,
+        liftlog::repositories::ValidateOutcome::Valid(_)
+    ));
 
     // Other session should be invalidated
     let other_valid = session_repo.validate_and_touch(&token_other).await.unwrap();
-    assert!(other_valid.is_none());
+    assert!(matches!(
+        other_valid,
+        liftlog::repositories::ValidateOutcome::Unknown
+    ));
 }
 
 #[tokio::test]
@@ -326,19 +332,23 @@ async fn test_logout_others_deletes_siblings_only() {
 
     // Sibling is gone, current survives.
     assert!(
-        session_repo
-            .validate_and_touch(&sibling_token)
-            .await
-            .unwrap()
-            .is_none(),
+        matches!(
+            session_repo
+                .validate_and_touch(&sibling_token)
+                .await
+                .unwrap(),
+            liftlog::repositories::ValidateOutcome::Unknown
+        ),
         "sibling session should be deleted"
     );
     assert!(
-        session_repo
-            .validate_and_touch(&current_token)
-            .await
-            .unwrap()
-            .is_some(),
+        matches!(
+            session_repo
+                .validate_and_touch(&current_token)
+                .await
+                .unwrap(),
+            liftlog::repositories::ValidateOutcome::Valid(_)
+        ),
         "current session should survive"
     );
 }
@@ -392,4 +402,36 @@ async fn test_change_password_requires_auth() {
     // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
+}
+
+/// OWASP Session Management Cheat Sheet (Web Content Caching): /settings
+/// carries account details and must never be resurrected from a browser or
+/// intermediate cache after logout.
+#[tokio::test]
+async fn test_settings_page_sets_no_store() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "no-cache, no-store, must-revalidate"
+    );
+    assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
 }

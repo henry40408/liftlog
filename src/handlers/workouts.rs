@@ -4,8 +4,8 @@ use axum::{
     extract::{Path, Query, State},
     response::{Html, IntoResponse, Redirect, Response},
 };
-use chrono::NaiveDate;
-use serde::Deserialize;
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Deserializer};
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
@@ -43,6 +43,7 @@ struct ShowWorkoutTemplate {
     categories: &'static [ExerciseCategory],
     exercise_last_weights: Vec<LastExerciseWeight>,
     share_url: Option<String>,
+    share_expires_at: Option<DateTime<Utc>>,
     error: Option<String>,
 }
 
@@ -159,6 +160,7 @@ pub async fn show(
         .share_token
         .as_ref()
         .map(|token| format!("/shared/{token}"));
+    let share_expires_at = workout.share_expires_at;
 
     let template = ShowWorkoutTemplate {
         user: auth_user,
@@ -168,6 +170,7 @@ pub async fn show(
         categories: CATEGORIES,
         exercise_last_weights,
         share_url,
+        share_expires_at,
         error: None,
     };
 
@@ -327,11 +330,48 @@ pub async fn update_log(
     Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
 }
 
+/// Deserialize an optional TTL (in days) from a form field. An absent field
+/// or an empty/whitespace-only string — what the "Never expires" `<select>`
+/// option submits — means `None`; anything else must parse as an integer.
+/// `Option<String>::deserialize` (rather than requiring a `String`) is what
+/// makes the absent-field case work at all: axum's form deserializer never
+/// invokes this function for a missing key unless the target type itself
+/// tolerates absence.
+fn empty_string_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        None => Ok(None),
+        Some(s) if s.trim().is_empty() => Ok(None),
+        Some(s) => s.trim().parse().map(Some).map_err(serde::de::Error::custom),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ShareForm {
+    /// Days the share link stays valid. `None` — the field absent, or an
+    /// empty string from the "never expires" <select> option — means never
+    /// expires, preserving pre-012 behaviour.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub expires_in_days: Option<i64>,
+}
+
 pub async fn share_workout(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
+    Form(form): Form<ShareForm>,
 ) -> Result<Response> {
+    if let Some(days) = form.expires_in_days
+        && !(1..=365).contains(&days)
+    {
+        return Err(AppError::BadRequest(
+            "Share link expiry must be between 1 and 365 days".to_string(),
+        ));
+    }
+
     state
         .workout_repo
         .find_owned_session(&id, &auth_user.id)
@@ -339,7 +379,11 @@ pub async fn share_workout(
 
     state
         .workout_repo
-        .set_share_token(&id, &auth_user.id)
+        .set_share_token(
+            &id,
+            &auth_user.id,
+            form.expires_in_days.map(chrono::Duration::days),
+        )
         .await?;
 
     Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
@@ -391,4 +435,47 @@ pub async fn view_shared(
     };
 
     Ok(Html(template.render()?).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ShareForm;
+
+    // `Option<String>::deserialize` behaves identically regardless of the
+    // wire format feeding it a field value, so exercising it through
+    // `serde_json` (already a direct dependency) covers the same code path
+    // `axum::Form`'s urlencoded deserializer would, without adding a new
+    // dependency just for these tests.
+    fn parse(json: &str) -> std::result::Result<ShareForm, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    #[test]
+    fn absent_field_means_never_expires() {
+        let form = parse("{}").unwrap();
+        assert_eq!(form.expires_in_days, None);
+    }
+
+    #[test]
+    fn empty_string_means_never_expires() {
+        let form = parse(r#"{"expires_in_days": ""}"#).unwrap();
+        assert_eq!(form.expires_in_days, None);
+    }
+
+    #[test]
+    fn whitespace_only_string_means_never_expires() {
+        let form = parse(r#"{"expires_in_days": "   "}"#).unwrap();
+        assert_eq!(form.expires_in_days, None);
+    }
+
+    #[test]
+    fn numeric_string_parses_to_some() {
+        let form = parse(r#"{"expires_in_days": "7"}"#).unwrap();
+        assert_eq!(form.expires_in_days, Some(7));
+    }
+
+    #[test]
+    fn non_numeric_string_is_a_deserialization_error() {
+        assert!(parse(r#"{"expires_in_days": "abc"}"#).is_err());
+    }
 }

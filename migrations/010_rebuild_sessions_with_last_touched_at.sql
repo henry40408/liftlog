@@ -21,4 +21,12 @@ ALTER TABLE sessions_new RENAME TO sessions;
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 
-PRAGMA foreign_keys = ON;
+-- Deliberately not re-enabling foreign_keys here. PRAGMA foreign_keys is a
+-- per-connection setting, and run_migrations runs every migration on a
+-- single connection borrowed from the pool; turning it back on at the end of
+-- this migration would only affect that one pooled connection, leaving the
+-- rest of the pool's connections (which never touch this pragma) with
+-- enforcement off. That makes cascade behaviour depend on which connection
+-- r2d2 happens to hand out for a given request — nondeterministic.
+-- Enforcement belongs in exactly one place, applied uniformly to every
+-- connection: the pool's connection initialiser in src/db.rs.

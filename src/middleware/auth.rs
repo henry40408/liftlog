@@ -6,9 +6,22 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 
+use crate::audit::{self, AuditContext};
 use crate::models::UserRole;
-use crate::repositories::SessionRepository;
+use crate::repositories::{SessionRepository, ValidateOutcome};
 use crate::session::{create_session_cookie, get_session_token};
+
+/// State bound to the sliding-session middleware layer. Carries the session
+/// repository plus the `Secure` flag so cookies re-issued mid-request
+/// (on touch) match what `login_submit` / `setup_submit` set at login.
+#[derive(Clone)]
+pub struct SessionLayerState {
+    pub session_repo: SessionRepository,
+    pub cookie_secure: bool,
+    pub log_salt: std::sync::Arc<[u8; 32]>,
+    pub trusted_proxy_header: crate::config::TrustedProxyHeader,
+    pub trusted_proxies: std::sync::Arc<Vec<std::net::IpAddr>>,
+}
 
 #[derive(Clone, Debug)]
 pub struct AuthUser {
@@ -62,30 +75,54 @@ pub struct ValidatedSession {
 /// cookie with a fresh `Max-Age`. Applied globally; requests without a
 /// cookie pass through untouched.
 pub async fn sliding_session_middleware(
-    State(session_repo): State<SessionRepository>,
+    State(layer): State<SessionLayerState>,
     jar: CookieJar,
     mut request: Request,
     next: Next,
 ) -> axum::response::Response {
-    let token = get_session_token(&jar);
+    let token = get_session_token(&jar, layer.cookie_secure);
     let mut should_refresh_cookie: Option<String> = None;
+    // Captured before `next.run` moves `request` — this is the only place
+    // that knows whether the request carried a valid session, since it's
+    // also the branch that inserts `ValidatedSession`. Drives the
+    // Cache-Control/Pragma injection below.
+    let mut authenticated = false;
 
     if let Some(tok) = token.as_deref() {
-        match session_repo.validate_and_touch(tok).await {
-            Ok(Some(outcome)) => {
+        // Only built when there's actually a token to validate — the audit
+        // events are the only consumer, so anonymous requests shouldn't pay
+        // for it.
+        let ctx = AuditContext::from_request_pieces(
+            request.extensions(),
+            request.headers(),
+            request.uri().path(),
+            layer.trusted_proxy_header,
+            &layer.trusted_proxies,
+        );
+        let fp = crate::session::token_fingerprint(tok, layer.log_salt.as_ref());
+
+        match layer.session_repo.validate_and_touch(tok).await {
+            Ok(ValidateOutcome::Valid(outcome)) => {
+                if outcome.new_expires_at.is_some() {
+                    should_refresh_cookie = Some(tok.to_string());
+                    audit::session_renewed(&ctx, &fp, &outcome.user_id, &outcome.username);
+                }
+                authenticated = true;
                 request.extensions_mut().insert(ValidatedSession {
                     user_id: outcome.user_id,
                     username: outcome.username,
                     role: outcome.role,
                     session_token: tok.to_string(),
                 });
-                if outcome.new_expires_at.is_some() {
-                    should_refresh_cookie = Some(tok.to_string());
-                }
             }
-            Ok(None) => {
-                // Invalid / expired token: do not insert ValidatedSession. The
-                // downstream extractor (AuthUser) will redirect to /auth/login.
+            Ok(ValidateOutcome::ExpiredIdle) => {
+                audit::session_expired(&ctx, &fp, "idle");
+            }
+            Ok(ValidateOutcome::ExpiredAbsolute) => {
+                audit::session_expired(&ctx, &fp, "absolute");
+            }
+            Ok(ValidateOutcome::Unknown) => {
+                audit::session_rejected(&ctx, &fp);
             }
             Err(e) => {
                 tracing::warn!(error = ?e, "sliding_session_middleware: validate_and_touch failed");
@@ -103,7 +140,7 @@ pub async fn sliding_session_middleware(
             .get::<SuppressSessionRefresh>()
             .is_some();
         if !suppressed {
-            let cookie = create_session_cookie(&tok);
+            let cookie = create_session_cookie(&tok, layer.cookie_secure);
             let header_value = cookie
                 .to_string()
                 .parse()
@@ -111,6 +148,31 @@ pub async fn sliding_session_middleware(
             response
                 .headers_mut()
                 .append(axum::http::header::SET_COOKIE, header_value);
+        }
+    }
+
+    // OWASP Session Management Cheat Sheet (Web Content Caching): prevent
+    // browsers/intermediate caches from persisting authenticated responses,
+    // so the back button (or a shared-device disk cache) can't resurrect
+    // private content after logout. Scoped to `authenticated` because this
+    // middleware also handles anonymous routes like /favicon.svg, which
+    // `favicon.rs` deliberately marks `public, max-age=86400` — the
+    // `contains_key` guard below is what keeps that intact even when the
+    // request is authenticated (a logged-in user's browser still fetches
+    // /favicon.svg through this same middleware), since an unconditional
+    // insert would silently overwrite the favicon handler's header and
+    // nothing in the anonymous favicon tests would catch it.
+    if authenticated {
+        let headers = response.headers_mut();
+        if !headers.contains_key(axum::http::header::CACHE_CONTROL) {
+            headers.insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            );
+            headers.insert(
+                axum::http::header::PRAGMA,
+                axum::http::HeaderValue::from_static("no-cache"),
+            );
         }
     }
 

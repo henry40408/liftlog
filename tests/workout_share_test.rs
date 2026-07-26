@@ -33,6 +33,7 @@ async fn test_share_workout_success() {
                 .method("POST")
                 .uri(format!("/workouts/{}/share", workout.id))
                 .header(header::COOKIE, &cookie_header)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -80,7 +81,7 @@ async fn test_view_shared_workout_public() {
     // Share the workout
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
-        .set_share_token(&workout.id, &user.id)
+        .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
@@ -145,7 +146,7 @@ async fn test_revoke_share_success() {
     // First share the workout
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
-        .set_share_token(&workout.id, &user.id)
+        .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
@@ -205,7 +206,7 @@ async fn test_reshare_after_revoke_generates_new_token() {
 
     // Share
     let token1 = workout_repo
-        .set_share_token(&workout.id, &user.id)
+        .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
@@ -217,7 +218,7 @@ async fn test_reshare_after_revoke_generates_new_token() {
 
     // Share again
     let token2 = workout_repo
-        .set_share_token(&workout.id, &user.id)
+        .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
@@ -279,6 +280,7 @@ async fn test_cannot_share_others_workout() {
                 .method("POST")
                 .uri(format!("/workouts/{}/share", workout.id))
                 .header(header::COOKIE, &cookie_header)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -375,7 +377,7 @@ async fn test_cannot_revoke_others_share() {
     .await;
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
-        .set_share_token(&workout.id, &user2.id)
+        .set_share_token(&workout.id, &user2.id, None)
         .await
         .unwrap();
 
@@ -468,7 +470,7 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     // Share the workout
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
-        .set_share_token(&workout.id, &user.id)
+        .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
@@ -495,4 +497,366 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     assert!(body_str.contains(&format!("/shared/{share_token}")));
     // Should not show share button (only the revoke form, not the share form)
     assert!(!body_str.contains(">Share</button>"));
+}
+
+// Share expiry tests (migration 012)
+
+#[tokio::test]
+async fn test_share_without_expiry_never_expires() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    // expires_in_days absent entirely — the "never expires" default.
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workouts/{}/share", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    let updated = workout_repo
+        .find_session_by_id(&workout.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(updated.share_token.is_some());
+    assert!(updated.share_expires_at.is_none());
+
+    // Backward-compatibility guard: a NULL expiry must still resolve.
+    let share_token = updated.share_token.unwrap();
+    let app = common::create_test_app(pool.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/shared/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_share_with_expiry_sets_share_expires_at() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workouts/{}/share", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("expires_in_days=7"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    let updated = workout_repo
+        .find_session_by_id(&workout.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let expires_at = updated
+        .share_expires_at
+        .expect("share_expires_at should be set");
+    let expected = chrono::Utc::now() + chrono::Duration::days(7);
+    // A few seconds of drift, same tolerance neighbouring time-based tests allow.
+    assert!((expires_at - expected).num_seconds().abs() < 5);
+
+    // A future (not-yet-elapsed) expiry must still resolve. Every other test
+    // in this file covers NULL expiry or a past expiry; nothing previously
+    // proved a live, unexpired share link actually works — a regression
+    // narrowing find_session_by_share_token's predicate to just
+    // `share_expires_at IS NULL` would make every expiring link dead on
+    // creation while leaving the rest of the suite green.
+    let share_token = updated.share_token.unwrap();
+    let app = common::create_test_app(pool.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/shared/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(body_str.contains("2024-01-15") || body_str.contains("testuser"));
+}
+
+#[tokio::test]
+async fn test_expired_share_token_returns_404() {
+    let pool = common::setup_test_db();
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        Some("Secret expired workout"),
+    )
+    .await;
+
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    let share_token = workout_repo
+        .set_share_token(&workout.id, &user.id, Some(chrono::Duration::days(7)))
+        .await
+        .unwrap();
+
+    // Age the row past expiry, following `expire_session`'s technique in
+    // tests/common/mod.rs.
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE workout_sessions SET share_expires_at = datetime('now', '-1 hour') WHERE id = ?",
+            [&workout.id],
+        )
+        .unwrap();
+    }
+
+    let app = common::create_test_app(pool.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/shared/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    // An expired token and a never-issued one must be indistinguishable —
+    // nothing about the workout itself should leak into the response.
+    assert!(!body_str.contains("Secret expired workout"));
+    assert!(!body_str.contains("Shared by"));
+}
+
+#[tokio::test]
+async fn test_revoke_share_clears_expiry_too() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    workout_repo
+        .set_share_token(&workout.id, &user.id, Some(chrono::Duration::days(7)))
+        .await
+        .unwrap();
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workouts/{}/revoke-share", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let updated = workout_repo
+        .find_session_by_id(&workout.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(updated.share_token.is_none());
+    assert!(updated.share_expires_at.is_none());
+}
+
+#[tokio::test]
+async fn test_share_rejects_out_of_range_expiry() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    for invalid in ["0", "400"] {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/workouts/{}/share", workout.id))
+                    .header(header::COOKIE, &cookie_header)
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("expires_in_days={invalid}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "expires_in_days={invalid}"
+        );
+    }
+
+    // Neither attempt should have shared the workout.
+    let workout_repo = WorkoutRepository::new(pool);
+    let found = workout_repo
+        .find_session_by_id(&workout.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(found.share_token.is_none());
+}
+
+#[tokio::test]
+async fn test_cleanup_expired_share_tokens_nulls_them() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let workout_repo = WorkoutRepository::new(pool.clone());
+
+    let expired = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let never_expires = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 16).unwrap(),
+        None,
+    )
+    .await;
+    let future_expiry = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 17).unwrap(),
+        None,
+    )
+    .await;
+
+    workout_repo
+        .set_share_token(&expired.id, &user.id, Some(chrono::Duration::days(7)))
+        .await
+        .unwrap();
+    workout_repo
+        .set_share_token(&never_expires.id, &user.id, None)
+        .await
+        .unwrap();
+    workout_repo
+        .set_share_token(
+            &future_expiry.id,
+            &user.id,
+            Some(chrono::Duration::days(30)),
+        )
+        .await
+        .unwrap();
+
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE workout_sessions SET share_expires_at = datetime('now', '-1 hour') WHERE id = ?",
+            [&expired.id],
+        )
+        .unwrap();
+    }
+
+    let cleared = workout_repo.cleanup_expired_share_tokens().await.unwrap();
+    assert_eq!(cleared, 1);
+
+    let expired_row = workout_repo
+        .find_session_by_id(&expired.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(expired_row.share_token.is_none());
+    assert!(expired_row.share_expires_at.is_none());
+
+    let never_row = workout_repo
+        .find_session_by_id(&never_expires.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(never_row.share_token.is_some());
+    assert!(never_row.share_expires_at.is_none());
+
+    let future_row = workout_repo
+        .find_session_by_id(&future_expiry.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(future_row.share_token.is_some());
+    assert!(future_row.share_expires_at.is_some());
 }

@@ -21,14 +21,120 @@ pub fn create_test_app(pool: DbPool) -> Router {
 }
 
 pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
+    // A generous default so existing tests (which don't exercise rate
+    // limiting) can't trip it.
+    create_test_app_with_rate_limit(pool, 100, std::time::Duration::from_secs(60))
+}
+
+#[allow(dead_code)]
+pub fn create_test_app_with_rate_limit(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+) -> TestApp {
+    build_test_app(
+        pool,
+        max_attempts,
+        window,
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        0,
+        false,
+    )
+}
+
+#[allow(dead_code)]
+pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> TestApp {
+    build_test_app(
+        pool,
+        100,
+        std::time::Duration::from_secs(60),
+        cookie_secure,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        0,
+        false,
+    )
+}
+
+/// Like [`create_test_app_with_rate_limit`], but also selects which
+/// forwarding header (if any) is trusted, and which peers may supply it —
+/// for tests exercising `crate::net::client_ip` end to end through the
+/// router.
+#[allow(dead_code)]
+pub fn create_test_app_with_proxy_header(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+    header: liftlog::config::TrustedProxyHeader,
+    trusted_proxies: Vec<std::net::IpAddr>,
+) -> TestApp {
+    build_test_app(
+        pool,
+        max_attempts,
+        window,
+        false,
+        header,
+        trusted_proxies,
+        0,
+        false,
+    )
+}
+
+/// Like [`create_test_app_with_rate_limit`], but also configures the HSTS
+/// header — for tests exercising `middleware::security_headers` end to end
+/// through the router.
+#[allow(dead_code)]
+pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains: bool) -> TestApp {
+    build_test_app(
+        pool,
+        100,
+        std::time::Duration::from_secs(60),
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        max_age,
+        include_subdomains,
+    )
+}
+
+/// Single place that actually builds `AppState`; every other
+/// `create_test_app_*` helper delegates here.
+#[allow(clippy::too_many_arguments)]
+fn build_test_app(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+    cookie_secure: bool,
+    trusted_proxy_header: liftlog::config::TrustedProxyHeader,
+    trusted_proxies: Vec<std::net::IpAddr>,
+    hsts_max_age: u64,
+    hsts_include_subdomains: bool,
+) -> TestApp {
+    use liftlog::rate_limit::RateLimiter;
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
     use liftlog::state::AppState;
+    use std::sync::Arc;
 
     let app_state = AppState {
         user_repo: UserRepository::new(pool.clone()),
         exercise_repo: ExerciseRepository::new(pool.clone()),
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
+        login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
+        trusted_proxy_header,
+        trusted_proxies: Arc::new(trusted_proxies),
+        cookie_secure,
+        // Disabled by default so every existing test keeps observing
+        // current (no-HSTS) behaviour; only `create_test_app_with_hsts`
+        // opts in.
+        hsts_max_age,
+        hsts_include_subdomains,
+        // Fixed, deterministic salt (not random) so a test can assert a
+        // specific fingerprint if it ever needs to; nothing in this test
+        // suite currently relies on its exact value.
+        log_salt: Arc::new([7u8; 32]),
     };
 
     let router = liftlog::routes::create_router(app_state);
@@ -56,12 +162,32 @@ pub async fn create_session_token(pool: &DbPool, user: &User) -> String {
 
 #[allow(dead_code)]
 pub fn cookie_header(token: &str) -> String {
-    format!("session={token}")
+    format!("{}={token}", liftlog::session::session_cookie_name(false))
+}
+
+#[allow(dead_code)]
+pub fn cookie_header_secure(token: &str) -> String {
+    format!("{}={token}", liftlog::session::session_cookie_name(true))
 }
 
 #[allow(dead_code)]
 pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
     cookie_header(&create_session_token(pool, user).await)
+}
+
+/// Attach a `ConnectInfo` extension so `login_submit` sees a TCP peer, the way
+/// `into_make_service_with_connect_info` does in production. `oneshot` does not
+/// go through that layer.
+#[allow(dead_code)]
+pub fn with_peer(
+    mut request: axum::http::Request<axum::body::Body>,
+    peer: &str,
+) -> axum::http::Request<axum::body::Body> {
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        peer.parse::<std::net::SocketAddr>()
+            .expect("valid peer socket address"),
+    ));
+    request
 }
 
 #[allow(dead_code)]
@@ -87,6 +213,15 @@ pub fn expire_session(pool: &DbPool, token: &str) {
         [token],
     )
     .unwrap();
+}
+
+#[allow(dead_code)]
+pub fn age_session_creation(pool: &DbPool, token: &str, days_ago: u32) {
+    let conn = pool.get().unwrap();
+    let sql = format!(
+        "UPDATE sessions SET created_at = datetime('now', '-{days_ago} days') WHERE token = ?"
+    );
+    conn.execute(&sql, [token]).unwrap();
 }
 
 // Test data creation helpers
