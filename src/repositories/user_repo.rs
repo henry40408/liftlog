@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
-use crate::models::{FromSqliteRow, User, UserRole};
+use crate::models::{FromSqliteRow, User, UserListItem, UserRole};
 
 #[derive(Clone)]
 pub struct UserRepository {
@@ -55,13 +55,17 @@ impl UserRepository {
         .await?
     }
 
-    pub async fn find_all(&self) -> Result<Vec<User>> {
+    /// Columns are listed explicitly rather than `SELECT *` so `password_hash`
+    /// never leaves the DB for a read that only feeds the users list.
+    pub async fn find_all(&self) -> Result<Vec<UserListItem>> {
         let pool = self.pool.clone();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let mut stmt = conn.prepare("SELECT * FROM users ORDER BY created_at DESC")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, username, role, created_at FROM users ORDER BY created_at DESC",
+            )?;
             let users = stmt
-                .query_map([], User::from_row)?
+                .query_map([], UserListItem::from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(users)
         })
