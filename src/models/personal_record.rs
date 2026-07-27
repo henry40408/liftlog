@@ -28,7 +28,6 @@ impl FromSqliteRow for DynamicPR {
 #[derive(Debug, Clone, Serialize)]
 pub struct LastExerciseWeight {
     pub exercise_id: String,
-    pub exercise_name: String,
     pub weight: f64,
     pub rpe: Option<i32>,
     pub logged_at: DateTime<Utc>,
@@ -38,7 +37,6 @@ impl FromSqliteRow for LastExerciseWeight {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
         Ok(Self {
             exercise_id: row.get("exercise_id")?,
-            exercise_name: row.get("exercise_name")?,
             weight: row.get("weight")?,
             rpe: row.get("rpe")?,
             logged_at: row.get("logged_at")?,

@@ -373,13 +373,12 @@ impl WorkoutRepository {
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
-                "SELECT wl.exercise_id, e.name as exercise_name,
+                "SELECT wl.exercise_id,
                         wl.weight as weight,
                         wl.rpe as rpe,
                         MAX(wl.created_at) as logged_at
                  FROM workout_logs wl
                  JOIN workout_sessions ws ON wl.session_id = ws.id
-                 JOIN exercises e ON wl.exercise_id = e.id
                  WHERE ws.user_id = ?
                  GROUP BY wl.exercise_id
                  ORDER BY logged_at DESC",
@@ -437,7 +436,6 @@ impl WorkoutRepository {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
                 "SELECT
-                     ws.id   AS session_id,
                      ws.date AS date,
                      MAX(wl.weight) AS top_weight,
                      (SELECT wl2.reps
@@ -1476,7 +1474,6 @@ mod tests {
 
         assert_eq!(metrics.len(), 1);
         let m = &metrics[0];
-        assert_eq!(m.session_id, session.id);
         assert_eq!(m.date, date);
         assert!((m.top_weight - 110.0).abs() < 1e-9);
         assert_eq!(m.top_reps, 8);
