@@ -10,7 +10,7 @@ use crate::audit::{self, AuditContext};
 use crate::error::{AppError, Result};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
-use crate::models::{CreateUser, LoginCredentials, User, UserRole};
+use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole};
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
 
@@ -37,7 +37,7 @@ struct NewUserTemplate {
 #[template(path = "auth/users.html")]
 struct UsersListTemplate {
     user: AuthUser,
-    users: Vec<User>,
+    users: Vec<UserListItem>,
 }
 
 /// Returns the validation error message, or `None` if the form is valid.

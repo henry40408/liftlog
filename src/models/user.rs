@@ -61,6 +61,29 @@ impl FromSqliteRow for User {
     }
 }
 
+/// Row shape for the admin users list. Deliberately omits `password_hash` —
+/// the list never renders it, and pulling every user's Argon2 hash into a
+/// template context is exposure with no upside.
+#[derive(Debug, Clone)]
+pub struct UserListItem {
+    pub id: String,
+    pub username: String,
+    pub role: UserRole,
+    pub created_at: DateTime<Utc>,
+}
+
+impl FromSqliteRow for UserListItem {
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        let role_str: String = row.get("role")?;
+        Ok(Self {
+            id: row.get("id")?,
+            username: row.get("username")?,
+            role: UserRole::parse(&role_str),
+            created_at: row.get("created_at")?,
+        })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateUser {
     pub username: String,
