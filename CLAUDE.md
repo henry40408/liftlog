@@ -59,7 +59,7 @@ npx playwright test sharing               # filter by feature filename
 - **Confirm dialogs.** Workout-delete, set-delete, exercise-delete, revoke-share, promote-user, delete-user all use `window.confirm()` — handle with `page.once('dialog', d => d.accept())` before the click.
 - **Guest views.** Public share URLs are tested via `browser.newContext()` so the logged-in cookie doesn't leak in.
 - **HTML form validation can swallow the request.** The setup short-password scenario calls `form.noValidate = true` before submit so the request actually reaches the server; otherwise `minlength="6"` blocks it client-side and the server-side defense is untested.
-- **Playwright is pinned to `~1.59.1`.** Playwright 1.60 moved internal paths that `playwright-bdd@8.5` still imports; don't bump without verifying the import surface.
+- **Keep Playwright in step with the other repos sharing the browser cache.** `~/.cache/ms-playwright` (macOS: `~/Library/Caches/ms-playwright`) is shared by every checkout on the machine, and each `playwright-core` pins one exact chromium revision. A repo left on an older Playwright asks for a revision nobody else has, so `playwright install` can't reuse the cache and falls back to a CDN download — which has only a 30s *idle* socket timeout and no wall-clock cap, so a throttled connection stalls indefinitely instead of failing. `playwright install` also garbage-collects revisions no registered checkout references, so a lagging repo gets its browser deleted and re-downloaded repeatedly. Bump this repo alongside the others; `npm` is in `dependabot.yml` (7-day cooldown) to keep that from drifting again.
 
 ## Project conventions
 

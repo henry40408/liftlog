@@ -39,3 +39,14 @@ updates:
       docker:
         patterns:
           - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/tests/e2e"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns:
+          - "*"
