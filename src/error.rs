@@ -15,19 +15,11 @@ pub enum AppError {
     #[error("Not found: {0}")]
     NotFound(String),
 
-    #[error("Unauthorized")]
-    #[allow(dead_code)]
-    Unauthorized,
-
     #[error("Forbidden: {0}")]
     Forbidden(String),
 
     #[error("Bad request: {0}")]
     BadRequest(String),
-
-    #[error("Validation error: {0}")]
-    #[allow(dead_code)]
-    Validation(String),
 
     #[error("Internal error: {0}")]
     Internal(String),
@@ -66,11 +58,8 @@ impl IntoResponse for AppError {
                 )
             }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            AppError::BadRequest(msg) | AppError::Validation(msg) => {
-                (StatusCode::BAD_REQUEST, msg.clone())
-            }
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);
                 (
