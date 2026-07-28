@@ -84,22 +84,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    #[allow(dead_code)]
-    pub async fn find_sessions_by_user(&self, user_id: &str) -> Result<Vec<WorkoutSession>> {
-        let pool = self.pool.clone();
-        let user_id = user_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt = conn
-                .prepare("SELECT * FROM workout_sessions WHERE user_id = ? ORDER BY date DESC")?;
-            let sessions = stmt
-                .query_map([&user_id], WorkoutSession::from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(sessions)
-        })
-        .await?
-    }
-
     pub async fn find_sessions_by_user_paginated(
         &self,
         user_id: &str,
@@ -264,7 +248,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    #[allow(dead_code)]
     pub async fn find_log_by_id(&self, id: &str) -> Result<Option<WorkoutLog>> {
         let pool = self.pool.clone();
         let id = id.to_string();
@@ -762,7 +745,10 @@ mod tests {
         repo.create_session("user1", date2, None).await.unwrap();
         repo.create_session("user1", date3, None).await.unwrap();
 
-        let sessions = repo.find_sessions_by_user("user1").await.unwrap();
+        let sessions = repo
+            .find_sessions_by_user_paginated("user1", 10, 0)
+            .await
+            .unwrap();
 
         assert_eq!(sessions.len(), 3);
         // Should be ordered by date DESC
