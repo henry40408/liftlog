@@ -11,7 +11,7 @@ askama = "0.16"
 # (build failure in #118). 0.3.53 restores compilation via a deprecated shim that
 # time says it will remove — so 0.3.54+ is expected to break cookie again until it
 # ships a fix. Hold at 0.3.53 until cookie 0.18.x adapts.
-time = ">=0.3.53, <0.3.54"
+time = ">=0.3.53, <0.3.55"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
