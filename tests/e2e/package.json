@@ -12,7 +12,7 @@
     "install-browsers": "playwright install --with-deps chromium"
   },
   "devDependencies": {
-    "@cucumber/cucumber": "^11.1.0",
+    "@cucumber/cucumber": "^13.2.0",
     "@playwright/test": "^1.61.1",
     "playwright-bdd": "^9.2.0"
   }
