@@ -30,7 +30,6 @@ impl UserRepository {
         .await?
     }
 
-    #[allow(dead_code)]
     pub async fn find_by_id(&self, id: &str) -> Result<Option<User>> {
         let pool = self.pool.clone();
         let id = id.to_string();

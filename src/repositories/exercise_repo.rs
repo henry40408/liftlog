@@ -27,36 +27,6 @@ impl ExerciseRepository {
         .await?
     }
 
-    #[allow(dead_code)]
-    pub async fn find_all(&self) -> Result<Vec<Exercise>> {
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt = conn.prepare("SELECT * FROM exercises ORDER BY category, name")?;
-            let exercises = stmt
-                .query_map([], Exercise::from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(exercises)
-        })
-        .await?
-    }
-
-    #[allow(dead_code)]
-    pub async fn find_by_category(&self, category: &str) -> Result<Vec<Exercise>> {
-        let pool = self.pool.clone();
-        let category = category.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt =
-                conn.prepare("SELECT * FROM exercises WHERE category = ? ORDER BY name")?;
-            let exercises = stmt
-                .query_map([&category], Exercise::from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(exercises)
-        })
-        .await?
-    }
-
     /// Fetch an exercise owned by `user_id`. Returns `NotFound` if no such row,
     /// `Forbidden` if it exists but belongs to another user.
     pub async fn find_owned(&self, id: &str, user_id: &str) -> Result<Exercise> {
