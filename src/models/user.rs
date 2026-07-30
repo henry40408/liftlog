@@ -84,6 +84,16 @@ impl FromSqliteRow for UserListItem {
     }
 }
 
+/// Minimum accepted password length, per the OWASP Authentication Cheat
+/// Sheet's *Implement Proper Password Strength Controls*.
+///
+/// Enforced server-side in `validate_credentials` (signup, admin-created
+/// users) and in the settings password-change handler; the `minlength` on the
+/// signup forms only saves a round trip and is not the control. Changing this
+/// constant does not invalidate passwords already stored — existing users keep
+/// working until they next set one.
+pub const MIN_PASSWORD_LEN: usize = 8;
+
 #[derive(Debug, Deserialize)]
 pub struct CreateUser {
     pub username: String,

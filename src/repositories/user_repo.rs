@@ -72,46 +72,45 @@ impl UserRepository {
     }
 
     pub async fn create(&self, username: &str, password: &str, role: UserRole) -> Result<User> {
-        let password_hash = hash_password(password)?;
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let password = password.to_string();
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let username = username.to_string();
 
-        let pool = self.pool.clone();
-        let user = User {
-            id: id.clone(),
-            username: username.clone(),
-            password_hash,
-            role,
-            created_at: now,
-        };
-        let user_clone = user.clone();
+        tokio::task::spawn_blocking(move || {
+            let password_hash = hash_password(&password)?;
+            let user = User {
+                id,
+                username,
+                password_hash,
+                role,
+                created_at: now,
+            };
 
-        tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = pool.get()?;
             conn.execute(
                 "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    user_clone.id,
-                    user_clone.username,
-                    user_clone.password_hash,
-                    user_clone.role.as_str(),
-                    user_clone.created_at
+                    user.id,
+                    user.username,
+                    user.password_hash,
+                    user.role.as_str(),
+                    user.created_at
                 ],
             )?;
-            Ok(())
+            Ok(user)
         })
-        .await??;
-
-        Ok(user)
+        .await?
     }
 
     pub async fn change_password(&self, user_id: &str, new_password: &str) -> Result<bool> {
-        let password_hash = hash_password(new_password)?;
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
+        let new_password = new_password.to_string();
 
         tokio::task::spawn_blocking(move || {
+            let password_hash = hash_password(&new_password)?;
             let conn = pool.get()?;
             let rows = conn.execute(
                 "UPDATE users SET password_hash = ? WHERE id = ?",
@@ -122,19 +121,44 @@ impl UserRepository {
         .await?
     }
 
+    /// Looks the user up and verifies the password inside a single blocking
+    /// task, rather than composing `find_by_username` with a verify on the
+    /// caller's thread.
     pub async fn verify_password(&self, username: &str, password: &str) -> Result<Option<User>> {
-        let user = self.find_by_username(username).await?;
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let password = password.to_string();
 
-        match user {
-            Some(user) => {
-                if verify_password(password, &user.password_hash)? {
-                    Ok(Some(user))
-                } else {
-                    Ok(None)
-                }
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare("SELECT * FROM users WHERE username = ?")?;
+            let user = stmt.query_row([&username], User::from_row).optional()?;
+
+            let Some(user) = user else {
+                // Spend the same Argon2 verification an existing username would
+                // have cost. Without it the two paths differ by the whole cost
+                // of a hash — tens of milliseconds against a bare SQLite lookup
+                // — which is measurable from a browser without any statistical
+                // work, and turns "is this a real account?" into a single
+                // request. The generic "Invalid username or password" message
+                // alone does not close that: the timing says what the wording
+                // refuses to.
+                //
+                // The result is deliberately discarded; it can only be
+                // `Ok(false)` (the supplied password will not match a hash of
+                // DUMMY_PASSWORD) or a parse error that must not distinguish
+                // this path from the other one either.
+                let _ = verify_password(&password, dummy_password_hash());
+                return Ok(None);
+            };
+
+            if verify_password(&password, &user.password_hash)? {
+                Ok(Some(user))
+            } else {
+                Ok(None)
             }
-            None => Ok(None),
-        }
+        })
+        .await?
     }
 
     pub async fn delete(&self, id: &str) -> Result<bool> {
@@ -163,6 +187,29 @@ impl UserRepository {
     }
 }
 
+/// Arbitrary; it is never a real credential. Only the hash derived from it is
+/// used, and only to burn Argon2 time on the unknown-username login path.
+const DUMMY_PASSWORD: &str = "liftlog-unknown-user-placeholder";
+
+/// A valid Argon2 hash of [`DUMMY_PASSWORD`], for `verify_password`'s
+/// unknown-username branch.
+///
+/// Computed once at first use rather than embedded as a literal, so it always
+/// carries whatever parameters `Argon2::default()` currently produces. A
+/// hardcoded PHC string would silently stop matching the real work — and
+/// reopen the timing gap — the day that default changes.
+fn dummy_password_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| hash_password(DUMMY_PASSWORD).expect("hashing a fixed literal cannot fail"))
+}
+
+/// Both of these run `Argon2::default()` — m=19 MiB, t=2, p=1, the parameters
+/// OWASP recommends — which is tens of milliseconds of CPU per call, not a
+/// negligible cost. Every caller in this module therefore invokes them from
+/// inside `spawn_blocking`: on a tokio worker thread they would each pin a
+/// core for that long, and `POST /settings/password` (two Argon2 operations
+/// per request, and no rate limit, unlike login) is reachable by any
+/// authenticated user in a loop.
 fn hash_password(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
@@ -344,6 +391,37 @@ mod tests {
         let result = repo.verify_password("nouser", "anypass").await.unwrap();
 
         assert!(result.is_none());
+    }
+
+    /// The timing defence only holds while the dummy hash costs the same as a
+    /// real one, so pin the algorithm and cost parameters against a hash this
+    /// codebase actually stores. Asserting on elapsed time instead would be
+    /// flaky under a loaded CI runner; this catches the failure that matters —
+    /// the dummy drifting away from `Argon2::default()`.
+    #[tokio::test]
+    async fn dummy_password_hash_matches_a_real_hash_parameter_for_parameter() {
+        let pool = setup_test_db();
+        let repo = UserRepository::new(pool);
+
+        let real = repo
+            .create("timinguser", "somepassword", UserRole::User)
+            .await
+            .unwrap()
+            .password_hash;
+
+        let real = PasswordHash::new(&real).unwrap();
+        let dummy = PasswordHash::new(dummy_password_hash()).unwrap();
+
+        assert_eq!(dummy.algorithm, real.algorithm);
+        assert_eq!(dummy.params, real.params);
+    }
+
+    /// The salt must be per-hash, so the dummy is not a fixed string that
+    /// could be recognised in a database dump or compared across deployments.
+    #[test]
+    fn dummy_password_hash_carries_its_own_salt() {
+        let dummy = PasswordHash::new(dummy_password_hash()).unwrap();
+        assert!(dummy.salt.is_some());
     }
 
     #[tokio::test]

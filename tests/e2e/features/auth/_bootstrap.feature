@@ -8,6 +8,6 @@ Feature: First-time setup
     When I visit "/auth/login"
     Then I see the setup page
 
-  Scenario: Setup rejects passwords shorter than 6 characters
+  Scenario: Setup rejects passwords shorter than 8 characters
     When I submit the setup form with username "tiny" and password "abc"
-    Then I see the setup error "Password must be at least 6 characters"
+    Then I see the setup error "Password must be at least 8 characters"

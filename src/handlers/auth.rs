@@ -10,7 +10,7 @@ use crate::audit::{self, AuditContext};
 use crate::error::{AppError, Result};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
-use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole};
+use crate::models::{CreateUser, LoginCredentials, MIN_PASSWORD_LEN, UserListItem, UserRole};
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
 
@@ -41,11 +41,17 @@ struct UsersListTemplate {
 }
 
 /// Returns the validation error message, or `None` if the form is valid.
-fn validate_credentials(form: &CreateUser) -> Option<&'static str> {
+///
+/// The length message is formatted from `MIN_PASSWORD_LEN` rather than
+/// spelling the number out, so raising the minimum cannot leave the form
+/// telling users the old one.
+fn validate_credentials(form: &CreateUser) -> Option<String> {
     if form.username.trim().is_empty() {
-        Some("Username is required")
-    } else if form.password.len() < 6 {
-        Some("Password must be at least 6 characters")
+        Some("Username is required".to_string())
+    } else if form.password.len() < MIN_PASSWORD_LEN {
+        Some(format!(
+            "Password must be at least {MIN_PASSWORD_LEN} characters"
+        ))
     } else {
         None
     }
@@ -163,7 +169,7 @@ pub async fn setup_submit(
 
     if let Some(message) = validate_credentials(&form) {
         let template = SetupTemplate {
-            error: Some(message.to_string()),
+            error: Some(message),
         };
         return Ok(Html(template.render()?).into_response());
     }
@@ -252,7 +258,7 @@ pub async fn new_user_submit(
     if let Some(message) = validate_credentials(&form) {
         let template = NewUserTemplate {
             user: admin_user.0,
-            error: Some(message.to_string()),
+            error: Some(message),
         };
         return Ok(Html(template.render()?).into_response());
     }

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use crate::audit::{self, AuditContext};
 use crate::error::Result;
 use crate::middleware::AuthUser;
+use crate::models::MIN_PASSWORD_LEN;
 use crate::repositories::SessionListRow;
 use crate::session::token_fingerprint;
 use crate::state::AppState;
@@ -59,15 +60,17 @@ pub async fn change_password(
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
     let validation_error = if form.new_password != form.confirm_password {
-        Some("New passwords do not match")
-    } else if form.new_password.len() < 6 {
-        Some("New password must be at least 6 characters")
+        Some("New passwords do not match".to_string())
+    } else if form.new_password.len() < MIN_PASSWORD_LEN {
+        Some(format!(
+            "New password must be at least {MIN_PASSWORD_LEN} characters"
+        ))
     } else {
         None
     };
 
     if let Some(message) = validation_error {
-        return render_page(&state, auth_user, Some(message.to_string()), None).await;
+        return render_page(&state, auth_user, Some(message), None).await;
     }
 
     let verified = state
