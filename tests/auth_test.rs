@@ -538,11 +538,54 @@ async fn test_setup_rejects_short_password() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let html = String::from_utf8_lossy(&body);
-    assert!(html.contains("Password must be at least 6 characters"));
+    assert!(html.contains("Password must be at least 8 characters"));
 
     let user_repo = liftlog::repositories::UserRepository::new(pool);
     let count = user_repo.count().await.unwrap();
     assert_eq!(count, 0);
+}
+
+/// Pins the boundary itself rather than "some short password is rejected":
+/// one character under the minimum must fail and exactly the minimum must
+/// succeed, so an off-by-one in the comparison cannot pass.
+#[tokio::test]
+async fn test_setup_password_length_boundary() {
+    for (password, should_create) in [("7chars!", false), ("8chars!!", true)] {
+        let pool = common::setup_test_db();
+        let test_app = common::create_test_app_with_session(pool.clone());
+
+        let response = test_app
+            .router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/setup")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("username=admin&password={password}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let user_repo = liftlog::repositories::UserRepository::new(pool);
+        let count = user_repo.count().await.unwrap();
+        assert_eq!(
+            count,
+            i64::from(should_create),
+            "password {:?} ({} chars) should {}have created a user",
+            password,
+            password.len(),
+            if should_create { "" } else { "not " }
+        );
+        assert_eq!(
+            response.status(),
+            if should_create {
+                StatusCode::SEE_OTHER
+            } else {
+                StatusCode::OK
+            }
+        );
+    }
 }
 
 #[tokio::test]

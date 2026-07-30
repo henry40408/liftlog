@@ -187,7 +187,7 @@ async fn test_change_password_too_short() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
-    assert!(body_str.contains("at least 6 characters"));
+    assert!(body_str.contains("at least 8 characters"));
 }
 
 #[tokio::test]
