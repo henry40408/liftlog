@@ -6,7 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
-use liftlog::repositories::UserRepository;
+use liftlog::repositories::{SessionRepository, UserRepository, ValidateOutcome};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -253,6 +253,55 @@ async fn test_admin_can_promote_user() {
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_id(&user.id).await.unwrap().unwrap();
     assert_eq!(found.role, UserRole::Admin);
+}
+
+/// A role change is a privilege-level change, so every session the promoted
+/// user holds must be destroyed: a token stolen while the account was an
+/// ordinary user must not silently become an admin token. The admin doing the
+/// promoting keeps their own session.
+#[tokio::test]
+async fn test_promote_destroys_the_promoted_users_sessions() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
+
+    let session_repo = SessionRepository::new(pool.clone());
+    let victim_token = session_repo.create(&user.id).await.unwrap();
+    let admin_session = common::create_session_cookie(&pool, &admin).await;
+    let cookie_header = common::extract_cookie_header(&admin_session);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/promote", user.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    assert!(
+        matches!(
+            session_repo
+                .validate_and_touch(&victim_token)
+                .await
+                .unwrap(),
+            ValidateOutcome::Unknown
+        ),
+        "the promoted user's pre-existing session must be destroyed"
+    );
+    assert_eq!(
+        session_repo.count_for_user(&admin.id).await.unwrap(),
+        1,
+        "the promoting admin's own session must survive"
+    );
 }
 
 #[tokio::test]
