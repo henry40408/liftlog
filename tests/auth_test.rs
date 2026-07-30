@@ -1723,3 +1723,101 @@ async fn test_hsts_header_present_on_csrf_rejection() {
         "max-age=31536000"
     );
 }
+
+/// The four baseline headers, unlike HSTS, are unconditional — no env var
+/// gates them, so a deployment cannot end up without them by omission.
+fn assert_baseline_headers(headers: &axum::http::HeaderMap) {
+    assert_eq!(
+        headers.get("content-security-policy").unwrap(),
+        "frame-ancestors 'none'"
+    );
+    assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(
+        headers.get("referrer-policy").unwrap(),
+        "strict-origin-when-cross-origin"
+    );
+}
+
+#[tokio::test]
+async fn test_baseline_security_headers_on_a_normal_response() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_session(pool).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_baseline_headers(response.headers());
+}
+
+/// The clickjacking defence is worthless if it only ships on responses that
+/// reach a handler. These two cover the paths that short-circuit inside a
+/// middleware instead — the CSRF guard's 403 and the auth redirect's 302 —
+/// which is what pins the layer's registration point.
+#[tokio::test]
+async fn test_baseline_security_headers_on_csrf_rejection() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_session(pool).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workouts")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("sec-fetch-site", "cross-site")
+                .body(Body::from("date=2024-01-15&notes=Leg%20day"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_baseline_headers(response.headers());
+}
+
+#[tokio::test]
+async fn test_baseline_security_headers_on_auth_redirect() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_session(pool).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_baseline_headers(response.headers());
+}
+
+/// The public share page is the one route a third party is meant to open, so
+/// it is also the one most likely to be embedded — it must not be an exception.
+#[tokio::test]
+async fn test_baseline_security_headers_on_the_public_share_route() {
+    let pool = common::setup_test_db();
+    let app = common::create_test_app_with_session(pool).router;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/shared/no-such-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_baseline_headers(response.headers());
+}
