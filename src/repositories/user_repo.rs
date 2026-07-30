@@ -72,46 +72,45 @@ impl UserRepository {
     }
 
     pub async fn create(&self, username: &str, password: &str, role: UserRole) -> Result<User> {
-        let password_hash = hash_password(password)?;
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let password = password.to_string();
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let username = username.to_string();
 
-        let pool = self.pool.clone();
-        let user = User {
-            id: id.clone(),
-            username: username.clone(),
-            password_hash,
-            role,
-            created_at: now,
-        };
-        let user_clone = user.clone();
+        tokio::task::spawn_blocking(move || {
+            let password_hash = hash_password(&password)?;
+            let user = User {
+                id,
+                username,
+                password_hash,
+                role,
+                created_at: now,
+            };
 
-        tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = pool.get()?;
             conn.execute(
                 "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    user_clone.id,
-                    user_clone.username,
-                    user_clone.password_hash,
-                    user_clone.role.as_str(),
-                    user_clone.created_at
+                    user.id,
+                    user.username,
+                    user.password_hash,
+                    user.role.as_str(),
+                    user.created_at
                 ],
             )?;
-            Ok(())
+            Ok(user)
         })
-        .await??;
-
-        Ok(user)
+        .await?
     }
 
     pub async fn change_password(&self, user_id: &str, new_password: &str) -> Result<bool> {
-        let password_hash = hash_password(new_password)?;
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
+        let new_password = new_password.to_string();
 
         tokio::task::spawn_blocking(move || {
+            let password_hash = hash_password(&new_password)?;
             let conn = pool.get()?;
             let rows = conn.execute(
                 "UPDATE users SET password_hash = ? WHERE id = ?",
@@ -122,19 +121,31 @@ impl UserRepository {
         .await?
     }
 
+    /// Looks the user up and verifies the password inside a single blocking
+    /// task, rather than composing `find_by_username` with a verify on the
+    /// caller's thread.
     pub async fn verify_password(&self, username: &str, password: &str) -> Result<Option<User>> {
-        let user = self.find_by_username(username).await?;
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let password = password.to_string();
 
-        match user {
-            Some(user) => {
-                if verify_password(password, &user.password_hash)? {
-                    Ok(Some(user))
-                } else {
-                    Ok(None)
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare("SELECT * FROM users WHERE username = ?")?;
+            let user = stmt.query_row([&username], User::from_row).optional()?;
+
+            match user {
+                Some(user) => {
+                    if verify_password(&password, &user.password_hash)? {
+                        Ok(Some(user))
+                    } else {
+                        Ok(None)
+                    }
                 }
+                None => Ok(None),
             }
-            None => Ok(None),
-        }
+        })
+        .await?
     }
 
     pub async fn delete(&self, id: &str) -> Result<bool> {
@@ -163,6 +174,13 @@ impl UserRepository {
     }
 }
 
+/// Both of these run `Argon2::default()` — m=19 MiB, t=2, p=1, the parameters
+/// OWASP recommends — which is tens of milliseconds of CPU per call, not a
+/// negligible cost. Every caller in this module therefore invokes them from
+/// inside `spawn_blocking`: on a tokio worker thread they would each pin a
+/// core for that long, and `POST /settings/password` (two Argon2 operations
+/// per request, and no rate limit, unlike login) is reachable by any
+/// authenticated user in a loop.
 fn hash_password(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
