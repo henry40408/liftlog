@@ -71,6 +71,8 @@ On logout, liftlog sends `Clear-Site-Data: "cache", "cookies", "storage"` so the
 
 Promoting a user to admin logs that user out of every device. A privilege-level change requires reauthentication (OWASP Session Management Cheat Sheet, *Renew the Session ID After Any Privilege Level Change*), so a token stolen while the account was an ordinary user cannot silently inherit admin rights.
 
+A failed login costs the same whether or not the username exists. The response wording is already generic, and an unknown username now spends an Argon2 verification against a throwaway hash so the two paths cannot be told apart by response time either — otherwise a single request would reveal whether an account exists, letting an attacker aim the login rate limit at real accounts only.
+
 Prefer sending HSTS from your reverse proxy. liftlog does not terminate TLS and cannot tell whether a request really arrived over HTTPS; the layer that terminates TLS does. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch for deployments that cannot set headers at the proxy. Before enabling it, make sure the whole domain — and, with `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS`, every subdomain — serves working HTTPS: this declaration cannot be withdrawn from the server side, only waited out until `max-age` expires. There is deliberately no `preload` option; configure that on your proxy if you want it. Browsers ignore the header on plain-HTTP origins, so setting it there achieves nothing. If your proxy also sends HSTS, set it in only one place.
 
 ## Audit Log
