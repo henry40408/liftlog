@@ -122,7 +122,6 @@ async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
     // The delete should have failed. Database error → INTERNAL_SERVER_ERROR.
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    // Victim's sessions should still exist.
     {
         let conn = pool.get().unwrap();
         let count: i64 = conn
@@ -138,7 +137,6 @@ async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
         );
     }
 
-    // Victim's user row should still exist.
     {
         let conn = pool.get().unwrap();
         let count: i64 = conn
@@ -279,7 +277,6 @@ async fn test_dashboard_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -289,7 +286,6 @@ async fn test_login_valid_credentials() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a test user
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
     let response = test_app
@@ -305,11 +301,9 @@ async fn test_login_valid_credentials() {
         .await
         .unwrap();
 
-    // Should redirect to dashboard on success
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/");
 
-    // Should set a session cookie
     let set_cookie = response.headers().get(header::SET_COOKIE);
     assert!(set_cookie.is_some());
     let cookie_str = set_cookie.unwrap().to_str().unwrap();
@@ -321,7 +315,6 @@ async fn test_login_invalid_credentials() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a test user
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
     let response = test_app
@@ -378,7 +371,6 @@ async fn test_logout_clears_session() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create and login a user
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -396,7 +388,6 @@ async fn test_logout_clears_session() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 
@@ -488,11 +479,9 @@ async fn test_setup_creates_admin_user() {
         .await
         .unwrap();
 
-    // Should redirect to dashboard after successful setup
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/");
 
-    // Verify user was created with admin role
     let user_repo = liftlog::repositories::UserRepository::new(pool);
     let user = user_repo.find_by_username("admin").await.unwrap();
     assert!(user.is_some());
@@ -523,7 +512,6 @@ async fn test_setup_rejects_empty_username() {
     let html = String::from_utf8_lossy(&body);
     assert!(html.contains("Username is required"));
 
-    // No user should have been created.
     let user_repo = liftlog::repositories::UserRepository::new(pool);
     let count = user_repo.count().await.unwrap();
     assert_eq!(count, 0);
@@ -562,7 +550,6 @@ async fn test_setup_redirects_when_users_exist() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an existing user
     common::create_test_user(&pool, "existing", "password", UserRole::User).await;
 
     let response = test_app
@@ -576,7 +563,6 @@ async fn test_setup_redirects_when_users_exist() {
         .await
         .unwrap();
 
-    // Should redirect to login when users already exist
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -1283,7 +1269,6 @@ async fn sliding_session_reissues_cookie_when_throttle_elapsed(cookie_secure: bo
         .await
         .unwrap();
 
-    // Should reach the dashboard (no redirect).
     assert_ne!(response.status(), StatusCode::SEE_OTHER);
 
     // And Set-Cookie should have been re-issued with a fresh Max-Age, under
@@ -1386,7 +1371,6 @@ async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
     let test_app = common::create_test_app_with_cookie_secure(pool.clone(), true);
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
-    // Login.
     let response = test_app
         .router
         .clone()
@@ -1421,7 +1405,6 @@ async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
     // Age the session so the next request triggers a sliding touch.
     common::age_session_touch(&pool, &token, 2);
 
-    // Sliding refresh.
     let response = test_app
         .router
         .clone()
@@ -1447,7 +1430,6 @@ async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
     );
     assert!(set_cookie.contains("Max-Age=604800"));
 
-    // Logout.
     let response = test_app
         .router
         .clone()

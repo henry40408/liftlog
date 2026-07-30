@@ -336,13 +336,31 @@ pub async fn delete_user(
 
 pub async fn promote_user(
     State(state): State<AppState>,
-    _admin_user: AdminUser,
+    admin_user: AdminUser,
+    audit_ctx: AuditContext,
     Path(user_id): Path<String>,
 ) -> Result<Response> {
-    state
+    let promoted = state
         .user_repo
         .update_role(&user_id, UserRole::Admin)
         .await?;
+
+    // OWASP Session Management Cheat Sheet, "Renew the Session ID After Any
+    // Privilege Level Change": a role change is exactly that. Permissions
+    // themselves already take effect immediately — `validate_and_touch`
+    // re-reads `users.role` on every request — so the risk being closed here
+    // is the reverse one: a token stolen while the account was an ordinary
+    // user would silently inherit admin the moment this runs, with no
+    // reauthentication anywhere in between. Dropping every session forces the
+    // promoted user to log in again under their new privilege level.
+    //
+    // Gated on `promoted` so a promote against a nonexistent id doesn't log a
+    // role_change that never happened.
+    if promoted {
+        let destroyed = state.session_repo.delete_all_for_user(&user_id).await?;
+        let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
+        audit::sessions_destroyed_bulk(&audit_ctx, &actor_fp, &user_id, destroyed, "role_change");
+    }
 
     Ok(Redirect::to("/users").into_response())
 }

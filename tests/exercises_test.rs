@@ -98,7 +98,6 @@ async fn test_create_exercise_success() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/exercises");
 
-    // Verify exercise was created
     let exercise_repo = ExerciseRepository::new(pool);
     let exercises = exercise_repo
         .find_available_for_user(&user.id)
@@ -118,7 +117,6 @@ async fn test_exercises_list_shows_exercises() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    // Create some exercises
     common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     common::create_test_exercise(&pool, &user.id, "Squat", "legs").await;
 
@@ -202,7 +200,6 @@ async fn test_update_exercise_success() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/exercises");
 
-    // Verify exercise was updated
     let exercise_repo = ExerciseRepository::new(pool);
     let updated = exercise_repo
         .find_by_id(&exercise.id)
@@ -239,7 +236,6 @@ async fn test_delete_exercise_success() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/exercises");
 
-    // Verify exercise was deleted
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
     assert!(found.is_none());
@@ -255,10 +251,8 @@ async fn test_cannot_edit_others_exercise() {
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
 
-    // Create exercise for user2
     let exercise = common::create_test_exercise(&pool, &user2.id, "Bench Press", "chest").await;
 
-    // Login as user1
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
@@ -306,7 +300,6 @@ async fn test_cannot_update_others_exercise() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // Verify exercise was NOT updated
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo
         .find_by_id(&exercise.id)
@@ -344,7 +337,6 @@ async fn test_cannot_delete_others_exercise() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // Verify exercise was NOT deleted
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
     assert!(found.is_some());
@@ -494,7 +486,6 @@ async fn test_update_exercise_empty_name_rejected() {
 
     assert!(body_str.contains("required") || body_str.contains("Exercise name"));
 
-    // Verify exercise was NOT updated
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo
         .find_by_id(&exercise.id)
@@ -548,7 +539,6 @@ async fn test_delete_exercise_referenced_by_log_returns_bad_request() {
     let body_str = String::from_utf8_lossy(&body);
     assert!(body_str.contains("used by existing workout logs"));
 
-    // Verify exercise was NOT deleted
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
     assert!(found.is_some());

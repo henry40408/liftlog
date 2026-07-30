@@ -6,7 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
-use liftlog::repositories::UserRepository;
+use liftlog::repositories::{SessionRepository, UserRepository, ValidateOutcome};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -14,7 +14,6 @@ async fn test_admin_can_access_users_page() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an admin user
     let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
     let session_cookie = common::create_session_cookie(&pool, &admin).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -45,7 +44,6 @@ async fn test_user_can_access_users_page() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a regular user
     let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -72,7 +70,6 @@ async fn test_user_cannot_access_new_user_page() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a regular user
     let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -98,7 +95,6 @@ async fn test_admin_can_access_new_user_page() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an admin user
     let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
     let session_cookie = common::create_session_cookie(&pool, &admin).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -123,7 +119,6 @@ async fn test_admin_can_delete_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an admin and a regular user
     let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
     let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
 
@@ -143,11 +138,9 @@ async fn test_admin_can_delete_user() {
         .await
         .unwrap();
 
-    // Should redirect to users list
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/users");
 
-    // Verify user was deleted
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_id(&user.id).await.unwrap();
     assert!(found.is_none());
@@ -158,7 +151,6 @@ async fn test_user_cannot_delete_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create two regular users
     let user1 = common::create_test_user(&pool, "user1", "password", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password", UserRole::User).await;
 
@@ -178,10 +170,8 @@ async fn test_user_cannot_delete_user() {
         .await
         .unwrap();
 
-    // Should get 403 Forbidden
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // User should still exist
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_id(&user2.id).await.unwrap();
     assert!(found.is_some());
@@ -192,7 +182,6 @@ async fn test_admin_cannot_self_delete() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an admin
     let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
 
     let session_cookie = common::create_session_cookie(&pool, &admin).await;
@@ -214,7 +203,6 @@ async fn test_admin_cannot_self_delete() {
     // Should get 400 Bad Request (cannot delete yourself)
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    // Admin should still exist
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_id(&admin.id).await.unwrap();
     assert!(found.is_some());
@@ -225,7 +213,6 @@ async fn test_admin_can_promote_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an admin and a regular user
     let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
     let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
 
@@ -245,14 +232,61 @@ async fn test_admin_can_promote_user() {
         .await
         .unwrap();
 
-    // Should redirect to users list
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/users");
 
-    // Verify user was promoted to admin
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_id(&user.id).await.unwrap().unwrap();
     assert_eq!(found.role, UserRole::Admin);
+}
+
+/// A role change is a privilege-level change, so every session the promoted
+/// user holds must be destroyed: a token stolen while the account was an
+/// ordinary user must not silently become an admin token. The admin doing the
+/// promoting keeps their own session.
+#[tokio::test]
+async fn test_promote_destroys_the_promoted_users_sessions() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
+
+    let session_repo = SessionRepository::new(pool.clone());
+    let victim_token = session_repo.create(&user.id).await.unwrap();
+    let admin_session = common::create_session_cookie(&pool, &admin).await;
+    let cookie_header = common::extract_cookie_header(&admin_session);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/promote", user.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    assert!(
+        matches!(
+            session_repo
+                .validate_and_touch(&victim_token)
+                .await
+                .unwrap(),
+            ValidateOutcome::Unknown
+        ),
+        "the promoted user's pre-existing session must be destroyed"
+    );
+    assert_eq!(
+        session_repo.count_for_user(&admin.id).await.unwrap(),
+        1,
+        "the promoting admin's own session must survive"
+    );
 }
 
 #[tokio::test]
@@ -260,7 +294,6 @@ async fn test_user_cannot_promote_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create two regular users
     let user1 = common::create_test_user(&pool, "user1", "password", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password", UserRole::User).await;
 
@@ -280,7 +313,6 @@ async fn test_user_cannot_promote_user() {
         .await
         .unwrap();
 
-    // Should get 403 Forbidden
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     // User2 should still be a regular user
@@ -294,7 +326,6 @@ async fn test_admin_can_create_new_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create an admin
     let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
 
     let session_cookie = common::create_session_cookie(&pool, &admin).await;
@@ -314,11 +345,9 @@ async fn test_admin_can_create_new_user() {
         .await
         .unwrap();
 
-    // Should redirect to users list
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/users");
 
-    // Verify new user was created
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_username("newuser").await.unwrap();
     assert!(found.is_some());
@@ -330,7 +359,6 @@ async fn test_user_cannot_create_new_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a regular user
     let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
 
     let session_cookie = common::create_session_cookie(&pool, &user).await;
@@ -350,10 +378,8 @@ async fn test_user_cannot_create_new_user() {
         .await
         .unwrap();
 
-    // Should get 403 Forbidden
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // User should not be created
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_username("newuser").await.unwrap();
     assert!(found.is_none());
@@ -378,7 +404,6 @@ async fn test_unauthenticated_cannot_access_users() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }

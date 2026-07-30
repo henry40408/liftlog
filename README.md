@@ -69,6 +69,8 @@ All configuration is done via environment variables:
 
 On logout, liftlog sends `Clear-Site-Data: "cache", "cookies", "storage"` so the browser drops more than just the session cookie. The `"cookies"` directive's scope is the whole **registrable domain**, not just this origin — if liftlog shares a domain with other services (e.g. `liftlog.example.com` alongside `wiki.example.com`), logging out of liftlog will also log the user out of those. Browsers ignore the header entirely on non-secure (plain HTTP) origins.
 
+Promoting a user to admin logs that user out of every device. A privilege-level change requires reauthentication (OWASP Session Management Cheat Sheet, *Renew the Session ID After Any Privilege Level Change*), so a token stolen while the account was an ordinary user cannot silently inherit admin rights.
+
 Prefer sending HSTS from your reverse proxy. liftlog does not terminate TLS and cannot tell whether a request really arrived over HTTPS; the layer that terminates TLS does. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch for deployments that cannot set headers at the proxy. Before enabling it, make sure the whole domain — and, with `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS`, every subdomain — serves working HTTPS: this declaration cannot be withdrawn from the server side, only waited out until `max-age` expires. There is deliberately no `preload` option; configure that on your proxy if you want it. Browsers ignore the header on plain-HTTP origins, so setting it there achieves nothing. If your proxy also sends HSTS, set it in only one place.
 
 ## Audit Log
@@ -79,7 +81,7 @@ Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Session
 |-------|-------|---------|
 | `session.created` | info | Login or first-user setup created a session (`reason`: `login` or `setup`) |
 | `session.renewed` | info | The sliding-expiry touch extended a session's lifetime |
-| `session.destroyed` | info | A session (or, for a bulk delete, a batch of sessions) was deleted — logout, password change, "log out other devices", or an admin deleting the user (`reason` says which) |
+| `session.destroyed` | info | A session (or, for a bulk delete, a batch of sessions) was deleted — logout, password change, "log out other devices", an admin promoting the user to admin, or an admin deleting the user (`reason` says which) |
 | `session.expired` | info | A session was found dead on use and lazily deleted (`reason`: `idle` or `absolute`), or a batch of abandoned sessions was retired by the hourly background sweep (`reason`: `sweep`, which carries only a `count` and no request fields) |
 | `session.rejected` | debug | An unrecognised session token was presented |
 

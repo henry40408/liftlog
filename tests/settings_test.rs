@@ -24,7 +24,6 @@ async fn test_settings_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -55,7 +54,6 @@ async fn test_settings_page_renders() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should contain settings page content
     assert!(body_str.contains("Settings") || body_str.contains("testuser"));
 }
 
@@ -122,7 +120,6 @@ async fn test_change_password_success() {
     let body_str = String::from_utf8_lossy(&body);
     assert!(body_str.contains("Password changed successfully"));
 
-    // Verify new password works
     let user_repo = UserRepository::new(pool.clone());
     let verified = user_repo
         .verify_password("testuser", "newpass456")
@@ -231,7 +228,6 @@ async fn test_change_password_invalidates_other_sessions() {
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
 
-    // Create two sessions
     let session_repo = SessionRepository::new(pool.clone());
     let token_current = session_repo.create(&user.id).await.unwrap();
     let token_other = session_repo.create(&user.id).await.unwrap();
@@ -256,7 +252,6 @@ async fn test_change_password_invalidates_other_sessions() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Current session should still be valid
     let current_valid = session_repo
         .validate_and_touch(&token_current)
         .await
@@ -266,7 +261,6 @@ async fn test_change_password_invalidates_other_sessions() {
         liftlog::repositories::ValidateOutcome::Valid(_)
     ));
 
-    // Other session should be invalidated
     let other_valid = session_repo.validate_and_touch(&token_other).await.unwrap();
     assert!(matches!(
         other_valid,
@@ -399,7 +393,6 @@ async fn test_change_password_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
