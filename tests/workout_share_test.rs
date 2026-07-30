@@ -40,7 +40,6 @@ async fn test_share_workout_success() {
         .await
         .unwrap();
 
-    // Should redirect to workout page
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert!(
         response
@@ -52,7 +51,6 @@ async fn test_share_workout_success() {
             .contains(&workout.id)
     );
 
-    // Verify share_token was set
     let workout_repo = WorkoutRepository::new(pool);
     let updated = workout_repo
         .find_session_by_id(&workout.id)
@@ -78,7 +76,6 @@ async fn test_view_shared_workout_public() {
     .await;
     common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, Some(8)).await;
 
-    // Share the workout
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
         .set_share_token(&workout.id, &user.id, None)
@@ -102,7 +99,6 @@ async fn test_view_shared_workout_public() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Verify content is shown
     assert!(body_str.contains("2024-01-15") || body_str.contains("Shared workout test"));
     assert!(body_str.contains("Bench Press"));
     assert!(body_str.contains("testuser"));
@@ -143,14 +139,12 @@ async fn test_revoke_share_success() {
     )
     .await;
 
-    // First share the workout
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
         .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
-    // Then revoke it
     let response = test_app
         .router
         .oneshot(
@@ -166,7 +160,6 @@ async fn test_revoke_share_success() {
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
-    // Verify share_token was revoked
     let updated = workout_repo
         .find_session_by_id(&workout.id)
         .await
@@ -174,7 +167,6 @@ async fn test_revoke_share_success() {
         .unwrap();
     assert!(updated.share_token.is_none());
 
-    // Verify the old token no longer works
     let app = common::create_test_app(pool.clone());
     let response = app
         .oneshot(
@@ -204,28 +196,23 @@ async fn test_reshare_after_revoke_generates_new_token() {
 
     let workout_repo = WorkoutRepository::new(pool.clone());
 
-    // Share
     let token1 = workout_repo
         .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
-    // Revoke
     workout_repo
         .revoke_share_token(&workout.id, &user.id)
         .await
         .unwrap();
 
-    // Share again
     let token2 = workout_repo
         .set_share_token(&workout.id, &user.id, None)
         .await
         .unwrap();
 
-    // Tokens should be different
     assert_ne!(token1, token2);
 
-    // Old token should not work
     let app = common::create_test_app(pool.clone());
     let response = app
         .oneshot(
@@ -238,7 +225,6 @@ async fn test_reshare_after_revoke_generates_new_token() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // New token should work
     let app2 = common::create_test_app(pool.clone());
     let response2 = app2
         .oneshot(
@@ -260,7 +246,6 @@ async fn test_cannot_share_others_workout() {
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
 
-    // user2 creates workout
     let workout = common::create_test_workout(
         &pool,
         &user2.id,
@@ -269,7 +254,6 @@ async fn test_cannot_share_others_workout() {
     )
     .await;
 
-    // user1 tries to share it
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
@@ -289,7 +273,6 @@ async fn test_cannot_share_others_workout() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // Verify workout was NOT shared
     let workout_repo = WorkoutRepository::new(pool);
     let found = workout_repo
         .find_session_by_id(&workout.id)
@@ -324,7 +307,6 @@ async fn test_share_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -354,7 +336,6 @@ async fn test_revoke_share_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -367,7 +348,6 @@ async fn test_cannot_revoke_others_share() {
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
 
-    // user2 creates and shares workout
     let workout = common::create_test_workout(
         &pool,
         &user2.id,
@@ -381,7 +361,6 @@ async fn test_cannot_revoke_others_share() {
         .await
         .unwrap();
 
-    // user1 tries to revoke it
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
@@ -400,7 +379,6 @@ async fn test_cannot_revoke_others_share() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // Verify workout share was NOT revoked
     let found = workout_repo
         .find_session_by_id(&workout.id)
         .await
@@ -443,9 +421,7 @@ async fn test_show_workout_displays_share_button() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should show share button
     assert!(body_str.contains(">Share</button>"));
-    // Should not show revoke button or share link
     assert!(!body_str.contains("Revoke Share"));
     assert!(!body_str.contains("Share link:"));
 }
@@ -467,7 +443,6 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     )
     .await;
 
-    // Share the workout
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo
         .set_share_token(&workout.id, &user.id, None)
@@ -491,7 +466,6 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should show revoke button and share link
     assert!(body_str.contains("Revoke Share</button>"));
     assert!(body_str.contains("Share link:"));
     assert!(body_str.contains(&format!("/shared/{share_token}")));

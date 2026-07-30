@@ -24,7 +24,6 @@ async fn test_workouts_list_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -44,7 +43,6 @@ async fn test_new_workout_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 }
 
@@ -53,7 +51,6 @@ async fn test_create_workout_authenticated() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a test user
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -72,7 +69,6 @@ async fn test_create_workout_authenticated() {
         .await
         .unwrap();
 
-    // Should redirect to the workout page
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let location = response
         .headers()
@@ -82,7 +78,6 @@ async fn test_create_workout_authenticated() {
         .unwrap();
     assert!(location.starts_with("/workouts/"));
 
-    // Verify workout was created in database
     let workout_repo = WorkoutRepository::new(pool);
     let count = workout_repo.count_sessions_by_user(&user.id).await.unwrap();
     assert_eq!(count, 1);
@@ -93,12 +88,10 @@ async fn test_workout_list_shows_user_workouts() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a test user and some workouts
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    // Create workouts directly via repository
     let workout_repo = WorkoutRepository::new(pool.clone());
     workout_repo
         .create_session(
@@ -134,7 +127,6 @@ async fn test_workout_list_shows_user_workouts() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Verify workouts are shown
     assert!(body_str.contains("Chest day") || body_str.contains("2024-01-15"));
     assert!(body_str.contains("Back day") || body_str.contains("2024-01-16"));
 }
@@ -144,11 +136,9 @@ async fn test_workout_list_only_shows_own_workouts() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create two users
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
 
-    // Create workouts for both users
     let workout_repo = WorkoutRepository::new(pool.clone());
     workout_repo
         .create_session(
@@ -167,7 +157,6 @@ async fn test_workout_list_only_shows_own_workouts() {
         .await
         .unwrap();
 
-    // Login as user1
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
@@ -198,7 +187,6 @@ async fn test_delete_workout() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a test user and a workout
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -226,11 +214,9 @@ async fn test_delete_workout() {
         .await
         .unwrap();
 
-    // Should redirect to workouts list
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/workouts");
 
-    // Verify workout was deleted
     let count = workout_repo.count_sessions_by_user(&user.id).await.unwrap();
     assert_eq!(count, 0);
 }
@@ -240,11 +226,9 @@ async fn test_cannot_delete_others_workout() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create two users
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
 
-    // Create a workout for user2
     let workout_repo = WorkoutRepository::new(pool.clone());
     let workout = workout_repo
         .create_session(
@@ -255,7 +239,6 @@ async fn test_cannot_delete_others_workout() {
         .await
         .unwrap();
 
-    // Login as user1 and try to delete user2's workout
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
@@ -275,7 +258,6 @@ async fn test_cannot_delete_others_workout() {
     // Should still redirect (delete returns success even if no rows affected)
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
-    // But the workout should still exist
     let found = workout_repo.find_session_by_id(&workout.id).await.unwrap();
     assert!(found.is_some());
 }
@@ -285,7 +267,6 @@ async fn test_view_workout_details() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a test user and a workout
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -325,11 +306,9 @@ async fn test_cannot_view_others_workout() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create two users
     let user1 = common::create_test_user(&pool, "user1", "password123", UserRole::User).await;
     let user2 = common::create_test_user(&pool, "user2", "password456", UserRole::User).await;
 
-    // Create a workout for user2
     let workout_repo = WorkoutRepository::new(pool.clone());
     let workout = workout_repo
         .create_session(
@@ -340,7 +319,6 @@ async fn test_cannot_view_others_workout() {
         .await
         .unwrap();
 
-    // Login as user1 and try to view user2's workout
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
@@ -436,7 +414,6 @@ async fn test_update_workout_success() {
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
-    // Verify workout was updated
     let updated = workout_repo
         .find_session_by_id(&workout.id)
         .await
@@ -534,7 +511,6 @@ async fn test_add_log_success() {
             .contains(&workout.id)
     );
 
-    // Verify log was created
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
         .find_logs_by_session_with_pr(&workout.id, &user.id)
@@ -722,7 +698,6 @@ async fn test_delete_log_success() {
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
-    // Verify log was deleted
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
         .find_logs_by_session_with_pr(&workout.id, &user.id)
@@ -767,7 +742,6 @@ async fn test_delete_log_requires_ownership() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // Verify log was NOT deleted
     let workout_repo = WorkoutRepository::new(pool);
     let found = workout_repo.find_log_by_id(&log.id).await.unwrap();
     assert!(found.is_some());
@@ -852,7 +826,6 @@ async fn test_update_log_success() {
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
-    // Verify log was updated
     let workout_repo = WorkoutRepository::new(pool);
     let updated = workout_repo.find_log_by_id(&log.id).await.unwrap().unwrap();
     assert_eq!(updated.reps, 12);
@@ -939,7 +912,6 @@ async fn test_update_log_requires_ownership() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // Verify log was NOT updated
     let workout_repo = WorkoutRepository::new(pool);
     let found = workout_repo.find_log_by_id(&log.id).await.unwrap().unwrap();
     assert_eq!(found.reps, 10);

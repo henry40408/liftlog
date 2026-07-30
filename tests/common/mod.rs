@@ -192,7 +192,6 @@ pub fn with_peer(
 
 #[allow(dead_code)]
 pub fn extract_cookie_header(set_cookie: &str) -> String {
-    // Extract just the cookie name=value part for use in Cookie header
     set_cookie.split(';').next().unwrap_or("").to_string()
 }
 
@@ -224,7 +223,6 @@ pub fn age_session_creation(pool: &DbPool, token: &str, days_ago: u32) {
     conn.execute(&sql, [token]).unwrap();
 }
 
-// Test data creation helpers
 #[allow(dead_code)]
 pub async fn create_test_exercise(
     pool: &DbPool,

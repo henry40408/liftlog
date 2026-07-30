@@ -23,7 +23,6 @@ async fn test_stats_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
@@ -43,7 +42,6 @@ async fn test_prs_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 }
 
@@ -97,7 +95,6 @@ async fn test_stats_index_calculates_volume() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    // Create workout with logs
     let today = chrono::Local::now().date_naive();
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let workout = common::create_test_workout(&pool, &user.id, today, None).await;
@@ -122,7 +119,6 @@ async fn test_stats_index_calculates_volume() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should contain volume data
     assert!(
         body_str.contains("1000") || body_str.contains("volume") || body_str.contains("Volume")
     );
@@ -164,7 +160,6 @@ async fn test_stats_index_shows_prs() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should show PR for Bench Press
     assert!(body_str.contains("Bench Press") || body_str.contains("120"));
 }
 

@@ -23,14 +23,11 @@ pub fn create_router(state: AppState) -> Router {
     let hsts_include_subdomains = state.hsts_include_subdomains;
 
     Router::new()
-        // Health check
         .route("/health", get(health::health_check))
         // Favicon (no auth, no state)
         .route("/favicon.svg", get(favicon::favicon_svg))
         .route("/apple-touch-icon.png", get(favicon::apple_touch_icon))
-        // Dashboard
         .route("/", get(dashboard::index))
-        // Auth routes
         .route(
             "/auth/login",
             get(auth::login_page).post(auth::login_submit),
@@ -47,7 +44,6 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/users/{id}/delete", post(auth::delete_user))
         .route("/users/{id}/promote", post(auth::promote_user))
-        // Workout routes
         .route("/workouts", get(workouts::list))
         .route("/workouts/new", get(workouts::new_page))
         .route("/workouts", post(workouts::create))
@@ -69,18 +65,15 @@ pub fn create_router(state: AppState) -> Router {
         .route("/workouts/{id}/revoke-share", post(workouts::revoke_share))
         // Public shared workout route (no auth required)
         .route("/shared/{token}", get(workouts::view_shared))
-        // Exercise routes
         .route("/exercises", get(exercises::list))
         .route("/exercises/new", get(exercises::new_page))
         .route("/exercises", post(exercises::create))
         .route("/exercises/{id}/edit", get(exercises::edit_page))
         .route("/exercises/{id}", post(exercises::update))
         .route("/exercises/{id}/delete", post(exercises::delete))
-        // Stats routes
         .route("/stats", get(stats::index))
         .route("/stats/exercise/{id}", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
-        // Settings routes
         .route("/settings", get(settings::index))
         .route("/settings/password", post(settings::change_password))
         .route("/settings/logout-others", post(settings::logout_others))

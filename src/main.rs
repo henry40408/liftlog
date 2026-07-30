@@ -80,21 +80,16 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     init_tracing(args.log_format);
 
-    // Load environment variables
     dotenvy::dotenv().ok();
 
-    // Load configuration
     let config = Config::from_env()?;
 
     tracing::info!("Connecting to database: {}", config.database_url);
 
-    // Create database pool
     let pool = db::create_pool(&config.database_url)?;
 
-    // Run migrations
     run_migrations(&pool)?;
 
-    // Create repositories
     let user_repo = UserRepository::new(pool.clone());
     let exercise_repo = ExerciseRepository::new(pool.clone());
     let workout_repo = WorkoutRepository::new(pool.clone());
