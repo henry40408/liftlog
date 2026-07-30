@@ -77,6 +77,60 @@ pub async fn hsts_middleware(
     response
 }
 
+/// Adds the baseline security headers to every response.
+///
+/// Unconditional, unlike HSTS above: none of these can be wrong for a
+/// deployment the way a premature HSTS declaration can, and none of them
+/// depend on the transport.
+///
+/// - `Content-Security-Policy: frame-ancestors 'none'` and the legacy
+///   `X-Frame-Options: DENY` are the reason this middleware exists. Without
+///   them any site can iframe liftlog and clickjack its buttons. `SameSite=Lax`
+///   does not help — a top-level iframe navigation still carries the cookie —
+///   and neither does `csrf_origin_guard`, because the click comes from the
+///   victim's own browser and reports `Sec-Fetch-Site: same-origin`. Workout
+///   delete, user delete, revoke-share and logout-others are all one-click
+///   POST forms, so this is a live path, not a theoretical one.
+/// - The CSP deliberately carries *only* `frame-ancestors`. A `default-src`
+///   would have to enumerate `fonts.bunny.net` (see `templates/base.html`) and
+///   would be worth doing properly with nonces rather than bolted on here; CSP
+///   directives are independent, so a policy with one directive restricts
+///   exactly that one thing.
+/// - `X-Content-Type-Options: nosniff` stops a browser second-guessing the
+///   `Content-Type` liftlog sends.
+/// - `Referrer-Policy` is set to the value modern browsers already default to,
+///   so the `/shared/{token}` page's outbound link cannot leak the share token
+///   in a `Referer` on a browser whose default is older and laxer.
+pub async fn baseline_headers_middleware(req: axum::extract::Request, next: Next) -> Response {
+    const BASELINE: [(axum::http::HeaderName, HeaderValue); 4] = [
+        (
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("frame-ancestors 'none'"),
+        ),
+        (
+            axum::http::header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ),
+        (
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ),
+        (
+            axum::http::header::REFERRER_POLICY,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ),
+    ];
+
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    for (name, value) in BASELINE {
+        // `insert`, not `append`: exactly one of each, and no handler sets
+        // these itself.
+        headers.insert(name, value);
+    }
+    response
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

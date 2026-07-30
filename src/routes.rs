@@ -6,7 +6,8 @@ use axum::{
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
 use crate::middleware::{
-    HstsHeader, SessionLayerState, csrf_origin_guard, hsts_middleware, sliding_session_middleware,
+    HstsHeader, SessionLayerState, baseline_headers_middleware, csrf_origin_guard, hsts_middleware,
+    sliding_session_middleware,
 };
 use crate::state::AppState;
 
@@ -87,6 +88,9 @@ pub fn create_router(state: AppState) -> Router {
         // Registered before HSTS below → runs before session validation, and
         // after HSTS in request order (outer layers run first).
         .layer(from_fn(csrf_origin_guard))
+        // Baseline security headers, outside the CSRF guard for the same
+        // reason HSTS is: the 403 that guard returns must carry them too.
+        .layer(from_fn(baseline_headers_middleware))
         // HSTS must be the outermost layer: it is registered last, after the
         // CSRF guard, so it also stamps responses that short-circuit inside
         // that guard (its 403) or inside session validation (the AuthRedirect
