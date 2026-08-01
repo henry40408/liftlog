@@ -339,7 +339,10 @@ async fn test_admin_can_create_new_user() {
                 .uri("/users/new")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
-                .body(Body::from("username=newuser&password=password123"))
+                .body(Body::from(format!(
+                    "username=newuser&password={}",
+                    common::STRONG_PASSWORD
+                )))
                 .unwrap(),
         )
         .await
@@ -372,7 +375,10 @@ async fn test_user_cannot_create_new_user() {
                 .uri("/users/new")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
-                .body(Body::from("username=newuser&password=password123"))
+                .body(Body::from(format!(
+                    "username=newuser&password={}",
+                    common::STRONG_PASSWORD
+                )))
                 .unwrap(),
         )
         .await

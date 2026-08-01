@@ -15,6 +15,16 @@ pub struct TestApp {
     pub router: Router,
 }
 
+/// A password that satisfies the policy in `models::user::password_policy_error`
+/// (length floor plus a `zxcvbn` score of at least 3). Used by every test whose
+/// subject is something *other* than password strength, so tightening the
+/// policy does not mean hunting through the suite for newly-invalid literals.
+///
+/// Contains no characters that form-encoding would alter, so it can be
+/// interpolated straight into a request body.
+#[allow(dead_code)]
+pub const STRONG_PASSWORD: &str = "purple-monkey-dishwasher";
+
 /// Budget handed to whichever rate limiter a given helper is not there to
 /// exercise, so a test targeting one throttle can never be tripped by the
 /// other.

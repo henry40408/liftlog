@@ -10,7 +10,7 @@ use crate::audit::{self, AuditContext};
 use crate::error::{AppError, Result};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
-use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole, password_length_error};
+use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole, password_policy_error};
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
 
@@ -42,16 +42,27 @@ struct UsersListTemplate {
 
 /// Returns the validation error message, or `None` if the form is valid.
 ///
-/// The length rules live in `password_length_error` so the two places that
+/// The password rules live in `password_policy_error` so the two places that
 /// accept a new password — this one (signup, admin-created users) and the
-/// settings password-change handler — cannot enforce different bounds. The
+/// settings password-change handler — cannot enforce different ones. The
 /// messages are formatted from the constants rather than spelling the numbers
 /// out, so changing a bound cannot leave a form telling users the old one.
-fn validate_credentials(form: &CreateUser) -> Option<String> {
+///
+/// `spawn_blocking` for the same reason `hash_password` uses it: the strength
+/// check is real CPU work (sub-millisecond for a typical password, but a few
+/// milliseconds for a pathological one at `MAX_PASSWORD_LEN` — and the
+/// attacker is the one choosing the password here). Long enough to stall
+/// every other task sharing that tokio worker.
+async fn validate_credentials(form: &CreateUser) -> Result<Option<String>> {
     if form.username.trim().is_empty() {
-        return Some("Username is required".to_string());
+        return Ok(Some("Username is required".to_string()));
     }
-    password_length_error(&form.password, "Password")
+    let password = form.password.clone();
+    let username = form.username.clone();
+    Ok(tokio::task::spawn_blocking(move || {
+        password_policy_error(&password, "Password", &[username.as_str()])
+    })
+    .await?)
 }
 
 pub async fn login_page(State(state): State<AppState>, request: Request) -> Result<Response> {
@@ -171,7 +182,7 @@ pub async fn setup_submit(
         return Ok(Redirect::to("/auth/login").into_response());
     }
 
-    if let Some(message) = validate_credentials(&form) {
+    if let Some(message) = validate_credentials(&form).await? {
         let template = SetupTemplate {
             error: Some(message),
         };
@@ -259,7 +270,7 @@ pub async fn new_user_submit(
     admin_user: AdminUser,
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
-    if let Some(message) = validate_credentials(&form) {
+    if let Some(message) = validate_credentials(&form).await? {
         let template = NewUserTemplate {
             user: admin_user.0,
             error: Some(message),

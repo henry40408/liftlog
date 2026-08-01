@@ -386,7 +386,7 @@ async fn failed_password_change_emits_an_audit_event() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, common::cookie_header(&token))
                 .body(Body::from(
-                    "current_password=wrongpass&new_password=newpass456&confirm_password=newpass456",
+                    "current_password=wrongpass&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher",
                 ))
                 .unwrap(),
         )
