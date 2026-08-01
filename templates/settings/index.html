@@ -48,15 +48,15 @@
         <tbody>
             {% for s in sessions %}
             <tr>
-                <td>
+                <td data-label="Device">
                     {% if s.token == user.session_token %}
                     <strong>This device</strong>
                     {% else %}
                     Other device
                     {% endif %}
                 </td>
-                <td>{{ s.last_touched_at.format("%Y-%m-%d %H:%M UTC") }}</td>
-                <td>{{ s.created_at.format("%Y-%m-%d %H:%M UTC") }}</td>
+                <td data-label="Last active"><time datetime="{{ s.last_touched_at.to_rfc3339() }}" data-fmt="datetime">{{ s.last_touched_at.format("%Y-%m-%d %H:%M UTC") }}</time></td>
+                <td data-label="Signed in"><time datetime="{{ s.created_at.to_rfc3339() }}" data-fmt="datetime">{{ s.created_at.format("%Y-%m-%d %H:%M UTC") }}</time></td>
             </tr>
             {% endfor %}
         </tbody>
