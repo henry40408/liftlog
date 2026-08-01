@@ -7,6 +7,14 @@ const { When, Then } = createBdd(test);
 
 async function fillPasswordForm(page, current, next, confirm) {
   await page.goto('/settings');
+  // Same reason as the setup form's short-password step in auth.steps.js:
+  // the new-password input carries minlength/maxlength, which would block a
+  // deliberately-invalid submission before it ever reaches the server. The
+  // server-side length check is the actual control, so bypass the browser's
+  // validation to keep it under test.
+  await page.locator('form[action="/settings/password"]').evaluate((f) => {
+    f.noValidate = true;
+  });
   await page.getByLabel('Current Password').fill(current);
   await page.getByLabel('New Password', { exact: true }).fill(next);
   await page.getByLabel('Confirm New Password').fill(confirm);

@@ -15,6 +15,12 @@ pub struct TestApp {
     pub router: Router,
 }
 
+/// Budget handed to whichever rate limiter a given helper is not there to
+/// exercise, so a test targeting one throttle can never be tripped by the
+/// other.
+const GENEROUS_MAX_ATTEMPTS: u32 = 100;
+const GENEROUS_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[allow(dead_code)]
 pub fn create_test_app(pool: DbPool) -> Router {
     create_test_app_with_session(pool).router
@@ -24,6 +30,31 @@ pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
     // A generous default so existing tests (which don't exercise rate
     // limiting) can't trip it.
     create_test_app_with_rate_limit(pool, 100, std::time::Duration::from_secs(60))
+}
+
+/// Builds an app whose *password-change* throttle is tightened to
+/// `max_attempts` per `window`, leaving the login throttle generous. The two
+/// limiters are configured independently because they key on different
+/// things (client IP vs user id) and a test exercising one must not be able
+/// to trip the other by accident.
+#[allow(dead_code)]
+pub fn create_test_app_with_password_change_limit(
+    pool: DbPool,
+    max_attempts: u32,
+    window: std::time::Duration,
+) -> TestApp {
+    build_test_app(
+        pool,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
+        max_attempts,
+        window,
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        0,
+        false,
+    )
 }
 
 #[allow(dead_code)]
@@ -36,6 +67,8 @@ pub fn create_test_app_with_rate_limit(
         pool,
         max_attempts,
         window,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
         false,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
@@ -50,6 +83,8 @@ pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> 
         pool,
         100,
         std::time::Duration::from_secs(60),
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
         cookie_secure,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
@@ -74,6 +109,8 @@ pub fn create_test_app_with_proxy_header(
         pool,
         max_attempts,
         window,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
         false,
         header,
         trusted_proxies,
@@ -91,6 +128,8 @@ pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains:
         pool,
         100,
         std::time::Duration::from_secs(60),
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
         false,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
@@ -106,6 +145,8 @@ fn build_test_app(
     pool: DbPool,
     max_attempts: u32,
     window: std::time::Duration,
+    password_change_max_attempts: u32,
+    password_change_window: std::time::Duration,
     cookie_secure: bool,
     trusted_proxy_header: liftlog::config::TrustedProxyHeader,
     trusted_proxies: Vec<std::net::IpAddr>,
@@ -123,6 +164,10 @@ fn build_test_app(
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
         login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
+        password_change_rate_limiter: Arc::new(RateLimiter::new(
+            password_change_max_attempts,
+            password_change_window,
+        )),
         trusted_proxy_header,
         trusted_proxies: Arc::new(trusted_proxies),
         cookie_secure,

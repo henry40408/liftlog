@@ -177,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         workout_repo,
         session_repo,
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
+        password_change_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         cookie_secure: config.cookie_secure,

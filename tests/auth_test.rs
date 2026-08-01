@@ -1821,3 +1821,43 @@ async fn test_baseline_security_headers_on_the_public_share_route() {
 
     assert_baseline_headers(response.headers());
 }
+
+/// Companion to `test_setup_rejects_short_password` at the other bound. The
+/// maximum exists so the hash comparison has a bounded input (OWASP:
+/// "protect against denial of service attacks with very long inputs"), and
+/// rejection — never truncation — is what keeps the accepted password and the
+/// one the user typed the same string.
+#[tokio::test]
+async fn test_setup_rejects_over_long_password() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let too_long = "a".repeat(liftlog::models::user::MAX_PASSWORD_LEN + 1);
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/setup")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("username=admin&password={too_long}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("at most 128 characters"),
+        "expected the maximum-length message, got: {body_str}"
+    );
+
+    let user_repo = liftlog::repositories::UserRepository::new(pool.clone());
+    assert_eq!(
+        user_repo.count().await.unwrap(),
+        0,
+        "no user should have been created"
+    );
+}

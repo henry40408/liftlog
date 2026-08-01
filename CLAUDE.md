@@ -57,7 +57,7 @@ npx playwright test sharing               # filter by feature filename
 - **`_bootstrap.feature` only needs its worker's DB empty at worker start.** Both scenarios are no-mutation, so they work no matter which worker they land on.
 - **Confirm dialogs.** Workout-delete, set-delete, exercise-delete, revoke-share, promote-user, delete-user use `window.confirm()` — handle with `page.once('dialog', d => d.accept())` before the click.
 - **Guest views.** Public share URLs are tested via `browser.newContext()` so the logged-in cookie doesn't leak in.
-- **HTML form validation can swallow the request.** The setup short-password scenario sets `form.noValidate = true` so the request reaches the server; otherwise `minlength="6"` blocks it client-side and the server-side defense is untested.
+- **HTML form validation can swallow the request.** Every password field carries `minlength`/`maxlength`, so any scenario submitting a deliberately-invalid password sets `form.noValidate = true` first (the setup step in `auth.steps.js`, `fillPasswordForm` in `settings.steps.js`); otherwise the browser blocks it client-side and the server-side defense — which is the actual control — goes untested.
 - **Keep Playwright in step with the other repos sharing the browser cache.** `~/.cache/ms-playwright` (macOS: `~/Library/Caches/ms-playwright`) is shared by every checkout, and each `playwright-core` pins one exact chromium revision. A lagging repo misses the cache and falls back to a CDN download with no wall-clock timeout, and `playwright install` garbage-collects revisions no registered checkout references — so its browser gets deleted and re-downloaded repeatedly. Bump alongside the other repos; `npm` is in `dependabot.yml` (7-day cooldown).
 
 ## Project conventions

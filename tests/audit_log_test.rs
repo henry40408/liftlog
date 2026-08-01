@@ -217,3 +217,245 @@ async fn logout_others_reports_the_number_of_sessions_actually_destroyed() {
         "expected count=2 destroyed sessions, got: {log}"
     );
 }
+
+/// The gap this closes: before `audit::login_failed` existed, a brute-force
+/// run against liftlog left *no trace at all* — only successful logins were
+/// logged. OWASP's *Logging and Monitoring* section requires that all
+/// password failures be logged.
+#[tokio::test]
+async fn failed_login_emits_an_audit_event_naming_the_attempted_username() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=testuser&password=wrongpass"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let log = writer.contents();
+    assert!(
+        log.contains("auth.login.failed"),
+        "expected an auth.login.failed event, got: {log}"
+    );
+    assert_eq!(
+        extract_field(&log, "username"),
+        Some("testuser"),
+        "the event must name the account under attack, got: {log}"
+    );
+    // The submitted password must never reach the log.
+    assert!(
+        !log.contains("wrongpass"),
+        "the attempted password leaked into the audit log: {log}"
+    );
+}
+
+/// An unknown username and a wrong password must produce the *same* event
+/// with the same wording. Emitting distinguishable events would rebuild the
+/// user-enumeration oracle that `verify_password`'s constant-cost dummy-hash
+/// path exists to remove — just in the operator's log instead of the response.
+#[tokio::test]
+async fn failed_login_for_an_unknown_user_is_indistinguishable_in_the_log() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    for username in ["testuser", "nosuchuser"] {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "username={username}&password=wrongpass"
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let log = writer.contents();
+    let events: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("auth.login.failed"))
+        .collect();
+    assert_eq!(
+        events.len(),
+        2,
+        "expected one event per attempt, got: {log}"
+    );
+
+    // Strip the two things that legitimately differ — the leading timestamp,
+    // and the username itself — so the comparison is about everything else:
+    // level, event name, message wording and the set of fields present.
+    let normalise = |line: &str| {
+        let without_timestamp = line.split_once(" WARN ").map_or(line, |(_, rest)| rest);
+        without_timestamp
+            .replace("testuser", "X")
+            .replace("nosuchuser", "X")
+    };
+    assert_eq!(
+        normalise(events[0]),
+        normalise(events[1]),
+        "the unknown-user and wrong-password events must not be distinguishable"
+    );
+}
+
+/// The cheat sheet also asks that lockouts themselves be logged, as a signal
+/// distinct from an ordinary credential failure.
+#[tokio::test]
+async fn throttled_login_emits_its_own_audit_event() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_rate_limit(
+        pool.clone(),
+        1,
+        std::time::Duration::from_secs(60),
+    );
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    for expected in [StatusCode::OK, StatusCode::TOO_MANY_REQUESTS] {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("username=testuser&password=wrongpass"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+
+    let log = writer.contents();
+    assert!(
+        log.contains("auth.login.throttled"),
+        "expected an auth.login.throttled event, got: {log}"
+    );
+    assert!(
+        log.contains("auth.login.failed"),
+        "the first (unthrottled) attempt should still log a failure, got: {log}"
+    );
+}
+
+/// The password-change route verifies a password too, so a wrong
+/// `current_password` is a password failure and must be logged like one.
+#[tokio::test]
+async fn failed_password_change_emits_an_audit_event() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let token = common::create_session_token(&pool, &user).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/password")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, common::cookie_header(&token))
+                .body(Body::from(
+                    "current_password=wrongpass&new_password=newpass456&confirm_password=newpass456",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let log = writer.contents();
+    assert!(
+        log.contains("auth.password_change.failed"),
+        "expected an auth.password_change.failed event, got: {log}"
+    );
+    assert_eq!(
+        extract_field(&log, "user_id"),
+        Some(user.id.as_str()),
+        "the event must identify the account, got: {log}"
+    );
+    assert!(
+        !log.contains(&token),
+        "the raw session token leaked into the audit log: {log}"
+    );
+    assert!(
+        !log.contains("wrongpass"),
+        "the attempted password leaked into the audit log: {log}"
+    );
+}
+
+/// Every request-scoped audit event claims to carry a `user_agent`, truncated
+/// to 256 chars. `audit::tests` covers the truncation helper in isolation, but
+/// nothing covered the field actually reaching a log line — so a hostile
+/// `User-Agent` is sent here and read back off the event.
+#[tokio::test]
+async fn audit_events_record_a_truncated_user_agent() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let hostile_ua = "M".repeat(5000);
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::USER_AGENT, &hostile_ua)
+                .body(Body::from("username=testuser&password=wrongpass"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let log = writer.contents();
+    assert!(log.contains("auth.login.failed"), "got: {log}");
+    let logged_ua = extract_field(&log, "user_agent").expect("user_agent field should be present");
+    assert_eq!(
+        logged_ua.len(),
+        256,
+        "the 5000-char User-Agent should have been truncated to 256, got {} chars",
+        logged_ua.len()
+    );
+    assert!(
+        !log.contains(&hostile_ua),
+        "the untruncated User-Agent reached the log"
+    );
+}

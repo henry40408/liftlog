@@ -10,7 +10,7 @@ use crate::audit::{self, AuditContext};
 use crate::error::{AppError, Result};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
-use crate::models::{CreateUser, LoginCredentials, MIN_PASSWORD_LEN, UserListItem, UserRole};
+use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole, password_length_error};
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
 
@@ -42,19 +42,16 @@ struct UsersListTemplate {
 
 /// Returns the validation error message, or `None` if the form is valid.
 ///
-/// The length message is formatted from `MIN_PASSWORD_LEN` rather than
-/// spelling the number out, so raising the minimum cannot leave the form
-/// telling users the old one.
+/// The length rules live in `password_length_error` so the two places that
+/// accept a new password — this one (signup, admin-created users) and the
+/// settings password-change handler — cannot enforce different bounds. The
+/// messages are formatted from the constants rather than spelling the numbers
+/// out, so changing a bound cannot leave a form telling users the old one.
 fn validate_credentials(form: &CreateUser) -> Option<String> {
     if form.username.trim().is_empty() {
-        Some("Username is required".to_string())
-    } else if form.password.len() < MIN_PASSWORD_LEN {
-        Some(format!(
-            "Password must be at least {MIN_PASSWORD_LEN} characters"
-        ))
-    } else {
-        None
+        return Some("Username is required".to_string());
     }
+    password_length_error(&form.password, "Password")
 }
 
 pub async fn login_page(State(state): State<AppState>, request: Request) -> Result<Response> {
@@ -90,7 +87,7 @@ pub async fn login_submit(
     );
 
     if !state.login_rate_limiter.try_acquire(ip) {
-        tracing::warn!(%ip, "login rate limited");
+        audit::login_throttled(&audit_ctx, &credentials.username);
         let template = LoginTemplate {
             error: Some("Too many login attempts. Please try again later.".to_string()),
         };
@@ -139,6 +136,13 @@ pub async fn login_submit(
         );
         Ok(response)
     } else {
+        // Deliberately emitted for both failure modes `verify_password`
+        // collapses together (unknown username, wrong password) with the same
+        // wording and the same event: the whole point of that collapse is
+        // that nothing observable distinguishes them, and an audit event that
+        // said which one it was would reintroduce the enumeration oracle in
+        // the operator's log — where a compromised log reader could read it.
+        audit::login_failed(&audit_ctx, &credentials.username);
         let template = LoginTemplate {
             error: Some("Invalid username or password".to_string()),
         };

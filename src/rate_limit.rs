@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::hash::Hash;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Maximum number of distinct IPs tracked at once. Bounds memory under a
-/// distributed spray of login attempts from many source addresses.
+/// Maximum number of distinct keys tracked at once. Bounds memory under a
+/// distributed spray of attempts from many source addresses (or, for the
+/// user-keyed limiter, many accounts).
 const MAX_ENTRIES: usize = 10_000;
 
 /// A single fixed-window attempt counter, shared by both the per-IP entries
@@ -23,11 +24,11 @@ impl Window {
     }
 }
 
-/// The mutex payload: per-IP windows, plus one shared window for sources
+/// The mutex payload: per-key windows, plus one shared window for keys
 /// admitted while `entries` is at capacity. See the capacity branch of
 /// `try_acquire` for why the overflow bucket exists.
-struct Buckets {
-    entries: HashMap<IpAddr, Window>,
+struct Buckets<K> {
+    entries: HashMap<K, Window>,
     overflow: Window,
 }
 
@@ -49,23 +50,30 @@ fn charge(w: &mut Window, max_attempts: u32, window: Duration) -> bool {
     true
 }
 
-/// A per-IP fixed-window rate limiter, used to throttle login attempts.
+/// A per-key fixed-window rate limiter, used to throttle password guesses.
 ///
-/// State lives in memory only, for the lifetime of the process. A 60-second
+/// Generic over the key so the same logic serves both throttles: login is
+/// keyed by `IpAddr` (the request is anonymous, so the source address is the
+/// only identity available), while the password-change throttle is keyed by
+/// user id — that request is authenticated, so the account it targets is
+/// known exactly, and keying on it means an attacker holding a stolen session
+/// cannot buy more guesses by rotating source addresses.
+///
+/// State lives in memory only, for the lifetime of the process. A short
 /// window has no persistence value: liftlog is a single-process,
 /// single-SQLite-file self-hosted service, and writing a database row per
 /// login attempt would turn an attacker's brute-force traffic into
 /// write-amplification denial-of-service against the same database that
 /// serves real users. A restart clearing every counter (letting anyone who
 /// was throttled start over) is an accepted trade-off for that simplicity.
-pub struct RateLimiter {
-    buckets: Mutex<Buckets>,
+pub struct RateLimiter<K = std::net::IpAddr> {
+    buckets: Mutex<Buckets<K>>,
     max_attempts: u32,
     window: Duration,
     max_entries: usize,
 }
 
-impl RateLimiter {
+impl<K: Eq + Hash> RateLimiter<K> {
     pub fn new(max_attempts: u32, window: Duration) -> Self {
         Self {
             buckets: Mutex::new(Buckets {
@@ -82,25 +90,25 @@ impl RateLimiter {
     /// (possibly inconsistent but still usable) inner guard rather than
     /// panicking. A panic inside one request while holding this lock must
     /// not take down every future login attempt on the service.
-    fn lock(&self) -> std::sync::MutexGuard<'_, Buckets> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Buckets<K>> {
         self.buckets
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Attempts to reserve one login attempt for `ip`. Returns `true` if the
-    /// attempt is allowed (and counts against the budget), `false` if `ip`
+    /// Attempts to reserve one attempt for `key`. Returns `true` if the
+    /// attempt is allowed (and counts against the budget), `false` if `key`
     /// has exceeded `max_attempts` within the current window.
     ///
     /// The lock is taken exactly once for the whole check-and-record
     /// operation. Splitting this into a separate "check" then "record" call
     /// would let concurrent requests all observe the same pre-attack count
     /// and all be admitted, defeating the limit.
-    pub fn try_acquire(&self, ip: IpAddr) -> bool {
+    pub fn try_acquire(&self, key: K) -> bool {
         let mut buckets = self.lock();
 
-        if buckets.entries.len() >= self.max_entries && !buckets.entries.contains_key(&ip) {
-            // At capacity and this is a new IP. First try to make room by
+        if buckets.entries.len() >= self.max_entries && !buckets.entries.contains_key(&key) {
+            // At capacity and this is a new key. First try to make room by
             // dropping entries whose window has already expired.
             buckets
                 .entries
@@ -117,14 +125,14 @@ impl RateLimiter {
                 //   - Clearing the map to make room would hand every
                 //     already-throttled source a free reset of its own
                 //     budget, just because an attacker sprayed enough fresh
-                //     IPs to fill the table.
-                // Instead, every untracked source while at capacity shares
+                //     keys to fill the table.
+                // Instead, every untracked key while at capacity shares
                 // one finite overflow budget: bounded, but not a bypass.
                 return charge(&mut buckets.overflow, self.max_attempts, self.window);
             }
         }
 
-        let entry = buckets.entries.entry(ip).or_insert_with(Window::new);
+        let entry = buckets.entries.entry(key).or_insert_with(Window::new);
         charge(entry, self.max_attempts, self.window)
     }
 
@@ -133,16 +141,17 @@ impl RateLimiter {
     /// cookies, a test suite) is never locked out. An attacker's attempts
     /// are all failures, so their budget is never released by this path.
     ///
-    /// Only ever touches the per-IP entry, never the overflow bucket: a
+    /// Only ever touches the per-key entry, never the overflow bucket: a
     /// legitimate user who happened to land in the shared overflow bucket
     /// during an active spray (because the table was full at the time) is
     /// collateral damage of being under attack, not a tracked identity this
     /// call can single out. Refunding the overflow bucket on any successful
     /// login would let anyone holding one valid credential keep it
     /// permanently topped up, defeating the whole point of bounding it.
-    pub fn release(&self, ip: IpAddr) {
+    pub fn release(&self, key: K) {
         let mut buckets = self.lock();
-        if let std::collections::hash_map::Entry::Occupied(mut occupied) = buckets.entries.entry(ip)
+        if let std::collections::hash_map::Entry::Occupied(mut occupied) =
+            buckets.entries.entry(key)
         {
             let w = occupied.get_mut();
             w.count = w.count.saturating_sub(1);
@@ -156,6 +165,7 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
     use std::sync::Arc;
     use std::sync::Barrier;
     use std::thread;
@@ -290,6 +300,31 @@ mod tests {
         assert!(
             !limiter.try_acquire(victim),
             "victim's budget must not be reset by a capacity spray from other IPs"
+        );
+    }
+
+    /// The password-change throttle keys by user id (a `String`), not an
+    /// `IpAddr`, so pin that the generic parameter actually works for an
+    /// owned, non-`Copy` key — including `release`, which moves the key in.
+    #[test]
+    fn string_keyed_limiter_tracks_budgets_per_key() {
+        let limiter: RateLimiter<String> = RateLimiter::new(2, Duration::from_secs(60));
+
+        assert!(limiter.try_acquire("user-a".to_string()));
+        assert!(limiter.try_acquire("user-a".to_string()));
+        assert!(
+            !limiter.try_acquire("user-a".to_string()),
+            "third attempt for the same user must be refused"
+        );
+        assert!(
+            limiter.try_acquire("user-b".to_string()),
+            "a different user must have its own budget"
+        );
+
+        limiter.release("user-a".to_string());
+        assert!(
+            limiter.try_acquire("user-a".to_string()),
+            "release should hand the attempt back"
         );
     }
 
