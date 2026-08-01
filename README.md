@@ -91,6 +91,16 @@ Every response carries `Content-Security-Policy: frame-ancestors 'none'`, `X-Fra
 
 Prefer sending HSTS from your reverse proxy. liftlog does not terminate TLS and cannot tell whether a request really arrived over HTTPS; the layer that terminates TLS does. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch for deployments that cannot set headers at the proxy. Before enabling it, make sure the whole domain — and, with `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS`, every subdomain — serves working HTTPS: this declaration cannot be withdrawn from the server side, only waited out until `max-age` expires. There is deliberately no `preload` option; configure that on your proxy if you want it. Browsers ignore the header on plain-HTTP origins, so setting it there achieves nothing. If your proxy also sends HSTS, set it in only one place.
 
+### Out of scope
+
+**Multi-factor authentication is not implemented, and is not planned.** The OWASP Authentication Cheat Sheet calls MFA the single most effective defence against password attacks, so this is a deliberate decision rather than a gap waiting to be filled — please read the reasoning before filing it as a bug.
+
+The blocker is account recovery, not the TOTP implementation. liftlog has no email, no password-reset flow, and no second channel of any kind to reach a user through. The first account created is the sole administrator. If that administrator enrolled in MFA and later lost both their authenticator and their recovery codes, nobody could restore their access — there is no support desk, and the only way back in would be editing the SQLite file by hand. For a personal, self-hosted workout journal, a realistic risk of permanently locking the owner out of their own data outweighs the attack it would prevent.
+
+What that leaves as residual risk is **credential stuffing**: a password reused from a site that was breached elsewhere. The strength policy above blocks *common* passwords, but a reused password can be strong and still be in someone's breach corpus — that is the case MFA would have covered and nothing here does. The mitigation is a unique password per site, which a password manager makes free. liftlog is deliberately friendly to them: standard form fields, correct `autocomplete` attributes, a 128-character ceiling, and every character allowed.
+
+There is also no "previously breached password" check against a service such as [Pwned Passwords](https://haveibeenpwned.com/Passwords). Doing it properly needs an outbound API call at password-set time, and a self-hosted app that otherwise never contacts the network should not start doing so without the operator asking for it.
+
 ## Audit Log
 
 Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Sessions Life Cycle*) are logged as structured `tracing` events under the `liftlog::audit` target, so they can be filtered out of general application logs and shipped to a log collector:

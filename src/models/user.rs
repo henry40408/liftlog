@@ -94,7 +94,9 @@ impl FromSqliteRow for UserListItem {
 /// working until they next set one.
 ///
 /// NIST SP800-63B, which the cheat sheet cites, treats anything under 15
-/// characters as weak when MFA is not available — and liftlog has no MFA. 15
+/// characters as weak when MFA is not available — and liftlog has no MFA, by
+/// decision rather than by omission (the README's *Out of scope* section
+/// explains why, so this pairing is permanent and not a stopgap). 15
 /// is not used here because the strength check below is doing the work NIST's
 /// blunt number stands in for: NIST's own advice is length **and blocklist
 /// checks** over composition rules, and a length floor's job in that pairing
