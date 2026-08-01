@@ -1939,3 +1939,57 @@ async fn test_setup_rejects_a_password_derived_from_the_username() {
         "a password built from the username must be rejected"
     );
 }
+
+/// The per-account backoff, end to end. The per-IP limiter is left generous
+/// here and each request carries a *different* peer address, so nothing but
+/// the account-keyed counter can be what slows these down — which is exactly
+/// the gap this closes: a spray from many sources against one account.
+///
+/// Asserts a lower bound on elapsed time only. An upper bound would be flaky
+/// on a loaded CI runner; a lower bound cannot be.
+#[tokio::test]
+async fn test_repeated_failures_against_one_account_are_delayed() {
+    let pool = common::setup_test_db();
+    // One free attempt, then 150ms, 300ms, … Small enough to keep the test
+    // quick, large enough to measure without racing the clock.
+    let base = std::time::Duration::from_millis(150);
+    let test_app = common::create_test_app_with_login_backoff(pool.clone(), 1, base);
+    common::create_test_user(&pool, "victim", "password123", UserRole::User).await;
+
+    let attempt = |peer: &str| {
+        common::with_peer(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=victim&password=wrongpass"))
+                .unwrap(),
+            peer,
+        )
+    };
+
+    // First failure is free, and spends the allowance.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(attempt("203.0.113.1:1111"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Second attempt, from a different source address, must now wait.
+    let started = std::time::Instant::now();
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(attempt("203.0.113.2:2222"))
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        elapsed >= base,
+        "expected the attempt to be held for at least {base:?}, took {elapsed:?}"
+    );
+}

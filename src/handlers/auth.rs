@@ -119,12 +119,30 @@ pub async fn login_submit(
             .into_response());
     }
 
+    // Hold the attempt for as long as this account's recent failures have
+    // earned, *before* evaluating it. Applied to the submitted username
+    // whether or not it names a real account, so the wait cannot be used to
+    // ask whether an account exists — the same reason `verify_password`
+    // spends an Argon2 verification on unknown usernames.
+    //
+    // Waiting here rather than before responding is what makes it a rate
+    // limit: the attacker's connection is occupied for the whole delay, so
+    // they cannot fire the next guess in the meantime.
+    let backoff = state.login_backoff.delay_for(&credentials.username);
+    if !backoff.is_zero() {
+        tokio::time::sleep(backoff).await;
+    }
+
     let user = state
         .user_repo
         .verify_password(&credentials.username, &credentials.password)
         .await?;
 
     if let Some(user) = user {
+        // A proven password clears the account's penalty, so a legitimate
+        // user who mistyped a few times is back to a clean slate rather than
+        // carrying the delay into their next login.
+        state.login_backoff.reset(&credentials.username);
         // Create the session before releasing the rate-limit reservation:
         // if `session_repo.create` fails, `?` below returns early and the
         // attempt stays charged instead of being refunded for a login that
@@ -163,7 +181,17 @@ pub async fn login_submit(
         // that nothing observable distinguishes them, and an audit event that
         // said which one it was would reintroduce the enumeration oracle in
         // the operator's log — where a compromised log reader could read it.
-        audit::login_failed(&audit_ctx, &credentials.username);
+        state
+            .login_backoff
+            .record_failure(credentials.username.clone());
+        // `backoff_ms` is the delay this attempt already served, not the one
+        // the next will: it makes the escalation visible in the log without
+        // needing a second event just to say the throttle engaged.
+        audit::login_failed(
+            &audit_ctx,
+            &credentials.username,
+            u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX),
+        );
         let template = LoginTemplate {
             error: Some("Invalid username or password".to_string()),
         };

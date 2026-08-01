@@ -356,3 +356,377 @@ mod tests {
         assert_eq!(successes, max_attempts as usize);
     }
 }
+
+/// Consecutive-failure counter that turns repeated failed logins against one
+/// account into an escalating delay.
+///
+/// This is deliberately **not** an account lockout, which is what the OWASP
+/// Authentication Cheat Sheet reaches for first. The cheat sheet also warns
+/// that lockout is a denial-of-service primitive — anyone can lock anyone out
+/// — and suggests letting the forgotten-password flow rescue a locked
+/// account. liftlog has no such flow, no email, and its first user is its only
+/// administrator, so a hard lockout here would be an unauthenticated attacker
+/// permanently locking the owner out of their own data with no recovery path
+/// short of editing the database by hand. An escalating delay collapses an
+/// attacker's guess rate just as effectively while leaving every legitimate
+/// login eventually possible.
+///
+/// The counter is keyed by the *submitted* username, and is incremented for
+/// unknown usernames exactly as for real ones. That symmetry is load-bearing:
+/// a delay applied only to accounts that exist would be a user-enumeration
+/// oracle measurable with a stopwatch, undoing the constant-cost work in
+/// `UserRepository::verify_password`.
+///
+/// Complements, rather than replaces, the per-IP [`RateLimiter`] on the same
+/// route: that one bounds how fast a single source can try, this one bounds
+/// how fast *one account* can be tried no matter how many sources are used.
+pub struct FailureBackoff<K = String> {
+    entries: Mutex<HashMap<K, Failures>>,
+    free_attempts: u32,
+    base: Duration,
+    max: Duration,
+    window: Duration,
+    max_entries: usize,
+}
+
+struct Failures {
+    count: u32,
+    last: Instant,
+}
+
+impl FailureBackoff<String> {
+    /// The configuration liftlog actually runs, as a named constructor rather
+    /// than four literals at the call site in `main` — where nothing can test
+    /// them and a typo in the cap would be invisible.
+    ///
+    /// Three free failures so ordinary mistyping costs nothing, then 1s, 2s,
+    /// 4s … capped at 30s, and forgotten after an hour of quiet. The cap is
+    /// what a sustained attack settles at: roughly two guesses a minute
+    /// against any one account, no matter how many source addresses are
+    /// thrown at it.
+    pub fn for_login() -> Self {
+        Self::new(
+            3,
+            Duration::from_secs(1),
+            Duration::from_secs(30),
+            Duration::from_secs(60 * 60),
+        )
+    }
+}
+
+impl<K: Eq + Hash + Clone> FailureBackoff<K> {
+    /// `free_attempts` failures cost nothing — a person mistyping their own
+    /// password should not be punished. Past that the delay doubles from
+    /// `base`, capped at `max`. An entry untouched for `window` is forgotten.
+    pub fn new(free_attempts: u32, base: Duration, max: Duration, window: Duration) -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            free_attempts,
+            base,
+            max,
+            window,
+            max_entries: MAX_ENTRIES,
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<K, Failures>> {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// How long this attempt should be held before it is even evaluated.
+    ///
+    /// Reads without mutating, so a caller that never reaches
+    /// [`Self::record_failure`] (because the request failed earlier for an
+    /// unrelated reason) does not leave the account penalised.
+    pub fn delay_for(&self, key: &K) -> Duration {
+        let entries = self.lock();
+        let Some(entry) = entries.get(key) else {
+            return Duration::ZERO;
+        };
+        if entry.last.elapsed() >= self.window {
+            return Duration::ZERO;
+        }
+        self.delay_for_count(entry.count)
+    }
+
+    /// The schedule itself, split out so it can be tested without touching the
+    /// map or the clock.
+    fn delay_for_count(&self, count: u32) -> Duration {
+        // `count` failures have already happened; this is what the *next*
+        // attempt waits. With `free_attempts = 3` that means three failures
+        // cost nothing and the fourth attempt is the first to wait — so the
+        // comparison is `<`, not `<=`. Getting this boundary wrong by one
+        // silently hands an attacker a free guess per account.
+        if count < self.free_attempts {
+            return Duration::ZERO;
+        }
+        // Saturating rather than wrapping: a long-running attack pushes
+        // `count` arbitrarily high, and `base << 40` would overflow into a
+        // nonsense duration (or panic in debug).
+        let doublings = count - self.free_attempts;
+        let scaled = self
+            .base
+            .checked_mul(1u32.checked_shl(doublings).unwrap_or(u32::MAX))
+            .unwrap_or(self.max);
+        scaled.min(self.max)
+    }
+
+    /// Records one failed attempt against `key`.
+    pub fn record_failure(&self, key: K) {
+        let mut entries = self.lock();
+
+        if entries.len() >= self.max_entries && !entries.contains_key(&key) {
+            // Drop everything already past its window first; a spray of
+            // one-shot usernames ages out on its own.
+            let window = self.window;
+            entries.retain(|_, f| f.last.elapsed() < window);
+
+            if entries.len() >= self.max_entries {
+                // Still full of *live* entries. Evict the least recently
+                // touched one rather than declining to track this key:
+                // declining would mean an attacker who first sprayed enough
+                // distinct usernames to fill the table could then hammer their
+                // real target with no delay at all, which is precisely the
+                // attack this exists to stop. Evicting the stalest entry keeps
+                // the newest activity tracked.
+                //
+                // The residual is that a sustained spray can still churn a
+                // specific victim's entry out. Reaching that requires keeping
+                // 10_000 entries alive inside the window, every one of them
+                // paid for with a failed login that also cost the attacker an
+                // Argon2 verification and a slot in the per-IP limiter.
+                if let Some(stalest) = entries
+                    .iter()
+                    .min_by_key(|(_, f)| f.last)
+                    .map(|(k, _)| k.clone())
+                {
+                    entries.remove(&stalest);
+                }
+            }
+        }
+
+        let entry = entries.entry(key).or_insert(Failures {
+            count: 0,
+            last: Instant::now(),
+        });
+        // An entry whose window lapsed starts over rather than resuming from
+        // an old count — otherwise a single failure months later would inherit
+        // the full penalty of a long-forgotten attack.
+        if entry.last.elapsed() >= self.window {
+            entry.count = 0;
+        }
+        entry.count = entry.count.saturating_add(1);
+        entry.last = Instant::now();
+    }
+
+    /// Clears the penalty after a proven-correct password.
+    pub fn reset(&self, key: &K) {
+        self.lock().remove(key);
+    }
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::*;
+
+    fn backoff() -> FailureBackoff<String> {
+        FailureBackoff::new(
+            3,
+            Duration::from_secs(1),
+            Duration::from_secs(30),
+            Duration::from_secs(3600),
+        )
+    }
+
+    #[test]
+    fn free_attempts_cost_nothing() {
+        let b = backoff();
+        let key = "alice".to_string();
+        for _ in 0..3 {
+            assert_eq!(b.delay_for(&key), Duration::ZERO);
+            b.record_failure(key.clone());
+        }
+        assert_eq!(
+            b.delay_for(&key),
+            Duration::from_secs(1),
+            "the first failure past the free allowance should start the delay"
+        );
+    }
+
+    #[test]
+    fn delay_doubles_then_saturates_at_the_cap() {
+        let b = backoff();
+        // Below the free allowance nothing is charged at all.
+        for count in 0..3 {
+            assert_eq!(b.delay_for_count(count), Duration::ZERO);
+        }
+        let expected = [1, 2, 4, 8, 16, 30, 30, 30];
+        for (i, secs) in expected.iter().enumerate() {
+            let count = 3 + u32::try_from(i).unwrap();
+            assert_eq!(
+                b.delay_for_count(count),
+                Duration::from_secs(*secs),
+                "after {count} failures the next attempt should wait {secs}s"
+            );
+        }
+    }
+
+    /// A long-running attack pushes the count arbitrarily high; the shift used
+    /// to double the delay must not overflow into a nonsense duration.
+    #[test]
+    fn absurd_failure_counts_stay_at_the_cap() {
+        let b = backoff();
+        for count in [40u32, 100, 1000, u32::MAX] {
+            assert_eq!(
+                b.delay_for_count(count),
+                Duration::from_secs(30),
+                "count {count} should clamp to the cap"
+            );
+        }
+    }
+
+    #[test]
+    fn a_proven_password_clears_the_penalty() {
+        let b = backoff();
+        let key = "alice".to_string();
+        for _ in 0..6 {
+            b.record_failure(key.clone());
+        }
+        assert!(b.delay_for(&key) > Duration::ZERO);
+
+        b.reset(&key);
+        assert_eq!(b.delay_for(&key), Duration::ZERO);
+    }
+
+    #[test]
+    fn accounts_are_penalised_independently() {
+        let b = backoff();
+        for _ in 0..6 {
+            b.record_failure("alice".to_string());
+        }
+        assert!(b.delay_for(&"alice".to_string()) > Duration::ZERO);
+        assert_eq!(b.delay_for(&"bob".to_string()), Duration::ZERO);
+    }
+
+    /// An entry whose window has lapsed must not be read as a live penalty —
+    /// otherwise one failure and a long silence would leave the account
+    /// permanently slowed.
+    #[test]
+    fn a_lapsed_entry_stops_delaying() {
+        let b = FailureBackoff::<String>::new(
+            0,
+            Duration::from_secs(1),
+            Duration::from_secs(30),
+            Duration::ZERO,
+        );
+        let key = "alice".to_string();
+        b.record_failure(key.clone());
+        assert_eq!(
+            b.delay_for(&key),
+            Duration::ZERO,
+            "a zero-length window is already lapsed when it is read"
+        );
+    }
+
+    /// The count restarts rather than resuming, so a failure long after an old
+    /// attack does not inherit its penalty.
+    #[test]
+    fn a_lapsed_entry_restarts_its_count() {
+        let b = FailureBackoff::<String>::new(
+            0,
+            Duration::from_secs(1),
+            Duration::from_secs(30),
+            Duration::ZERO,
+        );
+        let key = "alice".to_string();
+        for _ in 0..5 {
+            b.record_failure(key.clone());
+        }
+        assert_eq!(
+            b.lock().get(&key).unwrap().count,
+            1,
+            "each record should have found the window lapsed and started over"
+        );
+    }
+
+    /// At capacity the stalest entry is evicted so the newest activity stays
+    /// tracked. Declining to track instead would let an attacker fill the
+    /// table with throwaway usernames and then hammer their real target with
+    /// no delay at all.
+    #[test]
+    fn at_capacity_the_stalest_entry_is_evicted_for_a_new_one() {
+        let mut b = FailureBackoff::<String>::new(
+            0,
+            Duration::from_secs(1),
+            Duration::from_secs(30),
+            Duration::from_secs(3600),
+        );
+        b.max_entries = 2;
+
+        b.record_failure("stale".to_string());
+        b.record_failure("fresher".to_string());
+        b.record_failure("fresher".to_string());
+
+        let victim = "victim".to_string();
+        b.record_failure(victim.clone());
+
+        let entries = b.lock();
+        assert!(entries.contains_key(&victim), "the new key must be tracked");
+        assert!(
+            !entries.contains_key("stale"),
+            "the least recently touched key should have been evicted"
+        );
+        assert!(
+            entries.contains_key("fresher"),
+            "a more recently touched key should survive"
+        );
+        assert!(entries.len() <= 2);
+    }
+
+    /// `delay_for` must not mutate: a request that reads the delay and then
+    /// never records a failure (because it succeeded, or failed for an
+    /// unrelated reason) must leave the count where it was.
+    #[test]
+    fn reading_the_delay_does_not_penalise() {
+        let b = backoff();
+        let key = "alice".to_string();
+        b.record_failure(key.clone());
+        for _ in 0..10 {
+            let _ = b.delay_for(&key);
+        }
+        assert_eq!(b.lock().get(&key).unwrap().count, 1);
+    }
+}
+
+#[cfg(test)]
+mod production_backoff_tests {
+    use super::*;
+
+    /// Pins the schedule liftlog ships with. `backoff_tests` above proves the
+    /// mechanism; this proves the numbers the deployment actually runs, which
+    /// otherwise lived as four bare literals in `main` where nothing could
+    /// check them.
+    #[test]
+    fn for_login_matches_the_documented_schedule() {
+        let b = FailureBackoff::for_login();
+
+        for count in 0..3 {
+            assert_eq!(
+                b.delay_for_count(count),
+                Duration::ZERO,
+                "three failures should be free"
+            );
+        }
+        assert_eq!(b.delay_for_count(3), Duration::from_secs(1));
+        assert_eq!(b.delay_for_count(4), Duration::from_secs(2));
+        assert_eq!(b.delay_for_count(5), Duration::from_secs(4));
+        assert_eq!(
+            b.delay_for_count(u32::MAX),
+            Duration::from_secs(30),
+            "a sustained attack should settle at the 30s cap"
+        );
+        assert_eq!(b.window, Duration::from_secs(60 * 60));
+    }
+}

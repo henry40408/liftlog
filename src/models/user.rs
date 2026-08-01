@@ -152,11 +152,18 @@ const MIN_PASSWORD_SCORE: u8 = 3;
 ///    with input length.
 ///
 /// 2. `zxcvbn` score must be at least [`MIN_PASSWORD_SCORE`]. This is the
-///    cheat sheet's *Block common and previously breached passwords*
-///    requirement: zxcvbn ships the common-password and English-word
-///    dictionaries plus pattern detection (keyboard walks, l33t substitution,
-///    dates, repeats), so it rejects `MyPassword12` — which every composition
-///    rule ever written would happily accept.
+///    *common* half of the cheat sheet's *Block common and previously
+///    breached passwords* requirement: zxcvbn ships the common-password and
+///    English-word dictionaries plus pattern detection (keyboard walks, l33t
+///    substitution, dates, repeats), so it rejects `MyPassword12` — which
+///    every composition rule ever written would happily accept.
+///
+///    It is **not** the *previously breached* half, and no threshold here can
+///    make it so: zxcvbn scores how guessable a string is, while a breach
+///    lookup answers whether that exact string has ever appeared in a dump —
+///    a fact about history that no guessability model can derive. A reused
+///    password can score 4 and still sit in a corpus. That gap is deliberate
+///    and documented under *Out of scope* in the README.
 ///
 /// `user_inputs` are strings zxcvbn should treat as known to an attacker and
 /// penalise matches against; pass the username. Without it, `testuser1234` is
