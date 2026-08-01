@@ -73,6 +73,10 @@ Promoting a user to admin logs that user out of every device. A privilege-level 
 
 A failed login costs the same whether or not the username exists. The response wording is already generic, and an unknown username now spends an Argon2 verification against a throwaway hash so the two paths cannot be told apart by response time either — otherwise a single request would reveal whether an account exists, letting an attacker aim the login rate limit at real accounts only.
 
+Changing a password is throttled too, at 5 attempts per 15 minutes. `POST /settings/password` verifies the current password, which makes it liftlog's second place a password can be guessed at — reachable by anyone holding a stolen session cookie, and costing two Argon2 operations per request. Unlike the login throttle this one is keyed by **user id**, not client IP: the request is authenticated, so the account under attack is known exactly, and an IP key would let the same stolen session buy a fresh budget from every source address. A successful change hands its attempt back, so rotating your password repeatedly never locks you out.
+
+Passwords must be 8 to 128 characters. The maximum is there so the hash comparison has a bounded input (OWASP *Compare Password Hashes Using Safe Functions*); over-long passwords are rejected, never silently truncated. Both bounds count **characters, not bytes**, so a non-ASCII passphrase is measured the same way the error message describes it.
+
 Every response carries `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`. These are unconditional — there is no setting to turn them off. The first two block clickjacking, which nothing else here covers: `SameSite=Lax` still sends the session cookie on a top-level iframe navigation, and the CSRF origin guard sees `Sec-Fetch-Site: same-origin` because the click really did come from the victim's browser. This means **liftlog cannot be embedded in an iframe**, including the public `/shared/{token}` page. The CSP carries only `frame-ancestors`; it is not a full content policy, so it does not restrict scripts or styles.
 
 Prefer sending HSTS from your reverse proxy. liftlog does not terminate TLS and cannot tell whether a request really arrived over HTTPS; the layer that terminates TLS does. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch for deployments that cannot set headers at the proxy. Before enabling it, make sure the whole domain — and, with `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS`, every subdomain — serves working HTTPS: this declaration cannot be withdrawn from the server side, only waited out until `max-age` expires. There is deliberately no `preload` option; configure that on your proxy if you want it. Browsers ignore the header on plain-HTTP origins, so setting it there achieves nothing. If your proxy also sends HSTS, set it in only one place.
@@ -88,6 +92,17 @@ Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Session
 | `session.destroyed` | info | A session (or, for a bulk delete, a batch of sessions) was deleted — logout, password change, "log out other devices", an admin promoting the user to admin, or an admin deleting the user (`reason` says which) |
 | `session.expired` | info | A session was found dead on use and lazily deleted (`reason`: `idle` or `absolute`), or a batch of abandoned sessions was retired by the hourly background sweep (`reason`: `sweep`, which carries only a `count` and no request fields) |
 | `session.rejected` | debug | An unrecognised session token was presented |
+
+Authentication failures are logged alongside them (OWASP Authentication Cheat Sheet, *Logging and Monitoring*: all password failures and all lockouts must be logged and reviewed). These are the events to alert on — a burst of them is what a brute-force or credential-stuffing run looks like:
+
+| Event | Level | Meaning |
+|-------|-------|---------|
+| `auth.login.failed` | warn | A login was rejected. Carries the attempted `username` (truncated to 256 chars) so you can see which account is being targeted |
+| `auth.login.throttled` | warn | A login was refused by the rate limiter before any credential was checked |
+| `auth.password_change.failed` | warn | `POST /settings/password` was rejected because the current password was wrong. Carries `user_id` and `actor_session_fp` |
+| `auth.password_change.throttled` | warn | A password change was refused by the per-user rate limiter |
+
+`auth.login.failed` is emitted identically for an unknown username and a wrong password — same event, same wording, same fields. Distinguishing them would rebuild in the log the user-enumeration oracle that the constant-cost login path exists to remove. Note the trade-off inherent in recording the attempted username at all: a user who types their password into the username field puts it in the log, the same way `sshd` does.
 
 Every request-scoped event carries `client_ip`, `user_agent` (truncated to 256 chars), and `path`, plus a `session_fp` field — a salted SHA-256 fingerprint of the session token, never the raw token itself. The salt is generated fresh at process startup and is never logged, so `session_fp` values let you correlate events for the same session **within one process's lifetime**, but they do NOT correlate across restarts. Bulk-delete events carry `actor_session_fp` (the session that performed the action) and `count` instead of a single `session_fp`, since there's no one session to name. The sweep event is an exception: it has no request context and carries only `count`.
 

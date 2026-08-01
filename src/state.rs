@@ -13,7 +13,14 @@ pub struct AppState {
     pub exercise_repo: ExerciseRepository,
     pub workout_repo: WorkoutRepository,
     pub session_repo: SessionRepository,
-    pub login_rate_limiter: Arc<RateLimiter>,
+    /// Throttles `POST /auth/login`, keyed by client IP — the request is
+    /// anonymous, so the source address is the only identity available.
+    pub login_rate_limiter: Arc<RateLimiter<IpAddr>>,
+    /// Throttles `POST /settings/password`, keyed by user id. That route is
+    /// liftlog's other password-verification entry point; see
+    /// `handlers::settings::change_password` for why the key is the account
+    /// and not the address.
+    pub password_change_rate_limiter: Arc<RateLimiter<String>>,
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Arc<Vec<IpAddr>>,
     pub cookie_secure: bool,
