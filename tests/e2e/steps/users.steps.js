@@ -31,22 +31,56 @@ When(
   },
 );
 
-When('I promote that user to admin', async ({ page, scenarioState }) => {
+// Promote and delete no longer fire a window.confirm(); each opens a
+// confirmation page that re-checks the admin's own password before acting,
+// so the dialog handlers these steps used to install are gone with it.
+//
+// `linkName` is the row action on /users; `buttonName` is the confirmation
+// page's submit button, worded in full ("Delete user", not "Delete"). Both
+// are spelled out rather than leaning on getByRole's substring matching, so
+// a reworded button fails loudly instead of quietly matching something else.
+async function confirmUserAction(page, username, linkName, buttonName) {
   await page.goto('/users');
-  page.once('dialog', (d) => d.accept());
-  await userRow(page, scenarioState.otherUser)
-    .getByRole('button', { name: 'Promote' })
-    .click();
+  await userRow(page, username).getByRole('link', { name: linkName }).click();
+  await page
+    .getByLabel('Confirm your password to continue')
+    .fill(ADMIN.password);
+  await page.getByRole('button', { name: buttonName, exact: true }).click();
   await expect(page).toHaveURL('/users');
+}
+
+When('I promote that user to admin', async ({ page, scenarioState }) => {
+  await confirmUserAction(
+    page,
+    scenarioState.otherUser,
+    'Promote',
+    'Promote to admin',
+  );
 });
 
 When('I delete that user', async ({ page, scenarioState }) => {
-  await page.goto('/users');
-  page.once('dialog', (d) => d.accept());
-  await userRow(page, scenarioState.otherUser)
-    .getByRole('button', { name: 'Delete' })
-    .click();
-  await expect(page).toHaveURL('/users');
+  await confirmUserAction(page, scenarioState.otherUser, 'Delete', 'Delete user');
+});
+
+When(
+  'I open the delete confirmation for that user',
+  async ({ page, scenarioState }) => {
+    await page.goto('/users');
+    await userRow(page, scenarioState.otherUser)
+      .getByRole('link', { name: 'Delete' })
+      .click();
+  },
+);
+
+When('I confirm with the wrong password', async ({ page }) => {
+  await page
+    .getByLabel('Confirm your password to continue')
+    .fill('definitely-not-it');
+  await page.getByRole('button', { name: 'Delete user', exact: true }).click();
+});
+
+Then('I see a confirmation error', async ({ page }) => {
+  await expect(page.locator('.error')).toContainText('Password is incorrect');
 });
 
 Then(
@@ -93,6 +127,8 @@ Then(
     await page.goto('/users');
     const myRow = page.locator('tr').filter({ hasText: 'lifter' }).first();
     await expect(myRow.getByText('(you)')).toBeVisible();
-    await expect(myRow.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+    // A link now, not a submit button — the row action opens a confirmation
+    // page rather than posting directly.
+    await expect(myRow.getByRole('link', { name: 'Delete' })).toHaveCount(0);
   },
 );

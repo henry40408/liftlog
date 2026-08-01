@@ -53,7 +53,8 @@ async fn test_admin_delete_user_removes_their_sessions() {
                 .method("POST")
                 .uri(format!("/users/{}/delete", victim.id))
                 .header(header::COOKIE, &admin_cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass123"))
                 .unwrap(),
         )
         .await
@@ -113,7 +114,8 @@ async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
                 .method("POST")
                 .uri(format!("/users/{}/delete", victim.id))
                 .header(header::COOKIE, &admin_cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass123"))
                 .unwrap(),
         )
         .await
@@ -185,7 +187,8 @@ async fn test_admin_delete_user_removes_sessions_even_with_foreign_keys_enforced
                 .method("POST")
                 .uri(format!("/users/{}/delete", victim.id))
                 .header(header::COOKIE, &admin_cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass123"))
                 .unwrap(),
         )
         .await

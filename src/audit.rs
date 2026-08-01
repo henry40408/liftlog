@@ -164,41 +164,51 @@ pub fn login_throttled(ctx: &AuditContext, username: &str) {
     );
 }
 
-/// A wrong `current_password` on `POST /settings/password`. This is the
-/// second place liftlog verifies a password, so it is the second place a
-/// password can be guessed at — from an authenticated session, which is
-/// exactly the position an attacker holding a stolen cookie is in.
+/// A wrong password on one of the authenticated routes that re-check it
+/// before acting — the password change, and the admin promote/delete
+/// confirmations. These are the places a password can be guessed at *from an
+/// authenticated session*, which is exactly the position an attacker holding
+/// a stolen cookie is in.
+///
+/// `action` names which one, so a single event family covers every such route
+/// and an operator can still tell them apart. One family rather than one
+/// event per route because they are the same question from an attacker's
+/// point of view — "what is this account's password?" — and alerting should
+/// see them as one signal.
 ///
 /// Carries `user_id` rather than a username: the request is authenticated, so
 /// the account is known for certain and no attacker-supplied string is
 /// involved.
-pub fn password_change_failed(ctx: &AuditContext, actor_session_fp: &str, user_id: &str) {
+pub fn reauth_failed(ctx: &AuditContext, actor_session_fp: &str, user_id: &str, action: &str) {
     let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
-        event = "auth.password_change.failed",
+        event = "auth.reauth.failed",
         actor_session_fp,
         user_id,
+        action,
         client_ip = %ctx.client_ip,
         user_agent,
         path = %ctx.path,
-        "password change rejected: current password incorrect"
+        "re-authentication rejected: password incorrect"
     );
 }
 
-/// A password-change attempt refused by the per-user throttle. See
-/// [`password_change_failed`] for why this endpoint is throttled at all.
-pub fn password_change_throttled(ctx: &AuditContext, actor_session_fp: &str, user_id: &str) {
+/// A re-authentication attempt refused by the per-user throttle. See
+/// [`reauth_failed`] for why these routes are throttled at all; the budget is
+/// shared across them so moving to another route buys no fresh allowance.
+pub fn reauth_throttled(ctx: &AuditContext, actor_session_fp: &str, user_id: &str, action: &str) {
     let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
-        event = "auth.password_change.throttled",
+        event = "auth.reauth.throttled",
         actor_session_fp,
         user_id,
+        action,
         client_ip = %ctx.client_ip,
         user_agent,
         path = %ctx.path,
-        "password change throttled"
+        "re-authentication throttled"
     );
 }
 
@@ -364,10 +374,9 @@ mod tests {
                 5,
                 std::time::Duration::from_secs(60),
             )),
-            password_change_rate_limiter: std::sync::Arc::new(crate::rate_limit::RateLimiter::new(
-                5,
-                std::time::Duration::from_secs(900),
-            )),
+            sensitive_action_rate_limiter: std::sync::Arc::new(
+                crate::rate_limit::RateLimiter::new(5, std::time::Duration::from_secs(900)),
+            ),
             trusted_proxy_header: TrustedProxyHeader::None,
             trusted_proxies: std::sync::Arc::new(vec![]),
             cookie_secure: false,

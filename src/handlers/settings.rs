@@ -9,10 +9,10 @@ use serde::Deserialize;
 
 use crate::audit::{self, AuditContext};
 use crate::error::Result;
-use crate::middleware::AuthUser;
+use crate::middleware::{AuthUser, SuppressSessionRefresh};
 use crate::models::password_policy_error;
 use crate::repositories::SessionListRow;
-use crate::session::token_fingerprint;
+use crate::session::{create_session_cookie, token_fingerprint};
 use crate::state::AppState;
 use crate::version::GIT_VERSION;
 
@@ -74,7 +74,17 @@ pub async fn change_password(
     audit_ctx: AuditContext,
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
-    let validation_error = if form.new_password == form.confirm_password {
+    let validation_error = if form.new_password != form.confirm_password {
+        Some("New passwords do not match".to_string())
+    } else if form.new_password == form.current_password {
+        // Checked before the policy gate so the message is the specific one.
+        // This is a correctness guard rather than a security control: the
+        // request would otherwise "succeed" while changing nothing, tell the
+        // user their password was changed, and destroy their other sessions —
+        // all for a no-op. Someone rotating a possibly-compromised password
+        // would walk away believing they had.
+        Some("New password must be different from the current password".to_string())
+    } else {
         // Same policy as signup and admin-created users; see
         // `password_policy_error`. The length ceiling also caps what reaches
         // Argon2 on this route, which runs it twice per request.
@@ -87,8 +97,6 @@ pub async fn change_password(
             password_policy_error(&new_password, "New password", &[username.as_str()])
         })
         .await?
-    } else {
-        Some("New passwords do not match".to_string())
     };
 
     if let Some(message) = validation_error {
@@ -110,10 +118,10 @@ pub async fn change_password(
     // proved correct, so a legitimate user changing their password repeatedly
     // is never locked out while a guesser's failures all stay charged.
     if !state
-        .password_change_rate_limiter
+        .sensitive_action_rate_limiter
         .try_acquire(auth_user.id.clone())
     {
-        audit::password_change_throttled(&audit_ctx, &actor_fp, &auth_user.id);
+        audit::reauth_throttled(&audit_ctx, &actor_fp, &auth_user.id, "password_change");
         return render_page_with_status(
             &state,
             auth_user,
@@ -130,7 +138,7 @@ pub async fn change_password(
         .await?;
 
     if verified.is_none() {
-        audit::password_change_failed(&audit_ctx, &actor_fp, &auth_user.id);
+        audit::reauth_failed(&audit_ctx, &actor_fp, &auth_user.id, "password_change");
         return render_page(
             &state,
             auth_user,
@@ -148,13 +156,36 @@ pub async fn change_password(
     // Refund only now: the reservation stays charged for every path above
     // that did not prove knowledge of the current password.
     state
-        .password_change_rate_limiter
+        .sensitive_action_rate_limiter
         .release(auth_user.id.clone());
 
+    // OWASP Session Management Cheat Sheet, "Renew the Session ID After Any
+    // Privilege Level Change" and the Authentication Cheat Sheet's
+    // *Re-authentication After Risk Events* ("invalidate sessions after
+    // re-authentication and rotate tokens"): a credential change is the risk
+    // event. Destroying the *other* sessions was already happening; what was
+    // missing is that the token in the user's own browser survived unchanged,
+    // so a token captured before the change kept working after it — and
+    // changing a password one believes to be compromised is exactly when that
+    // matters.
+    //
+    // The new session is created *before* anything is destroyed: if `create`
+    // fails, `?` returns having changed nothing but the password, leaving the
+    // user logged in on their existing token rather than logged out with no
+    // way back in. Passing the *new* token as the exception to
+    // `delete_all_for_user_except` then retires the old current session in the
+    // same statement as every other device, so there is no window in which
+    // both tokens are live.
+    let new_token = state.session_repo.create(&auth_user.id).await?;
+    let new_fp = token_fingerprint(&new_token, state.log_salt.as_ref());
     let deleted_sessions = state
         .session_repo
-        .delete_all_for_user_except(&auth_user.id, &auth_user.session_token)
+        .delete_all_for_user_except(&auth_user.id, &new_token)
         .await?;
+
+    // `count` now includes the rotated-away session, not just the other
+    // devices — accurate, and the `session.created` event below names the
+    // replacement, so the pair still reconciles.
     audit::sessions_destroyed_bulk(
         &audit_ctx,
         &actor_fp,
@@ -162,14 +193,43 @@ pub async fn change_password(
         deleted_sessions,
         "password_change",
     );
+    audit::session_created(
+        &audit_ctx,
+        &new_fp,
+        &auth_user.id,
+        &auth_user.username,
+        "password_change_rotation",
+    );
 
-    render_page(
+    // The settings page marks the current row "This device" by comparing each
+    // session's token against `user.session_token`, so the rendered identity
+    // has to carry the new token — otherwise the page the user lands on shows
+    // every session as somebody else's.
+    let mut auth_user = auth_user;
+    auth_user.session_token = new_token.clone();
+
+    let mut response = render_page(
         &state,
         auth_user,
         None,
         Some("Password changed successfully. All other sessions have been logged out.".to_string()),
     )
-    .await
+    .await?;
+
+    // Hand the browser the replacement cookie, and stop
+    // `sliding_session_middleware` from appending a refresh for the token
+    // that this request arrived with — that token no longer exists, and its
+    // `Set-Cookie` would land after ours and log the user straight out.
+    let cookie = create_session_cookie(&new_token, state.cookie_secure);
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        cookie
+            .to_string()
+            .parse()
+            .expect("session cookie serialises to a valid header value"),
+    );
+    response.extensions_mut().insert(SuppressSessionRefresh);
+    Ok(response)
 }
 
 pub async fn logout_others(

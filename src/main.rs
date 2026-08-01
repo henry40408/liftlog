@@ -177,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
         workout_repo,
         session_repo,
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
-        password_change_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
+        sensitive_action_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         cookie_secure: config.cookie_secure,
@@ -192,10 +192,21 @@ async fn main() -> anyhow::Result<()> {
     // Start server
     let addr = config.bind;
     tracing::info!("Starting server at http://{}", addr);
-    tracing::info!(
-        cookie_secure = config.cookie_secure,
-        "session cookie Secure attribute"
-    );
+    // Not an `info!` like the rest of this block. liftlog never terminates
+    // TLS, so it cannot detect that it is being served over HTTPS with this
+    // left off — and that combination silently drops both the `Secure`
+    // attribute and the `__Host-` cookie prefix, which is precisely the
+    // misconfiguration nobody notices because everything still works. A
+    // deployment that really is plain HTTP (loopback, a private LAN) will see
+    // this warning too and can ignore it; the asymmetry is deliberate, since
+    // one case is a security hole and the other is a line of log noise.
+    if config.cookie_secure {
+        tracing::info!("session cookie Secure attribute is enabled");
+    } else {
+        tracing::warn!(
+            "LIFTLOG_COOKIE_SECURE is off: the session cookie is sent without `Secure` and without the `__Host-` prefix, so it will travel over plain HTTP and can be overwritten by a sibling subdomain. Set LIFTLOG_COOKIE_SECURE=true if this deployment is served over HTTPS."
+        );
+    }
     if config.hsts_max_age > 0 {
         tracing::info!(
             max_age = config.hsts_max_age,

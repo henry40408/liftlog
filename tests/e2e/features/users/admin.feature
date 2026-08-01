@@ -26,6 +26,14 @@ Feature: Admin user management
     Then I do not see the "+ Add New User" button on the users page
     And visiting "/users/new" returns a 403
 
+  Scenario: A destructive action needs the admin's own password
+    Given I am logged in as "lifter"
+    And another user exists
+    When I open the delete confirmation for that user
+    And I confirm with the wrong password
+    Then I see a confirmation error
+    And I see that user listed on the users page
+
   Scenario: Admin cannot delete their own account from the users page
     Given I am logged in as "lifter"
     Then the users page does not let me delete my own account

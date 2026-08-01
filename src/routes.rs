@@ -43,8 +43,16 @@ pub fn create_router(state: AppState) -> Router {
             "/users/new",
             get(auth::new_user_page).post(auth::new_user_submit),
         )
-        .route("/users/{id}/delete", post(auth::delete_user))
-        .route("/users/{id}/promote", post(auth::promote_user))
+        // GET renders a confirmation page that re-checks the admin's own
+        // password; POST is the action itself and refuses without it.
+        .route(
+            "/users/{id}/delete",
+            get(auth::confirm_delete_page).post(auth::delete_user),
+        )
+        .route(
+            "/users/{id}/promote",
+            get(auth::confirm_promote_page).post(auth::promote_user),
+        )
         .route("/workouts", get(workouts::list))
         .route("/workouts/new", get(workouts::new_page))
         .route("/workouts", post(workouts::create))

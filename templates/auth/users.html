@@ -34,15 +34,15 @@
                 {% if user.is_admin() %}
                 <td data-label="Actions">
                     {% if u.id != user.id %}
+                    {# Links, not POST forms with a confirm() dialog: both
+                       actions now go through a page that spells out the
+                       consequence and re-checks the admin's own password. The
+                       action itself is still a POST, from that page. #}
                     <div class="actions">
                         {% if !u.role.is_admin() %}
-                        <form action="/users/{{ u.id }}/promote" method="post" style="display:inline;" onsubmit="return confirm('Promote {{ u.username }} to admin?');">
-                            <button type="submit" class="btn btn-ghost btn-sm">Promote</button>
-                        </form>
+                        <a href="/users/{{ u.id }}/promote" class="btn btn-ghost btn-sm">Promote</a>
                         {% endif %}
-                        <form action="/users/{{ u.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('Delete user {{ u.username }}?');">
-                            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                        </form>
+                        <a href="/users/{{ u.id }}/delete" class="btn btn-danger btn-sm">Delete</a>
                     </div>
                     {% else %}
                     <span class="muted">(you)</span>

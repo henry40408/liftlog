@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action_label }} - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<main>
+    <div class="page-header">
+        <h1>{{ action_label }}</h1>
+    </div>
+
+    {% if let Some(err) = error %}
+    <div class="error">{{ err }}</div>
+    {% endif %}
+
+    <p class="mb-4">{{ consequence }}</p>
+
+    <form method="post" action="{{ form_action }}">
+        <div class="form-group">
+            <label for="current_password">Confirm your password to continue</label>
+            <input type="password" id="current_password" name="current_password" required
+                   autocomplete="current-password" autofocus>
+        </div>
+        <button type="submit" class="btn btn-danger">{{ action_label }}</button>
+        <a href="/users" class="btn btn-ghost">Cancel</a>
+    </form>
+</main>
+{% endblock %}
