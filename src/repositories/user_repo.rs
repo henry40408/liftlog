@@ -318,6 +318,50 @@ mod tests {
         assert_eq!(found.unwrap().username, "findme");
     }
 
+    /// Usernames are exact identifiers, and that is a decision rather than an
+    /// accident of `SQLite`'s default collation — see *Out of scope* in the
+    /// README. Pinned here so it cannot drift silently: a lookup that quietly
+    /// became case-insensitive would also need the per-account login backoff
+    /// (keyed by the submitted username) to normalise with it, or varying the
+    /// case would buy a fresh backoff counter per spelling and bypass the
+    /// throttle.
+    #[tokio::test]
+    async fn usernames_are_case_sensitive() {
+        let pool = setup_test_db();
+        let repo = UserRepository::new(pool);
+
+        repo.create("henry", "purple-monkey-dishwasher", UserRole::User)
+            .await
+            .unwrap();
+
+        assert!(
+            repo.find_by_username("henry").await.unwrap().is_some(),
+            "the exact spelling must resolve"
+        );
+        for variant in ["Henry", "HENRY", "hEnRy"] {
+            assert!(
+                repo.find_by_username(variant).await.unwrap().is_none(),
+                "{variant} must not resolve to henry"
+            );
+            assert!(
+                repo.verify_password(variant, "purple-monkey-dishwasher")
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "the right password under the wrong case must not authenticate {variant}"
+            );
+        }
+
+        // Nothing stops a second account differing only in case; the README
+        // says so rather than leaving it to be discovered.
+        assert!(
+            repo.create("Henry", "purple-monkey-dishwasher", UserRole::User)
+                .await
+                .is_ok(),
+            "a case variant is a distinct account, not a duplicate"
+        );
+    }
+
     #[tokio::test]
     async fn test_find_by_username_not_exists() {
         let pool = setup_test_db();

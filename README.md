@@ -113,6 +113,13 @@ Put in terms of the attacks: zxcvbn is a direct hit against **password spraying*
 
 Closing it properly therefore needs an outbound API call at password-set time. The k-anonymity protocol means the password itself never leaves (only the first five characters of its SHA-1, matched against the returned suffixes locally), but it still turns an application that contacts nothing into one that contacts something, and it needs an answer for what to do when the service is unreachable. For a self-hosted personal journal that trade is not obviously worth making, so it is not made. The residual risk is the credential-stuffing paragraph above, and the mitigation is the same: a unique password per site.
 
+**Usernames are case-sensitive, and making them case-insensitive is out of scope.** A username is treated as an exact identifier: `henry` and `Henry` are different accounts and can both exist. Two consequences are worth knowing rather than discovering:
+
+- Typing your username in the wrong case fails with the same generic `Invalid username or password` as a wrong password would. That wording is deliberate — a more specific message would tell an attacker which usernames exist — but it does mean a case slip looks identical to a forgotten password.
+- An administrator can create `Admin` alongside `admin`. In a deployment with more than one person, decide your own convention; nothing enforces one.
+
+This is enforced by a test, so it cannot drift by accident. If it is ever revisited, note that the per-account login backoff is keyed by the **submitted** username: any change that makes lookup case-insensitive has to normalise that key — and anything else keyed by username — in the same change, or an attacker can vary the case to get a fresh backoff counter per spelling and bypass the throttle entirely.
+
 ## Audit Log
 
 Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Sessions Life Cycle*) are logged as structured `tracing` events under the `liftlog::audit` target, so they can be filtered out of general application logs and shipped to a log collector:
