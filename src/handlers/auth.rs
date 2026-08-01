@@ -34,6 +34,16 @@ struct NewUserTemplate {
 }
 
 #[derive(Template)]
+#[template(path = "auth/confirm_action.html")]
+struct ConfirmActionTemplate {
+    user: AuthUser,
+    action_label: &'static str,
+    consequence: String,
+    form_action: String,
+    error: Option<String>,
+}
+
+#[derive(Template)]
 #[template(path = "auth/users.html")]
 struct UsersListTemplate {
     user: AuthUser,
@@ -308,16 +318,215 @@ pub async fn users_list(State(state): State<AppState>, auth_user: AuthUser) -> R
     Ok(Html(template.render()?).into_response())
 }
 
-pub async fn delete_user(
+/// The password an admin re-enters on the confirmation page before a
+/// destructive user-management action goes through.
+#[derive(Debug, serde::Deserialize)]
+pub struct ConfirmActionForm {
+    pub current_password: String,
+}
+
+/// Which sensitive action a confirmation page is gating. Keeps the wording,
+/// the form target and the audit `action` string for each one in a single
+/// place, so the page and the handler that acts on it cannot disagree about
+/// what is being confirmed.
+#[derive(Clone, Copy)]
+enum SensitiveAction {
+    PromoteUser,
+    DeleteUser,
+}
+
+impl SensitiveAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PromoteUser => "Promote to admin",
+            Self::DeleteUser => "Delete user",
+        }
+    }
+
+    /// Spelled out in full on the page: the point of an interstitial is that
+    /// the admin reads what is about to happen, which a `window.confirm()`
+    /// one-liner does not encourage.
+    fn consequence(self, username: &str) -> String {
+        match self {
+            Self::PromoteUser => format!(
+                "{username} will gain full administrative access, including the ability to create and delete other users. They will be signed out of every device and must log in again."
+            ),
+            Self::DeleteUser => format!(
+                "{username} and all of their workouts, exercises and sessions will be permanently deleted. This cannot be undone."
+            ),
+        }
+    }
+
+    fn form_action(self, user_id: &str) -> String {
+        match self {
+            Self::PromoteUser => format!("/users/{user_id}/promote"),
+            Self::DeleteUser => format!("/users/{user_id}/delete"),
+        }
+    }
+
+    /// Value of the `action` field on the `auth.reauth.*` audit events.
+    fn audit_name(self) -> &'static str {
+        match self {
+            Self::PromoteUser => "promote_user",
+            Self::DeleteUser => "delete_user",
+        }
+    }
+}
+
+/// Renders the confirmation page for `action` against `target_id`.
+///
+/// Looks the target up so the page can name them; a nonexistent id is a 404
+/// rather than a page offering to delete nobody.
+async fn render_confirm_page(
+    state: &AppState,
+    admin_user: AuthUser,
+    action: SensitiveAction,
+    target_id: &str,
+    error: Option<String>,
+) -> Result<Response> {
+    let target = state
+        .user_repo
+        .find_by_id(target_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let template = ConfirmActionTemplate {
+        user: admin_user,
+        action_label: action.label(),
+        consequence: action.consequence(&target.username),
+        form_action: action.form_action(target_id),
+        error,
+    };
+    Ok(Html(template.render()?).into_response())
+}
+
+/// Verifies the admin's own password before a sensitive action proceeds
+/// (OWASP Authentication Cheat Sheet, *Require Re-authentication for Sensitive
+/// Features*). Returns the rendered confirmation page — carrying an error —
+/// when the check fails, or `None` when the caller may go ahead.
+///
+/// The CSRF origin guard already blocks a cross-site *trigger* of these
+/// routes; what it cannot do is stop someone who holds the admin's session
+/// cookie outright, or has walked up to an unlocked browser. Requiring the
+/// password turns "has the cookie" into "knows the password" for the two
+/// actions that can hand out admin rights or destroy an account.
+///
+/// Throttled on the same per-user budget as the password change: this is
+/// another authenticated route that verifies a password, so leaving it
+/// unmetered would just move an attacker's guessing here.
+async fn require_reauth(
+    state: &AppState,
+    admin_user: &AuthUser,
+    audit_ctx: &AuditContext,
+    action: SensitiveAction,
+    target_id: &str,
+    password: &str,
+) -> Result<Option<Response>> {
+    let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
+
+    if !state
+        .sensitive_action_rate_limiter
+        .try_acquire(admin_user.id.clone())
+    {
+        audit::reauth_throttled(audit_ctx, &actor_fp, &admin_user.id, action.audit_name());
+        let page = render_confirm_page(
+            state,
+            admin_user.clone(),
+            action,
+            target_id,
+            Some("Too many attempts. Please try again later.".to_string()),
+        )
+        .await?;
+        return Ok(Some(
+            (axum::http::StatusCode::TOO_MANY_REQUESTS, page).into_response(),
+        ));
+    }
+
+    let verified = state
+        .user_repo
+        .verify_password(&admin_user.username, password)
+        .await?;
+
+    if verified.is_none() {
+        audit::reauth_failed(audit_ctx, &actor_fp, &admin_user.id, action.audit_name());
+        return Ok(Some(
+            render_confirm_page(
+                state,
+                admin_user.clone(),
+                action,
+                target_id,
+                Some("Password is incorrect".to_string()),
+            )
+            .await?,
+        ));
+    }
+
+    // Only a proven password hands the attempt back, so failures stay charged.
+    state
+        .sensitive_action_rate_limiter
+        .release(admin_user.id.clone());
+    Ok(None)
+}
+
+pub async fn confirm_promote_page(
     State(state): State<AppState>,
     admin_user: AdminUser,
-    audit_ctx: AuditContext,
+    Path(user_id): Path<String>,
+) -> Result<Response> {
+    render_confirm_page(
+        &state,
+        admin_user.0,
+        SensitiveAction::PromoteUser,
+        &user_id,
+        None,
+    )
+    .await
+}
+
+pub async fn confirm_delete_page(
+    State(state): State<AppState>,
+    admin_user: AdminUser,
     Path(user_id): Path<String>,
 ) -> Result<Response> {
     if admin_user.id == user_id {
         return Err(AppError::BadRequest(
             "Cannot delete your own account".to_string(),
         ));
+    }
+    render_confirm_page(
+        &state,
+        admin_user.0,
+        SensitiveAction::DeleteUser,
+        &user_id,
+        None,
+    )
+    .await
+}
+
+pub async fn delete_user(
+    State(state): State<AppState>,
+    admin_user: AdminUser,
+    audit_ctx: AuditContext,
+    Path(user_id): Path<String>,
+    Form(form): Form<ConfirmActionForm>,
+) -> Result<Response> {
+    if admin_user.id == user_id {
+        return Err(AppError::BadRequest(
+            "Cannot delete your own account".to_string(),
+        ));
+    }
+
+    if let Some(rejection) = require_reauth(
+        &state,
+        &admin_user.0,
+        &audit_ctx,
+        SensitiveAction::DeleteUser,
+        &user_id,
+        &form.current_password,
+    )
+    .await?
+    {
+        return Ok(rejection);
     }
 
     // Read the session count *before* the delete. It cannot be derived from
@@ -360,7 +569,21 @@ pub async fn promote_user(
     admin_user: AdminUser,
     audit_ctx: AuditContext,
     Path(user_id): Path<String>,
+    Form(form): Form<ConfirmActionForm>,
 ) -> Result<Response> {
+    if let Some(rejection) = require_reauth(
+        &state,
+        &admin_user.0,
+        &audit_ctx,
+        SensitiveAction::PromoteUser,
+        &user_id,
+        &form.current_password,
+    )
+    .await?
+    {
+        return Ok(rejection);
+    }
+
     let promoted = state
         .user_repo
         .update_role(&user_id, UserRole::Admin)

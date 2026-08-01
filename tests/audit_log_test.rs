@@ -397,8 +397,8 @@ async fn failed_password_change_emits_an_audit_event() {
 
     let log = writer.contents();
     assert!(
-        log.contains("auth.password_change.failed"),
-        "expected an auth.password_change.failed event, got: {log}"
+        log.contains("auth.reauth.failed"),
+        "expected an auth.reauth.failed event, got: {log}"
     );
     assert_eq!(
         extract_field(&log, "user_id"),

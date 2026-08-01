@@ -132,7 +132,8 @@ async fn test_admin_can_delete_user() {
                 .method("POST")
                 .uri(format!("/users/{}/delete", user.id))
                 .header(header::COOKIE, &cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass"))
                 .unwrap(),
         )
         .await
@@ -194,7 +195,8 @@ async fn test_admin_cannot_self_delete() {
                 .method("POST")
                 .uri(format!("/users/{}/delete", admin.id))
                 .header(header::COOKIE, &cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass"))
                 .unwrap(),
         )
         .await
@@ -226,7 +228,8 @@ async fn test_admin_can_promote_user() {
                 .method("POST")
                 .uri(format!("/users/{}/promote", user.id))
                 .header(header::COOKIE, &cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass"))
                 .unwrap(),
         )
         .await
@@ -264,7 +267,8 @@ async fn test_promote_destroys_the_promoted_users_sessions() {
                 .method("POST")
                 .uri(format!("/users/{}/promote", user.id))
                 .header(header::COOKIE, &cookie_header)
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=adminpass"))
                 .unwrap(),
         )
         .await
@@ -412,4 +416,280 @@ async fn test_unauthenticated_cannot_access_users() {
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
+}
+
+/// The whole point of the confirmation step: holding the admin's session
+/// cookie is no longer enough to promote someone. Without the password the
+/// action must not happen.
+#[tokio::test]
+async fn test_promote_without_the_password_does_nothing() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/promote", user.id))
+                .header(header::COOKIE, &cookie_header)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=notthepassword"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Re-rendered confirmation page, not a redirect: the action did not run.
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let user_repo = UserRepository::new(pool);
+    assert_eq!(
+        user_repo.find_by_id(&user.id).await.unwrap().unwrap().role,
+        UserRole::User,
+        "a wrong confirmation password must leave the role untouched"
+    );
+}
+
+/// Same for the destructive one — and this is the case where getting it wrong
+/// is unrecoverable.
+#[tokio::test]
+async fn test_delete_without_the_password_does_nothing() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/users/{}/delete", user.id))
+                .header(header::COOKIE, &cookie_header)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("current_password=notthepassword"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let user_repo = UserRepository::new(pool);
+    assert!(
+        user_repo.find_by_id(&user.id).await.unwrap().is_some(),
+        "a wrong confirmation password must leave the account intact"
+    );
+}
+
+/// The confirmation page names the target and spells out the consequence, so
+/// the admin is not confirming an action they cannot see the shape of.
+#[tokio::test]
+async fn test_delete_confirmation_page_names_the_target() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "victimuser", "password", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/users/{}/delete", user.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("victimuser"), "should name the target");
+    assert!(
+        html.contains("cannot be undone"),
+        "should state the consequence"
+    );
+    assert!(
+        html.contains("name=\"current_password\""),
+        "should ask for the password"
+    );
+}
+
+/// A non-admin must not even see the confirmation page — otherwise the page
+/// would disclose that a given user id exists, and to whom it belongs.
+#[tokio::test]
+async fn test_non_admin_cannot_open_the_confirmation_page() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user1 = common::create_test_user(&pool, "user1", "password", UserRole::User).await;
+    let user2 = common::create_test_user(&pool, "user2", "password", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user1).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/users/{}/delete", user2.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+/// The re-auth check shares the password-change throttle, so an attacker
+/// holding a stolen admin cookie cannot guess the password by hammering this
+/// route instead of `/settings/password`.
+#[tokio::test]
+async fn test_reauth_is_throttled() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_password_change_limit(
+        pool.clone(),
+        2,
+        std::time::Duration::from_secs(60),
+    );
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "regularuser", "password", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let guess = |cookie: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/users/{}/promote", user.id))
+            .header(header::COOKIE, cookie)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("current_password=wrongguess"))
+            .unwrap()
+    };
+
+    for _ in 0..2 {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(guess(&cookie_header))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let response = test_app
+        .router
+        .oneshot(guess(&cookie_header))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// The promote confirmation page, which the delete-side test does not cover.
+/// It has to state that promotion is a privilege grant, not just ask for a
+/// password — an admin clicking through a bare prompt learns nothing.
+#[tokio::test]
+async fn test_promote_confirmation_page_names_the_target_and_the_grant() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let user = common::create_test_user(&pool, "candidate", "password", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/users/{}/promote", user.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("candidate"), "should name the target");
+    assert!(
+        html.contains("administrative access"),
+        "should say what is being granted"
+    );
+    assert!(
+        html.contains("name=\"current_password\""),
+        "should ask for the password"
+    );
+}
+
+/// The self-delete guard has to fire on the confirmation page too, not only on
+/// the POST. Otherwise an admin is offered a page promising to delete their own
+/// account, and only finds out it was never possible after typing their
+/// password.
+#[tokio::test]
+async fn test_delete_confirmation_page_refuses_self() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/users/{}/delete", admin.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// A confirmation page for an id that does not exist must 404 rather than
+/// render a form offering to act on nobody.
+#[tokio::test]
+async fn test_confirmation_page_404s_for_an_unknown_user() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let admin = common::create_test_user(&pool, "admin", "adminpass", UserRole::Admin).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &admin).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/users/no-such-id/promote")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

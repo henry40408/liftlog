@@ -174,7 +174,7 @@ fn build_test_app(
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
         login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
-        password_change_rate_limiter: Arc::new(RateLimiter::new(
+        sensitive_action_rate_limiter: Arc::new(RateLimiter::new(
             password_change_max_attempts,
             password_change_window,
         )),

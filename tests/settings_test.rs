@@ -252,20 +252,107 @@ async fn test_change_password_invalidates_other_sessions() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let current_valid = session_repo
-        .validate_and_touch(&token_current)
+    // The response must hand back a replacement cookie, because the token the
+    // request arrived on is now gone.
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("password change should re-issue a session cookie")
+        .to_str()
+        .unwrap()
+        .to_string();
+    let new_token = common::extract_cookie_header(&set_cookie)
+        .strip_prefix(&format!(
+            "{}=",
+            liftlog::session::session_cookie_name(false)
+        ))
+        .expect("cookie should carry the replacement token")
+        .to_string();
+
+    assert_ne!(
+        new_token, token_current,
+        "the session token must be rotated, not reused"
+    );
+
+    // Every pre-change token is dead: the other device, and — this is the part
+    // that was missing before — the caller's own.
+    for (name, token) in [("current", &token_current), ("other", &token_other)] {
+        assert!(
+            matches!(
+                session_repo.validate_and_touch(token).await.unwrap(),
+                liftlog::repositories::ValidateOutcome::Unknown
+            ),
+            "the {name} session should have been destroyed"
+        );
+    }
+
+    assert!(
+        matches!(
+            session_repo.validate_and_touch(&new_token).await.unwrap(),
+            liftlog::repositories::ValidateOutcome::Valid(_)
+        ),
+        "the replacement session should be usable"
+    );
+    assert_eq!(
+        session_repo.count_for_user(&user.id).await.unwrap(),
+        1,
+        "exactly one session — the replacement — should survive"
+    );
+}
+
+/// The replacement cookie has to actually authenticate the next request, not
+/// merely exist. Without `SuppressSessionRefresh` the sliding middleware would
+/// append a second `Set-Cookie` carrying the *old* token, and whichever the
+/// browser kept last would decide whether the user stayed logged in.
+#[tokio::test]
+async fn test_rotated_session_cookie_authenticates_the_next_request() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(change_password_request(
+            &cookie_header,
+            "current_password=password123&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher",
+        ))
         .await
         .unwrap();
-    assert!(matches!(
-        current_valid,
-        liftlog::repositories::ValidateOutcome::Valid(_)
-    ));
+    assert_eq!(response.status(), StatusCode::OK);
 
-    let other_valid = session_repo.validate_and_touch(&token_other).await.unwrap();
-    assert!(matches!(
-        other_valid,
-        liftlog::repositories::ValidateOutcome::Unknown
-    ));
+    let cookies: Vec<String> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        cookies.len(),
+        1,
+        "exactly one Set-Cookie — a second one would be the stale refresh: {cookies:?}"
+    );
+    let new_cookie = common::extract_cookie_header(&cookies[0]);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .header(header::COOKIE, &new_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the rotated cookie should still be logged in"
+    );
 }
 
 #[tokio::test]
@@ -505,9 +592,13 @@ async fn test_successful_change_password_releases_its_attempt() {
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
-    let cookie_header = common::extract_cookie_header(&session_cookie);
+    let mut cookie_header = common::extract_cookie_header(&session_cookie);
 
     // A budget of 1 means every one of these must be refunded to succeed.
+    // Each success also rotates the session token, so the cookie has to be
+    // carried forward the way a browser would — reusing the original would
+    // fail on the second pass for the *wrong* reason (dead session, not
+    // throttling) and quietly stop testing the refund.
     let rotations = [
         ("password123", "amber-tractor-lantern"),
         ("amber-tractor-lantern", "velvet-harbour-kestrel"),
@@ -526,6 +617,14 @@ async fn test_successful_change_password_releases_its_attempt() {
             StatusCode::OK,
             "rotating {current} -> {new} should not be throttled"
         );
+        let set_cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("each change should re-issue a session cookie")
+            .to_str()
+            .unwrap()
+            .to_string();
+        cookie_header = common::extract_cookie_header(&set_cookie);
     }
 
     let user_repo = UserRepository::new(pool.clone());
@@ -706,5 +805,63 @@ async fn test_change_password_rejects_a_password_derived_from_the_username() {
             .unwrap()
             .is_none(),
         "a password built from the username must be rejected"
+    );
+}
+
+/// Re-submitting the current password as the new one is refused. Without this
+/// the request would report success, destroy every other session and rotate
+/// the token — all for a password that did not change, leaving someone who
+/// was rotating a compromised credential believing they had.
+#[tokio::test]
+async fn test_change_password_rejects_reusing_the_current_password() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(
+        &pool,
+        "testuser",
+        "purple-monkey-dishwasher",
+        UserRole::User,
+    )
+    .await;
+    let other_token = SessionRepository::new(pool.clone())
+        .create(&user.id)
+        .await
+        .unwrap();
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(change_password_request(
+            &cookie_header,
+            "current_password=purple-monkey-dishwasher&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers().get(header::SET_COOKIE).is_none(),
+        "a refused change must not rotate the session"
+    );
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains("different from the current password"),
+        "got: {body_str}"
+    );
+
+    // The side effects of a real change must not have happened either.
+    assert!(
+        matches!(
+            SessionRepository::new(pool.clone())
+                .validate_and_touch(&other_token)
+                .await
+                .unwrap(),
+            liftlog::repositories::ValidateOutcome::Valid(_)
+        ),
+        "other sessions must survive a refused change"
     );
 }

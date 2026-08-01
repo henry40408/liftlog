@@ -71,6 +71,10 @@ On logout, liftlog sends `Clear-Site-Data: "cache", "cookies", "storage"` so the
 
 Promoting a user to admin logs that user out of every device. A privilege-level change requires reauthentication (OWASP Session Management Cheat Sheet, *Renew the Session ID After Any Privilege Level Change*), so a token stolen while the account was an ordinary user cannot silently inherit admin rights.
 
+Promoting or deleting a user also requires the acting admin to re-enter **their own** password, on a confirmation page that spells out what is about to happen (OWASP Authentication Cheat Sheet, *Require Re-authentication for Sensitive Features*). The CSRF origin guard already blocks a cross-site *trigger* of those routes; what it cannot stop is someone who holds the admin's session cookie outright, or who has walked up to an unlocked browser. This re-check turns "has the cookie" into "knows the password" for the two actions that can hand out admin rights or destroy an account. It shares the password change's per-user rate limit, so an attacker cannot move their guessing from one route to the other for a fresh allowance.
+
+Changing your password rotates your own session token, not just everyone else's. Every other device was already signed out; what the rotation adds is that the token in your *own* browser is replaced too, so a token captured before the change stops working after it — which matters precisely because rotating a password you believe is compromised is the case this is for. The replacement cookie comes back on the same response, so you stay signed in.
+
 A failed login costs the same whether or not the username exists. The response wording is already generic, and an unknown username now spends an Argon2 verification against a throwaway hash so the two paths cannot be told apart by response time either — otherwise a single request would reveal whether an account exists, letting an attacker aim the login rate limit at real accounts only.
 
 Changing a password is throttled too, at 5 attempts per 15 minutes. `POST /settings/password` verifies the current password, which makes it liftlog's second place a password can be guessed at — reachable by anyone holding a stolen session cookie, and costing two Argon2 operations per request. Unlike the login throttle this one is keyed by **user id**, not client IP: the request is authenticated, so the account under attack is known exactly, and an IP key would let the same stolen session buy a fresh budget from every source address. A successful change hands its attempt back, so rotating your password repeatedly never locks you out.
@@ -105,8 +109,8 @@ Authentication failures are logged alongside them (OWASP Authentication Cheat Sh
 |-------|-------|---------|
 | `auth.login.failed` | warn | A login was rejected. Carries the attempted `username` (truncated to 256 chars) so you can see which account is being targeted |
 | `auth.login.throttled` | warn | A login was refused by the rate limiter before any credential was checked |
-| `auth.password_change.failed` | warn | `POST /settings/password` was rejected because the current password was wrong. Carries `user_id` and `actor_session_fp` |
-| `auth.password_change.throttled` | warn | A password change was refused by the per-user rate limiter |
+| `auth.reauth.failed` | warn | A route that re-checks the password before acting was given the wrong one. Carries `user_id`, `actor_session_fp` and `action` (`password_change`, `promote_user`, `delete_user`) |
+| `auth.reauth.throttled` | warn | Such a re-check was refused by the per-user rate limiter. Same `action` field |
 
 `auth.login.failed` is emitted identically for an unknown username and a wrong password — same event, same wording, same fields. Distinguishing them would rebuild in the log the user-enumeration oracle that the constant-cost login path exists to remove. Note the trade-off inherent in recording the attempted username at all: a user who types their password into the username field puts it in the log, the same way `sshd` does.
 

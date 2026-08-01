@@ -16,10 +16,16 @@ pub struct AppState {
     /// Throttles `POST /auth/login`, keyed by client IP — the request is
     /// anonymous, so the source address is the only identity available.
     pub login_rate_limiter: Arc<RateLimiter<IpAddr>>,
-    /// Throttles `POST /settings/password`, keyed by user id. That route is
-    /// liftlog's other password-verification entry point; see
-    /// `handlers::settings::change_password` for why the key is the account
-    /// and not the address.
+    /// Throttles the authenticated routes that verify a password before
+    /// acting — the password change, and the admin promote/delete
+    /// confirmations. Keyed by user id: those requests are authenticated, so
+    /// the account under attack is known exactly, and an IP key would let one
+    /// stolen session buy a fresh budget from every source address.
+    ///
+    /// One shared budget across all of them on purpose. They are the same
+    /// question from an attacker's point of view — "what is this account's
+    /// password?" — so letting a guesser move to another route for a fresh
+    /// allowance would make the limit decorative.
     ///
     /// Configured in `main` with a far longer window than login's 60 seconds,
     /// because the two defend against different things. Login has to stay
@@ -27,7 +33,7 @@ pub struct AppState {
     /// password is a rare, deliberate act, so five attempts per 15 minutes is
     /// generous for the legitimate case while leaving an attacker with a
     /// stolen session only ~480 guesses a day against the current password.
-    pub password_change_rate_limiter: Arc<RateLimiter<String>>,
+    pub sensitive_action_rate_limiter: Arc<RateLimiter<String>>,
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Arc<Vec<IpAddr>>,
     pub cookie_secure: bool,
