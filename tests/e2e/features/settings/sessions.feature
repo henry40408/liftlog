@@ -1,9 +1,9 @@
 Feature: Active session management
 
   Scenario: Logging out other devices leaves just this session
-    Given a user "logoutme" with password "barbell-club" exists
+    Given a user "logoutme" with password "barbell-club-2026" exists
     And I have a second session as "logoutme"
-    And I am logged in as "logoutme" with password "barbell-club"
+    And I am logged in as "logoutme" with password "barbell-club-2026"
     Then the active sessions table has 2 rows
     When I log out all other devices
     Then the active sessions table has 1 row

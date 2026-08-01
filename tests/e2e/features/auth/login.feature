@@ -4,12 +4,12 @@ Feature: Logging in
   So that I can see my training dashboard
 
   Scenario: Logging in with valid credentials lands on the dashboard
-    Given a user "lifter" with password "barbell-club" exists
-    When I log in as "lifter" with password "barbell-club"
+    Given a user "lifter" with password "barbell-club-2026" exists
+    When I log in as "lifter" with password "barbell-club-2026"
     Then I see the dashboard
 
   Scenario: Logging in with the wrong password shows an error
-    Given a user "lifter" with password "barbell-club" exists
+    Given a user "lifter" with password "barbell-club-2026" exists
     When I log in as "lifter" with password "definitely-not-it"
     Then I see the login error "Invalid username or password"
     And the URL is "/auth/login"

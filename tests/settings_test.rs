@@ -108,7 +108,7 @@ async fn test_change_password_success() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(
-                    "current_password=password123&new_password=newpass456&confirm_password=newpass456",
+                    "current_password=password123&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher",
                 ))
                 .unwrap(),
         )
@@ -122,7 +122,7 @@ async fn test_change_password_success() {
 
     let user_repo = UserRepository::new(pool.clone());
     let verified = user_repo
-        .verify_password("testuser", "newpass456")
+        .verify_password("testuser", "purple-monkey-dishwasher")
         .await
         .unwrap();
     assert!(verified.is_some());
@@ -146,7 +146,7 @@ async fn test_change_password_mismatch() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(
-                    "current_password=password123&new_password=newpass456&confirm_password=different",
+                    "current_password=password123&new_password=purple-monkey-dishwasher&confirm_password=amber-tractor-lantern",
                 ))
                 .unwrap(),
         )
@@ -187,7 +187,7 @@ async fn test_change_password_too_short() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
-    assert!(body_str.contains("at least 8 characters"));
+    assert!(body_str.contains("at least 12 characters"));
 }
 
 #[tokio::test]
@@ -208,7 +208,7 @@ async fn test_change_password_wrong_current() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(
-                    "current_password=wrongpass&new_password=newpass456&confirm_password=newpass456",
+                    "current_password=wrongpass&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher",
                 ))
                 .unwrap(),
         )
@@ -243,7 +243,7 @@ async fn test_change_password_invalidates_other_sessions() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(header::COOKIE, &cookie_header)
                 .body(Body::from(
-                    "current_password=password123&new_password=newpass456&confirm_password=newpass456",
+                    "current_password=password123&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher",
                 ))
                 .unwrap(),
         )
@@ -459,7 +459,7 @@ async fn test_change_password_throttled_after_max_attempts() {
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
-    let body = "current_password=wrongpass&new_password=newpass456&confirm_password=newpass456";
+    let body = "current_password=wrongpass&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher";
 
     for attempt in 1..=3 {
         let response = test_app
@@ -509,9 +509,9 @@ async fn test_successful_change_password_releases_its_attempt() {
 
     // A budget of 1 means every one of these must be refunded to succeed.
     let rotations = [
-        ("password123", "passwordAAA"),
-        ("passwordAAA", "passwordBBB"),
-        ("passwordBBB", "passwordCCC"),
+        ("password123", "amber-tractor-lantern"),
+        ("amber-tractor-lantern", "velvet-harbour-kestrel"),
+        ("velvet-harbour-kestrel", "copper-thistle-marmot"),
     ];
     for (current, new) in rotations {
         let body = format!("current_password={current}&new_password={new}&confirm_password={new}");
@@ -531,7 +531,7 @@ async fn test_successful_change_password_releases_its_attempt() {
     let user_repo = UserRepository::new(pool.clone());
     assert!(
         user_repo
-            .verify_password("testuser", "passwordCCC")
+            .verify_password("testuser", "copper-thistle-marmot")
             .await
             .unwrap()
             .is_some(),
@@ -556,7 +556,7 @@ async fn test_change_password_throttle_is_per_user() {
         common::extract_cookie_header(&common::create_session_cookie(&pool, &alice).await);
     let bob_cookie =
         common::extract_cookie_header(&common::create_session_cookie(&pool, &bob).await);
-    let body = "current_password=wrongpass&new_password=newpass456&confirm_password=newpass456";
+    let body = "current_password=wrongpass&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher";
 
     // Alice burns her single attempt, then is throttled.
     for expected in [StatusCode::OK, StatusCode::TOO_MANY_REQUESTS] {
@@ -634,5 +634,77 @@ async fn test_change_password_rejects_over_long_password() {
             .unwrap()
             .is_none(),
         "the over-long password must have been rejected, not silently truncated"
+    );
+}
+
+/// The strength gate on the change-password route. Also pins the ordering: the
+/// policy is checked *before* the current password, so a weak new password is
+/// refused without spending an Argon2 verification on it.
+#[tokio::test]
+async fn test_change_password_rejects_a_guessable_new_password() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(change_password_request(
+            &cookie_header,
+            "current_password=password123&new_password=MyPassword12&confirm_password=MyPassword12",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        !body_str.contains("must be at least"),
+        "should be rejected on strength, not length: {body_str}"
+    );
+
+    let user_repo = UserRepository::new(pool.clone());
+    assert!(
+        user_repo
+            .verify_password("testuser", "password123")
+            .await
+            .unwrap()
+            .is_some(),
+        "the original password must be untouched"
+    );
+}
+
+/// Companion to the setup-side test: the username reaches the strength check
+/// here too, taken from the authenticated session rather than the form.
+#[tokio::test]
+async fn test_change_password_rejects_a_password_derived_from_the_username() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "henrylifts", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = test_app
+        .router
+        .oneshot(change_password_request(
+            &cookie_header,
+            "current_password=password123&new_password=henrylifts.42x&confirm_password=henrylifts.42x",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let user_repo = UserRepository::new(pool.clone());
+    assert!(
+        user_repo
+            .verify_password("henrylifts", "henrylifts.42x")
+            .await
+            .unwrap()
+            .is_none(),
+        "a password built from the username must be rejected"
     );
 }

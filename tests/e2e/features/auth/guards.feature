@@ -4,7 +4,7 @@ Feature: Authentication wall
   page rather than seeing partial UI or errors.
 
   Background:
-    Given a user "lifter" with password "barbell-club" exists
+    Given a user "lifter" with password "barbell-club-2026" exists
 
   Scenario: /workouts redirects to login when not authenticated
     When I visit "/workouts"

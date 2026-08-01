@@ -1,6 +1,13 @@
 import { expect } from '@playwright/test';
 
-export const ADMIN = { username: 'lifter', password: 'barbell-club' };
+// Every scenario's fixtures hang off this account, and it is created through
+// the real /auth/setup endpoint, so its password has to satisfy the server's
+// policy (length floor plus a zxcvbn score >= 3 — see
+// models::user::password_policy_error). Deliberately comfortably above that
+// bar rather than exactly on it: the previous value scored exactly 3, so
+// raising the threshold would have failed the whole suite at the seeding
+// step, where the cause is least visible.
+export const ADMIN = { username: 'lifter', password: 'barbell-club-2026' };
 
 const STATUS_OK_OR_REDIRECT = [200, 302, 303];
 

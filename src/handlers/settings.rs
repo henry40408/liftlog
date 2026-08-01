@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::audit::{self, AuditContext};
 use crate::error::Result;
 use crate::middleware::AuthUser;
-use crate::models::password_length_error;
+use crate::models::password_policy_error;
 use crate::repositories::SessionListRow;
 use crate::session::token_fingerprint;
 use crate::state::AppState;
@@ -75,10 +75,18 @@ pub async fn change_password(
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
     let validation_error = if form.new_password == form.confirm_password {
-        // Same bounds as signup and admin-created users; see
-        // `password_length_error`. The upper bound also caps what reaches
+        // Same policy as signup and admin-created users; see
+        // `password_policy_error`. The length ceiling also caps what reaches
         // Argon2 on this route, which runs it twice per request.
-        password_length_error(&form.new_password, "New password")
+        //
+        // `spawn_blocking` for the same reason as `validate_credentials`: the
+        // strength check is CPU work on an attacker-chosen input.
+        let new_password = form.new_password.clone();
+        let username = auth_user.username.clone();
+        tokio::task::spawn_blocking(move || {
+            password_policy_error(&new_password, "New password", &[username.as_str()])
+        })
+        .await?
     } else {
         Some("New passwords do not match".to_string())
     };

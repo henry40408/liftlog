@@ -473,7 +473,10 @@ async fn test_setup_creates_admin_user() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("username=admin&password=adminpass123"))
+                .body(Body::from(format!(
+                    "username=admin&password={}",
+                    common::STRONG_PASSWORD
+                )))
                 .unwrap(),
         )
         .await
@@ -500,7 +503,10 @@ async fn test_setup_rejects_empty_username() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("username=&password=adminpass123"))
+                .body(Body::from(format!(
+                    "username=&password={}",
+                    common::STRONG_PASSWORD
+                )))
                 .unwrap(),
         )
         .await
@@ -538,7 +544,7 @@ async fn test_setup_rejects_short_password() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let html = String::from_utf8_lossy(&body);
-    assert!(html.contains("Password must be at least 8 characters"));
+    assert!(html.contains("Password must be at least 12 characters"));
 
     let user_repo = liftlog::repositories::UserRepository::new(pool);
     let count = user_repo.count().await.unwrap();
@@ -550,7 +556,7 @@ async fn test_setup_rejects_short_password() {
 /// succeed, so an off-by-one in the comparison cannot pass.
 #[tokio::test]
 async fn test_setup_password_length_boundary() {
-    for (password, should_create) in [("7chars!", false), ("8chars!!", true)] {
+    for (password, should_create) in [("gymrat.2026", false), ("gymrat.2026!", true)] {
         let pool = common::setup_test_db();
         let test_app = common::create_test_app_with_session(pool.clone());
 
@@ -574,7 +580,7 @@ async fn test_setup_password_length_boundary() {
             i64::from(should_create),
             "password {:?} ({} chars) should {}have created a user",
             password,
-            password.len(),
+            password.chars().count(),
             if should_create { "" } else { "not " }
         );
         assert_eq!(
@@ -1608,7 +1614,10 @@ async fn test_setup_success_response_is_not_cacheable() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("username=admin&password=adminpass123"))
+                .body(Body::from(format!(
+                    "username=admin&password={}",
+                    common::STRONG_PASSWORD
+                )))
                 .unwrap(),
         )
         .await
@@ -1859,5 +1868,71 @@ async fn test_setup_rejects_over_long_password() {
         user_repo.count().await.unwrap(),
         0,
         "no user should have been created"
+    );
+}
+
+/// The strength gate, reaching the handler. `MyPassword12` clears the length
+/// floor and has upper case, lower case and digits — every composition rule
+/// accepts it — so this proves the handler consults `password_policy_error`
+/// and not just the length bounds.
+#[tokio::test]
+async fn test_setup_rejects_a_guessable_password() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/setup")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=admin&password=MyPassword12"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+    assert!(
+        !html.contains("must be at least"),
+        "should be rejected on strength, not length: {html}"
+    );
+
+    let user_repo = liftlog::repositories::UserRepository::new(pool);
+    assert_eq!(user_repo.count().await.unwrap(), 0);
+}
+
+/// Proves the *username* is threaded into the strength check as a
+/// `user_inputs` entry. `henrylifts.42x` is strong on its own — the unit test
+/// pins that — so the only way this can be rejected is if the handler passed
+/// the username down. Nothing else in the suite would catch that argument
+/// being dropped.
+#[tokio::test]
+async fn test_setup_rejects_a_password_derived_from_the_username() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/setup")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("username=henrylifts&password=henrylifts.42x"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let user_repo = liftlog::repositories::UserRepository::new(pool);
+    assert_eq!(
+        user_repo.count().await.unwrap(),
+        0,
+        "a password built from the username must be rejected"
     );
 }

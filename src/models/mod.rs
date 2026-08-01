@@ -14,6 +14,6 @@ pub use personal_record::{DynamicPR, LastExerciseWeight};
 // in-crate caller goes through `password_length_error` instead, so a second
 // place enforcing its own idea of "too short" cannot quietly appear. Tests
 // that need the numbers reach for `models::user::{MIN,MAX}_PASSWORD_LEN`.
-pub use user::{CreateUser, LoginCredentials, User, UserListItem, UserRole, password_length_error};
+pub use user::{CreateUser, LoginCredentials, User, UserListItem, UserRole, password_policy_error};
 pub use workout_log::{CreateWorkoutLog, UpdateWorkoutLog, WorkoutLog, WorkoutLogWithExercise};
 pub use workout_session::{CreateWorkoutSession, WorkoutSession};
