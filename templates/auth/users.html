@@ -30,7 +30,7 @@
             <tr>
                 <td data-label="Username" style="color: var(--text-primary);">{{ u.username }}</td>
                 <td data-label="Role">{% if u.role.is_admin() %}<span style="color: var(--gold);">{{ u.role.as_str() }}</span>{% else %}{{ u.role.as_str() }}{% endif %}</td>
-                <td data-label="Created">{{ u.created_at.format("%Y-%m-%d %H:%M") }}</td>
+                <td data-label="Created"><time datetime="{{ u.created_at.to_rfc3339() }}" data-fmt="datetime">{{ u.created_at.format("%Y-%m-%d %H:%M UTC") }}</time></td>
                 {% if user.is_admin() %}
                 <td data-label="Actions">
                     {% if u.id != user.id %}

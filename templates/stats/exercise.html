@@ -17,7 +17,7 @@
     <div class="card card-gold" style="margin-bottom: var(--sp-6); display: inline-block;">
         <div style="display: flex; align-items: baseline; gap: var(--sp-4);">
             <span class="stat-value" style="font-size: var(--font-4xl);">{{ p.value }}</span>
-            <span class="text-secondary text-sm">kg &middot; {{ p.achieved_at.format("%Y-%m-%d") }}</span>
+            <span class="text-secondary text-sm">kg &middot; <time datetime="{{ p.achieved_at.to_rfc3339() }}" data-fmt="date">{{ p.achieved_at.format("%Y-%m-%d") }}</time></span>
         </div>
     </div>
     {% when None %}

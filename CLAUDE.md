@@ -42,6 +42,8 @@ npx playwright test sharing               # filter by feature filename
 
 **Exercise categories are code, not data.** `CATEGORIES` in `src/models/exercise.rs` is a `&'static` slice; exercises store the category as a string column constrained to those values. Adding/renaming a category is a code change, not a migration.
 
+**Timestamps render in the browser's timezone, not the server's.** Every `DateTime<Utc>` shown in the UI is emitted as `<time datetime="{{ x.to_rfc3339() }}" data-fmt="datetime|date">{{ x.format("…UTC") }}</time>`; the server-rendered text is only the no-JS fallback. An inline script in `templates/base.html` exposes `window.LiftLog.formatLocalDate/formatLocalDateTime` and rewrites those nodes on `DOMContentLoaded` into a fixed `YYYY-MM-DD HH:MM GMT±H` (dates: `YYYY-MM-DD`) — deliberately not `toLocaleString()`, so column widths stay constant. `NaiveDate` columns (`workout.date`, chart x-axes) are user-entered calendar dates and must **not** be converted.
+
 **Build script side-effects.** `build.rs` renders `apple-touch-icon.png` from `assets/favicon.svg` via `resvg` and stamps `GIT_VERSION` (from `git describe` or the `GIT_VERSION` env override used by Docker/CI) into the binary as a `rustc-env`.
 
 ## Integration test harness

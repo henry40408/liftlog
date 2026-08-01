@@ -11,3 +11,11 @@ Feature: Active session management
   Scenario: The current device is marked on the active sessions list
     Given I am logged in as "lifter"
     Then the active sessions table marks my current device
+
+  Scenario: Every active sessions cell carries a label for the mobile card layout
+    Given I am logged in as "lifter"
+    Then the active sessions table labels every cell
+
+  Scenario: Session timestamps are shown in the browser's timezone
+    Given a user "tzview" with password "barbell-club-2026" exists
+    Then the settings page in timezone "Asia/Taipei" shows session times ending with "GMT+8" for "tzview" with password "barbell-club-2026"

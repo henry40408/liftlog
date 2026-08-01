@@ -43,7 +43,7 @@
         <button type="button" class="btn btn-sm btn-inline" onclick="copyShareLink('{{ url }}')" style="background:var(--accent);color:var(--text-inverse);border-color:var(--accent);">Copy</button></p>
         {% match share_expires_at %}
         {% when Some with (expires_at) %}
-        <p class="muted" style="margin: 0 0 var(--sp-3) 0;">Expires {{ expires_at.format("%Y-%m-%d %H:%M UTC") }}</p>
+        <p class="muted" style="margin: 0 0 var(--sp-3) 0;">Expires <time datetime="{{ expires_at.to_rfc3339() }}" data-fmt="datetime">{{ expires_at.format("%Y-%m-%d %H:%M UTC") }}</time></p>
         {% when None %}
         <p class="muted" style="margin: 0 0 var(--sp-3) 0;">Never expires</p>
         {% endmatch %}
@@ -138,7 +138,7 @@ var exerciseLastWeights = {};
 exerciseLastWeights["{{ entry.exercise_id }}"] = {
     weight: {{ entry.weight }},
     rpe: {% match entry.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %},
-    date: "{{ entry.logged_at.format("%Y-%m-%d") }}"
+    loggedAt: "{{ entry.logged_at.to_rfc3339() }}"
 };
 {% endfor %}
 
@@ -151,8 +151,9 @@ function showLastWeightInfo(exerciseId) {
         var rpeHtml = (entry.rpe !== null)
             ? '<span class="rpe-chip">RPE ' + entry.rpe + '</span>'
             : '<span class="rpe-chip rpe-chip-empty">RPE —</span>';
+        var loggedDate = window.LiftLog.formatLocalDate(entry.loggedAt) || '';
         lastWeightInfoEl.innerHTML = "Last: " + entry.weight + " kg " + rpeHtml +
-            ' <span class="muted">' + entry.date + '</span>' +
+            ' <span class="muted">' + loggedDate + '</span>' +
             ' <button type="button" class="btn btn-sm btn-inline" style="background:var(--gold);color:var(--text-inverse);border-color:var(--gold);" onclick="fillLastWeight()">Fill</button>';
         lastWeightInfoEl.classList.add('visible');
     } else {

@@ -17,7 +17,7 @@
     <form method="post" action="/workouts">
         <div class="form-group">
             <label for="date">Date</label>
-            <input type="date" id="date" name="date" value="{{ today }}" required>
+            <input type="date" id="date" name="date" value="{{ today }}" data-server-today="{{ today }}" required>
         </div>
         <div class="form-group">
             <label for="notes">Notes (optional)</label>
@@ -28,4 +28,20 @@
 
     <a href="/workouts" class="back-link">&larr; Back to Workouts</a>
 </main>
+
+<script>
+/* The server prefills "today" in its own timezone; correct it to the
+   browser's today, but only while the field still holds that prefill so a
+   bfcache restore of what the user typed survives. */
+(function () {
+    var dateEl = document.getElementById('date');
+    if (dateEl.value !== dateEl.dataset.serverToday) {
+        return;
+    }
+    var browserToday = window.LiftLog.formatLocalDate(new Date().toISOString());
+    if (browserToday) {
+        dateEl.value = browserToday;
+    }
+})();
+</script>
 {% endblock %}
