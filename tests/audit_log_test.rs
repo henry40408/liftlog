@@ -459,3 +459,104 @@ async fn audit_events_record_a_truncated_user_agent() {
         "the untruncated User-Agent reached the log"
     );
 }
+
+/// The per-account backoff's semantics, asserted on the exact `backoff_ms`
+/// the audit log reports rather than on wall-clock time.
+///
+/// Wall-clock assertions were the obvious way to write these and the wrong
+/// one: an *upper* bound ("this login was not delayed") is unfalsifiable on a
+/// loaded runner, and did in fact fail the first time this suite ran under
+/// `cargo llvm-cov`, where instrumentation pushed an ordinary Argon2
+/// verification past the threshold. `backoff_ms` states what the code
+/// actually decided, so these are exact. The one thing a log cannot prove —
+/// that the delay is really served — is covered by the single lower-bound
+/// timing test in `auth_test`.
+///
+/// The base is 10ms, so the whole test sleeps for tens of milliseconds.
+#[tokio::test]
+async fn login_backoff_climbs_per_account_and_resets_on_success() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_login_backoff(
+        pool.clone(),
+        1,
+        std::time::Duration::from_millis(10),
+    );
+    common::create_test_user(&pool, "victim", "password123", UserRole::User).await;
+    common::create_test_user(&pool, "bystander", "password123", UserRole::User).await;
+
+    let login = |username: &str, password: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/auth/login")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(format!(
+                "username={username}&password={password}"
+            )))
+            .unwrap()
+    };
+
+    // Reads `backoff_ms` off the most recent auth.login.failed line.
+    let last_backoff = |log: &str| -> u64 {
+        log.lines()
+            .rfind(|l| l.contains("auth.login.failed"))
+            .and_then(|l| extract_field(l, "backoff_ms").map(str::to_string))
+            .expect("a failed login should report backoff_ms")
+            .parse()
+            .expect("backoff_ms should be a number")
+    };
+
+    // One free failure, then the delay starts and doubles.
+    for expected in [0u64, 10, 20] {
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(login("victim", "wrongpass"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            last_backoff(&writer.contents()),
+            expected,
+            "expected backoff_ms={expected} on this attempt"
+        );
+    }
+
+    // A different account is untouched by the victim's penalty.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(login("bystander", "wrongpass"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        last_backoff(&writer.contents()),
+        0,
+        "another account must not inherit the penalty"
+    );
+
+    // A proven password clears the victim's penalty: the next failure is back
+    // to the free tier.
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(login("victim", "password123"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let response = test_app
+        .router
+        .oneshot(login("victim", "wrongpass"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        last_backoff(&writer.contents()),
+        0,
+        "a successful login should have cleared the accumulated penalty"
+    );
+}

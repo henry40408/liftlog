@@ -131,13 +131,18 @@ impl FromRequestParts<AppState> for AuditContext {
 /// accepted rather than mitigated — dropping the username would leave the
 /// event unable to answer "which account is being attacked?", which is the
 /// question the log exists to answer.
-pub fn login_failed(ctx: &AuditContext, username: &str) {
+/// `backoff_ms` is how long the per-account delay held this attempt before it
+/// was evaluated. Zero until an account has spent its free failures; watching
+/// it climb is how an operator sees the backoff engaging, without a second
+/// event whose only job is to announce that.
+pub fn login_failed(ctx: &AuditContext, username: &str, backoff_ms: u64) {
     let username = truncate_chars(username, MAX_USERNAME_LEN);
     let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
         event = "auth.login.failed",
         username,
+        backoff_ms,
         client_ip = %ctx.client_ip,
         user_agent,
         path = %ctx.path,
@@ -372,6 +377,12 @@ mod tests {
             session_repo: crate::repositories::SessionRepository::new(pool),
             login_rate_limiter: std::sync::Arc::new(crate::rate_limit::RateLimiter::new(
                 5,
+                std::time::Duration::from_secs(60),
+            )),
+            login_backoff: std::sync::Arc::new(crate::rate_limit::FailureBackoff::new(
+                3,
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
                 std::time::Duration::from_secs(60),
             )),
             sensitive_action_rate_limiter: std::sync::Arc::new(

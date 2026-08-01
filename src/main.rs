@@ -23,7 +23,7 @@ mod version;
 use config::Config;
 use migrations::run_migrations;
 use rand_core::RngCore;
-use rate_limit::RateLimiter;
+use rate_limit::{FailureBackoff, RateLimiter};
 use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
 use state::AppState;
 use std::sync::Arc;
@@ -177,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         workout_repo,
         session_repo,
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
+        login_backoff: Arc::new(FailureBackoff::for_login()),
         sensitive_action_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),

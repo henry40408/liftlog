@@ -77,6 +77,12 @@ Changing your password rotates your own session token, not just everyone else's.
 
 A failed login costs the same whether or not the username exists. The response wording is already generic, and an unknown username now spends an Argon2 verification against a throwaway hash so the two paths cannot be told apart by response time either — otherwise a single request would reveal whether an account exists, letting an attacker aim the login rate limit at real accounts only.
 
+Repeated failed logins against the *same account* are slowed down, keyed by the submitted username: three failures are free, then each further attempt is held 1s, 2s, 4s … up to 30s, and the penalty is forgotten after an hour of quiet. A correct password clears it immediately, so mistyping your own password a few times costs you nothing lasting.
+
+This is deliberately a delay and **not** an account lockout, which is what OWASP names first. The cheat sheet also warns that lockout is a denial-of-service primitive — anyone can lock anyone out — and suggests letting a forgotten-password flow rescue a locked account. liftlog has no such flow, no email, and its first user is its only administrator, so a hard lockout would let an unauthenticated attacker permanently lock the owner out of their own data with no recovery short of editing the database by hand. The delay collapses an attacker's guess rate just as effectively while leaving every legitimate login eventually possible.
+
+It complements the per-IP limit rather than duplicating it: that one bounds how fast a single source can try, this one bounds how fast *one account* can be tried no matter how many sources are used — which is the shape of a password spray. The penalty accumulates for usernames that do not exist exactly as for real ones, so the wait cannot be used to ask whether an account exists.
+
 Changing a password is throttled too, at 5 attempts per 15 minutes. `POST /settings/password` verifies the current password, which makes it liftlog's second place a password can be guessed at — reachable by anyone holding a stolen session cookie, and costing two Argon2 operations per request. Unlike the login throttle this one is keyed by **user id**, not client IP: the request is authenticated, so the account under attack is known exactly, and an IP key would let the same stolen session buy a fresh budget from every source address. A successful change hands its attempt back, so rotating your password repeatedly never locks you out.
 
 Passwords must be 12 to 128 characters **and** score at least 3 of 4 on [zxcvbn](https://github.com/dropbox/zxcvbn). The maximum is there so the hash comparison has a bounded input (OWASP *Compare Password Hashes Using Safe Functions*); over-long passwords are rejected, never silently truncated. Both bounds count **characters, not bytes**, so a non-ASCII passphrase is measured the same way the error message describes it.
@@ -117,7 +123,7 @@ Authentication failures are logged alongside them (OWASP Authentication Cheat Sh
 
 | Event | Level | Meaning |
 |-------|-------|---------|
-| `auth.login.failed` | warn | A login was rejected. Carries the attempted `username` (truncated to 256 chars) so you can see which account is being targeted |
+| `auth.login.failed` | warn | A login was rejected. Carries the attempted `username` (truncated to 256 chars) so you can see which account is being targeted, and `backoff_ms` — how long the per-account delay held that attempt, which climbs as an attack continues |
 | `auth.login.throttled` | warn | A login was refused by the rate limiter before any credential was checked |
 | `auth.reauth.failed` | warn | A route that re-checks the password before acting was given the wrong one. Carries `user_id`, `actor_session_fp` and `action` (`password_change`, `promote_user`, `delete_user`) |
 | `auth.reauth.throttled` | warn | Such a re-check was refused by the per-user rate limiter. Same `action` field |

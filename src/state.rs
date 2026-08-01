@@ -2,7 +2,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use crate::config::TrustedProxyHeader;
-use crate::rate_limit::RateLimiter;
+use crate::rate_limit::{FailureBackoff, RateLimiter};
 use crate::repositories::{
     ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository,
 };
@@ -16,6 +16,19 @@ pub struct AppState {
     /// Throttles `POST /auth/login`, keyed by client IP — the request is
     /// anonymous, so the source address is the only identity available.
     pub login_rate_limiter: Arc<RateLimiter<IpAddr>>,
+    /// Escalating delay applied to repeated failed logins against the *same
+    /// account*, keyed by the submitted username. The per-IP limiter above
+    /// bounds how fast one source can guess; this bounds how fast one account
+    /// can be guessed at regardless of how many sources are used, which is the
+    /// shape of a password spray. See `FailureBackoff` for why this is a delay
+    /// rather than the lockout OWASP names first.
+    ///
+    /// Configured in `main` with three free failures, so ordinary mistyping
+    /// costs nothing, then 1s, 2s, 4s … capped at 30s and forgotten after an
+    /// hour of quiet. The cap is what a sustained attack settles at: roughly
+    /// two guesses a minute against any one account, no matter how many
+    /// source addresses are thrown at it.
+    pub login_backoff: Arc<FailureBackoff<String>>,
     /// Throttles the authenticated routes that verify a password before
     /// acting — the password change, and the admin promote/delete
     /// confirmations. Keyed by user id: those requests are authenticated, so

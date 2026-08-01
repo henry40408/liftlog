@@ -31,6 +31,13 @@ pub const STRONG_PASSWORD: &str = "purple-monkey-dishwasher";
 const GENEROUS_MAX_ATTEMPTS: u32 = 100;
 const GENEROUS_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Per-account backoff settings for tests that are not about the backoff. The
+/// base is zero, so the counter still runs and stays exercised but no test
+/// ever sleeps for it — a nonzero default here would add real wall-clock time
+/// to every failed-login test in the suite.
+const NO_BACKOFF_FREE_ATTEMPTS: u32 = 3;
+const NO_BACKOFF_BASE: std::time::Duration = std::time::Duration::ZERO;
+
 #[allow(dead_code)]
 pub fn create_test_app(pool: DbPool) -> Router {
     create_test_app_with_session(pool).router
@@ -59,6 +66,8 @@ pub fn create_test_app_with_password_change_limit(
         GENEROUS_WINDOW,
         max_attempts,
         window,
+        NO_BACKOFF_FREE_ATTEMPTS,
+        NO_BACKOFF_BASE,
         false,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
@@ -79,6 +88,8 @@ pub fn create_test_app_with_rate_limit(
         window,
         GENEROUS_MAX_ATTEMPTS,
         GENEROUS_WINDOW,
+        NO_BACKOFF_FREE_ATTEMPTS,
+        NO_BACKOFF_BASE,
         false,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
@@ -91,10 +102,12 @@ pub fn create_test_app_with_rate_limit(
 pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> TestApp {
     build_test_app(
         pool,
-        100,
-        std::time::Duration::from_secs(60),
         GENEROUS_MAX_ATTEMPTS,
         GENEROUS_WINDOW,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
+        NO_BACKOFF_FREE_ATTEMPTS,
+        NO_BACKOFF_BASE,
         cookie_secure,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
@@ -121,6 +134,8 @@ pub fn create_test_app_with_proxy_header(
         window,
         GENEROUS_MAX_ATTEMPTS,
         GENEROUS_WINDOW,
+        NO_BACKOFF_FREE_ATTEMPTS,
+        NO_BACKOFF_BASE,
         false,
         header,
         trusted_proxies,
@@ -140,11 +155,37 @@ pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains:
         std::time::Duration::from_secs(60),
         GENEROUS_MAX_ATTEMPTS,
         GENEROUS_WINDOW,
+        NO_BACKOFF_FREE_ATTEMPTS,
+        NO_BACKOFF_BASE,
         false,
         liftlog::config::TrustedProxyHeader::None,
         Vec::new(),
         max_age,
         include_subdomains,
+    )
+}
+
+/// Builds an app whose per-account login backoff is active, so a test can
+/// observe the delay without every other test paying for it.
+#[allow(dead_code)]
+pub fn create_test_app_with_login_backoff(
+    pool: DbPool,
+    free_attempts: u32,
+    base: std::time::Duration,
+) -> TestApp {
+    build_test_app(
+        pool,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
+        free_attempts,
+        base,
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        0,
+        false,
     )
 }
 
@@ -157,13 +198,15 @@ fn build_test_app(
     window: std::time::Duration,
     password_change_max_attempts: u32,
     password_change_window: std::time::Duration,
+    backoff_free_attempts: u32,
+    backoff_base: std::time::Duration,
     cookie_secure: bool,
     trusted_proxy_header: liftlog::config::TrustedProxyHeader,
     trusted_proxies: Vec<std::net::IpAddr>,
     hsts_max_age: u64,
     hsts_include_subdomains: bool,
 ) -> TestApp {
-    use liftlog::rate_limit::RateLimiter;
+    use liftlog::rate_limit::{FailureBackoff, RateLimiter};
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
     use liftlog::state::AppState;
     use std::sync::Arc;
@@ -174,6 +217,14 @@ fn build_test_app(
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
         login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
+        login_backoff: Arc::new(FailureBackoff::new(
+            backoff_free_attempts,
+            backoff_base,
+            // Cap and window mirror the base so a test never waits longer
+            // than it asked for; the schedule itself is unit-tested.
+            backoff_base * 4,
+            std::time::Duration::from_secs(60),
+        )),
         sensitive_action_rate_limiter: Arc::new(RateLimiter::new(
             password_change_max_attempts,
             password_change_window,
