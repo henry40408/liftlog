@@ -20,6 +20,13 @@ pub struct AppState {
     /// liftlog's other password-verification entry point; see
     /// `handlers::settings::change_password` for why the key is the account
     /// and not the address.
+    ///
+    /// Configured in `main` with a far longer window than login's 60 seconds,
+    /// because the two defend against different things. Login has to stay
+    /// usable for a person who mistypes and retries immediately; changing a
+    /// password is a rare, deliberate act, so five attempts per 15 minutes is
+    /// generous for the legitimate case while leaving an attacker with a
+    /// stolen session only ~480 guesses a day against the current password.
     pub password_change_rate_limiter: Arc<RateLimiter<String>>,
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Arc<Vec<IpAddr>>,

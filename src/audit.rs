@@ -80,6 +80,15 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
+// A note on the `let` bindings in the `auth.*` emitters below: field values
+// that are *calls* (`truncate_chars(..)`, `.as_deref()`) get expanded by
+// `tracing` into a closure that `llvm-cov` never marks as executed, so those
+// lines report as uncovered even when a test demonstrably drives them — see
+// the same lines in the older `session.*` emitters, which are exercised by
+// `tests/audit_log_test.rs` and still show up missing. Binding the value
+// first and passing the plain identifier keeps the emitted event identical
+// while letting coverage see the work. Don't inline them back.
+
 impl FromRequestParts<AppState> for AuditContext {
     type Rejection = std::convert::Infallible;
 
@@ -123,12 +132,14 @@ impl FromRequestParts<AppState> for AuditContext {
 /// event unable to answer "which account is being attacked?", which is the
 /// question the log exists to answer.
 pub fn login_failed(ctx: &AuditContext, username: &str) {
+    let username = truncate_chars(username, MAX_USERNAME_LEN);
+    let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
         event = "auth.login.failed",
-        username = truncate_chars(username, MAX_USERNAME_LEN),
+        username,
         client_ip = %ctx.client_ip,
-        user_agent = ctx.user_agent.as_deref(),
+        user_agent,
         path = %ctx.path,
         "login failed"
     );
@@ -140,12 +151,14 @@ pub fn login_failed(ctx: &AuditContext, username: &str) {
 /// wrong, the other says the throttle engaged, and an operator alerting on
 /// brute force wants to tell those apart.
 pub fn login_throttled(ctx: &AuditContext, username: &str) {
+    let username = truncate_chars(username, MAX_USERNAME_LEN);
+    let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
         event = "auth.login.throttled",
-        username = truncate_chars(username, MAX_USERNAME_LEN),
+        username,
         client_ip = %ctx.client_ip,
-        user_agent = ctx.user_agent.as_deref(),
+        user_agent,
         path = %ctx.path,
         "login throttled"
     );
@@ -160,13 +173,14 @@ pub fn login_throttled(ctx: &AuditContext, username: &str) {
 /// the account is known for certain and no attacker-supplied string is
 /// involved.
 pub fn password_change_failed(ctx: &AuditContext, actor_session_fp: &str, user_id: &str) {
+    let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
         event = "auth.password_change.failed",
         actor_session_fp,
         user_id,
         client_ip = %ctx.client_ip,
-        user_agent = ctx.user_agent.as_deref(),
+        user_agent,
         path = %ctx.path,
         "password change rejected: current password incorrect"
     );
@@ -175,13 +189,14 @@ pub fn password_change_failed(ctx: &AuditContext, actor_session_fp: &str, user_i
 /// A password-change attempt refused by the per-user throttle. See
 /// [`password_change_failed`] for why this endpoint is throttled at all.
 pub fn password_change_throttled(ctx: &AuditContext, actor_session_fp: &str, user_id: &str) {
+    let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
         target: "liftlog::audit",
         event = "auth.password_change.throttled",
         actor_session_fp,
         user_id,
         client_ip = %ctx.client_ip,
-        user_agent = ctx.user_agent.as_deref(),
+        user_agent,
         path = %ctx.path,
         "password change throttled"
     );

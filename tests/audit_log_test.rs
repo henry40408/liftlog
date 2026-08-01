@@ -414,3 +414,48 @@ async fn failed_password_change_emits_an_audit_event() {
         "the attempted password leaked into the audit log: {log}"
     );
 }
+
+/// Every request-scoped audit event claims to carry a `user_agent`, truncated
+/// to 256 chars. `audit::tests` covers the truncation helper in isolation, but
+/// nothing covered the field actually reaching a log line — so a hostile
+/// `User-Agent` is sent here and read back off the event.
+#[tokio::test]
+async fn audit_events_record_a_truncated_user_agent() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+
+    let hostile_ua = "M".repeat(5000);
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::USER_AGENT, &hostile_ua)
+                .body(Body::from("username=testuser&password=wrongpass"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let log = writer.contents();
+    assert!(log.contains("auth.login.failed"), "got: {log}");
+    let logged_ua = extract_field(&log, "user_agent").expect("user_agent field should be present");
+    assert_eq!(
+        logged_ua.len(),
+        256,
+        "the 5000-char User-Agent should have been truncated to 256, got {} chars",
+        logged_ua.len()
+    );
+    assert!(
+        !log.contains(&hostile_ua),
+        "the untruncated User-Agent reached the log"
+    );
+}

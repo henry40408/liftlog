@@ -177,12 +177,6 @@ async fn main() -> anyhow::Result<()> {
         workout_repo,
         session_repo,
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
-        // A far longer window than login's 60 seconds, because the two are
-        // defending against different things. Login has to stay usable for a
-        // person who mistypes and retries immediately; changing a password is
-        // a rare, deliberate act, so five attempts per 15 minutes is generous
-        // for the legitimate case while leaving an attacker with a stolen
-        // session only ~480 guesses a day against the current password.
         password_change_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
