@@ -72,7 +72,12 @@ pub struct WorkoutLogWithExercise {
     pub reps: i32,
     pub weight: f64,
     pub rpe: Option<i32>,
+    /// The set matches the all-time best weight for its exercise.
     pub is_pr: bool,
+    /// The set is inside the rolling 1-month window *and* matches the best
+    /// weight logged for its exercise within it. An all-time PR logged today
+    /// sets both flags; one from two years ago sets only `is_pr`.
+    pub is_recent_pr: bool,
 }
 
 impl FromSqliteRow for WorkoutLogWithExercise {
@@ -87,6 +92,7 @@ impl FromSqliteRow for WorkoutLogWithExercise {
             weight: row.get("weight")?,
             rpe: row.get("rpe")?,
             is_pr: row.get("is_pr")?,
+            is_recent_pr: row.get("is_recent_pr")?,
         })
     }
 }

@@ -1,8 +1,18 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rusqlite::Row;
 use serde::Serialize;
 
 use super::FromSqliteRow;
+
+/// Width of the "PR (1M)" window. A rolling 30 days, not a calendar month, so
+/// the number never resets just because a new month started.
+pub const RECENT_PR_WINDOW_DAYS: i64 = 30;
+
+/// Start of the rolling window every "PR (1M)" surface is measured against —
+/// the PR tables, and the per-set badges on a workout.
+pub fn recent_pr_window_start() -> DateTime<Utc> {
+    Utc::now() - Duration::days(RECENT_PR_WINDOW_DAYS)
+}
 
 /// Dynamically computed Personal Record
 #[derive(Debug, Clone, Serialize)]

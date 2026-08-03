@@ -120,7 +120,7 @@
                 <td style="color: var(--text-primary); font-weight: 500;">{{ log.weight }}</td>
                 <td>{{ log.reps }}</td>
                 <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
-                <td>{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</td>
+                <td>{% if log.is_pr %}<span class="pr-badge" title="All-time best for this exercise">PR</span>{% else if log.is_recent_pr %}<span class="pr-badge pr-badge-recent" title="Best for this exercise in the last month">PR 1M</span>{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
