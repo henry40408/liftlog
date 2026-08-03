@@ -115,7 +115,7 @@
             <div class="set-cell set-cell-weight">{{ log.weight }}</div>
             <div class="set-cell set-cell-reps">{{ log.reps }}</div>
             <div class="set-cell set-cell-rpe">{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</div>
-            <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge">PR</span>{% endif %}</div>
+            <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge" title="All-time best for this exercise">PR</span>{% else if log.is_recent_pr %}<span class="pr-badge pr-badge-recent" title="Best for this exercise in the last month">PR 1M</span>{% endif %}</div>
             <div class="set-row-actions">
                 <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>

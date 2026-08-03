@@ -19,7 +19,9 @@
         <thead>
             <tr>
                 <th>Exercise</th>
-                <th>Max Weight</th>
+                <th>PR (All)</th>
+                <th>Date</th>
+                <th>PR (1M)</th>
                 <th>Date</th>
             </tr>
         </thead>
@@ -27,8 +29,10 @@
             {% for pr in prs %}
             <tr>
                 <td data-label="Exercise"><a href="/stats/exercise/{{ pr.exercise_id }}">{{ pr.exercise_name }}</a></td>
-                <td data-label="Max Weight" style="color: var(--gold); font-weight: 600;">{{ pr.value }}</td>
-                <td data-label="Date"><time datetime="{{ pr.achieved_at.to_rfc3339() }}" data-fmt="date">{{ pr.achieved_at.format("%Y-%m-%d") }}</time></td>
+                <td data-label="PR (All)" style="color: var(--gold); font-weight: 600;">{{ pr.all_time_value }}</td>
+                <td data-label="Date"><time datetime="{{ pr.all_time_achieved_at.to_rfc3339() }}" data-fmt="date">{{ pr.all_time_achieved_at.format("%Y-%m-%d") }}</time></td>
+                <td data-label="PR (1M)" style="color: {% if pr.recent_is_all_time() %}var(--gold){% else %}var(--accent){% endif %}; font-weight: 600;">{% match pr.recent_value %}{% when Some with (v) %}{{ v }}{% when None %}<span class="muted">&mdash;</span>{% endmatch %}</td>
+                <td data-label="Date">{% match pr.recent_achieved_at %}{% when Some with (at) %}<time datetime="{{ at.to_rfc3339() }}" data-fmt="date">{{ at.format("%Y-%m-%d") }}</time>{% when None %}<span class="muted">&mdash;</span>{% endmatch %}</td>
             </tr>
             {% endfor %}
         </tbody>

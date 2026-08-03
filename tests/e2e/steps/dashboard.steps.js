@@ -18,6 +18,24 @@ Then(
 );
 
 Then(
+  'the dashboard actions sit above the summary and the workout list',
+  async ({ page }) => {
+    await page.goto('/');
+    const actions = page.locator('.actions-lead');
+    await expect(actions.getByRole('link', { name: '+ New Workout' })).toBeVisible();
+
+    const actionsBox = await actions.boundingBox();
+    const statsBox = await page.locator('.stats-grid').boundingBox();
+    const recentBox = await page
+      .getByRole('heading', { name: 'Recent Workouts', level: 2 })
+      .boundingBox();
+
+    expect(actionsBox.y).toBeLessThan(statsBox.y);
+    expect(actionsBox.y).toBeLessThan(recentBox.y);
+  },
+);
+
+Then(
   'the dashboard {string} count is {int}',
   async ({ page }, label, count) => {
     await page.goto('/');

@@ -174,6 +174,9 @@ Then('my set is flagged as a PR', async ({ page, scenarioState }) => {
     .filter({ hasText: scenarioState.exerciseName })
     .first();
   await expect(row.locator('.pr-badge')).toBeVisible();
+  // A first-ever set is both the all-time and the 1-month best; the all-time
+  // badge wins, so the row shows "PR" rather than "PR 1M".
+  await expect(row.locator('.pr-badge')).toHaveText('PR');
 });
 
 When(

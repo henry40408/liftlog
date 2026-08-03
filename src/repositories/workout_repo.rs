@@ -1,12 +1,12 @@
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::error::{AppError, Result};
 use crate::models::{
-    DynamicPR, FromSqliteRow, LastExerciseWeight, WorkoutLog, WorkoutLogWithExercise,
-    WorkoutSession,
+    DynamicPR, FromSqliteRow, LastExerciseWeight, PersonalRecordSummary, WorkoutLog,
+    WorkoutLogWithExercise, WorkoutSession,
 };
 
 #[derive(Clone)]
@@ -213,11 +213,13 @@ impl WorkoutRepository {
         Ok(log)
     }
 
-    /// Find logs by session with dynamically computed `is_pr`
+    /// Find logs by session with dynamically computed `is_pr` and
+    /// `is_recent_pr`, the latter measured over the window starting at `since`.
     pub async fn find_logs_by_session_with_pr(
         &self,
         session_id: &str,
         user_id: &str,
+        since: DateTime<Utc>,
     ) -> Result<Vec<WorkoutLogWithExercise>> {
         let pool = self.pool.clone();
         let session_id = session_id.to_string();
@@ -230,16 +232,22 @@ impl WorkoutRepository {
                         CASE WHEN wl.weight = (
                             SELECT MAX(wl2.weight) FROM workout_logs wl2
                             JOIN workout_sessions ws2 ON wl2.session_id = ws2.id
-                            WHERE ws2.user_id = ? AND wl2.exercise_id = wl.exercise_id
-                        ) THEN 1 ELSE 0 END as is_pr
+                            WHERE ws2.user_id = ?1 AND wl2.exercise_id = wl.exercise_id
+                        ) THEN 1 ELSE 0 END as is_pr,
+                        CASE WHEN datetime(wl.created_at) >= datetime(?3) AND wl.weight = (
+                            SELECT MAX(wl3.weight) FROM workout_logs wl3
+                            JOIN workout_sessions ws3 ON wl3.session_id = ws3.id
+                            WHERE ws3.user_id = ?1 AND wl3.exercise_id = wl.exercise_id
+                              AND datetime(wl3.created_at) >= datetime(?3)
+                        ) THEN 1 ELSE 0 END as is_recent_pr
                  FROM workout_logs wl
                  JOIN exercises e ON wl.exercise_id = e.id
-                 WHERE wl.session_id = ?
+                 WHERE wl.session_id = ?2
                  ORDER BY wl.created_at DESC, wl.set_number",
             )?;
             let logs = stmt
                 .query_map(
-                    rusqlite::params![user_id, session_id],
+                    rusqlite::params![user_id, session_id, since],
                     WorkoutLogWithExercise::from_row,
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -318,28 +326,49 @@ impl WorkoutRepository {
 
     // Dynamic Personal Records
 
-    /// Get all PRs for a user (one per exercise, max weight)
-    pub async fn get_all_prs_by_user(&self, user_id: &str) -> Result<Vec<DynamicPR>> {
+    /// Get all PRs for a user (one per exercise, max weight), each with a
+    /// second max over the window starting at `since` — the "PR (1M)" column.
+    ///
+    /// `created_at` is compared through `datetime()` rather than as a raw
+    /// string: rows written by the app carry an offset (`… +00:00`, rusqlite's
+    /// chrono encoding) while rows created by `DEFAULT CURRENT_TIMESTAMP` do
+    /// not, so a lexicographic comparison would order the two encodings
+    /// against each other incorrectly.
+    pub async fn get_pr_summaries_by_user(
+        &self,
+        user_id: &str,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<PersonalRecordSummary>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let mut stmt = conn.prepare(
                 "SELECT wl.exercise_id, e.name as exercise_name,
-                        MAX(wl.weight) as value,
+                        MAX(wl.weight) as all_time_value,
                         (SELECT wl3.created_at FROM workout_logs wl3
                          JOIN workout_sessions ws3 ON wl3.session_id = ws3.id
-                         WHERE ws3.user_id = ? AND wl3.exercise_id = wl.exercise_id
-                         ORDER BY wl3.weight DESC, wl3.created_at DESC LIMIT 1) as achieved_at
+                         WHERE ws3.user_id = ?1 AND wl3.exercise_id = wl.exercise_id
+                         ORDER BY wl3.weight DESC, wl3.created_at DESC LIMIT 1) as all_time_achieved_at,
+                        MAX(CASE WHEN datetime(wl.created_at) >= datetime(?2)
+                                 THEN wl.weight END) as recent_value,
+                        (SELECT wl4.created_at FROM workout_logs wl4
+                         JOIN workout_sessions ws4 ON wl4.session_id = ws4.id
+                         WHERE ws4.user_id = ?1 AND wl4.exercise_id = wl.exercise_id
+                           AND datetime(wl4.created_at) >= datetime(?2)
+                         ORDER BY wl4.weight DESC, wl4.created_at DESC LIMIT 1) as recent_achieved_at
                  FROM workout_logs wl
                  JOIN workout_sessions ws ON wl.session_id = ws.id
                  JOIN exercises e ON wl.exercise_id = e.id
-                 WHERE ws.user_id = ?
+                 WHERE ws.user_id = ?1
                  GROUP BY wl.exercise_id
-                 ORDER BY achieved_at DESC",
+                 ORDER BY all_time_achieved_at DESC",
             )?;
             let prs = stmt
-                .query_map(rusqlite::params![user_id, user_id], DynamicPR::from_row)?
+                .query_map(
+                    rusqlite::params![user_id, since],
+                    PersonalRecordSummary::from_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(prs)
         })
@@ -499,12 +528,14 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Get exercise history with dynamically computed `is_pr`
+    /// Get exercise history with dynamically computed `is_pr` and
+    /// `is_recent_pr` (see `find_logs_by_session_with_pr`).
     pub async fn get_exercise_history_with_pr(
         &self,
         user_id: &str,
         exercise_id: &str,
         limit: i64,
+        since: DateTime<Utc>,
     ) -> Result<Vec<WorkoutLogWithExercise>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
@@ -517,18 +548,24 @@ impl WorkoutRepository {
                         CASE WHEN wl.weight = (
                             SELECT MAX(wl2.weight) FROM workout_logs wl2
                             JOIN workout_sessions ws2 ON wl2.session_id = ws2.id
-                            WHERE ws2.user_id = ? AND wl2.exercise_id = wl.exercise_id
-                        ) THEN 1 ELSE 0 END as is_pr
+                            WHERE ws2.user_id = ?1 AND wl2.exercise_id = wl.exercise_id
+                        ) THEN 1 ELSE 0 END as is_pr,
+                        CASE WHEN datetime(wl.created_at) >= datetime(?4) AND wl.weight = (
+                            SELECT MAX(wl3.weight) FROM workout_logs wl3
+                            JOIN workout_sessions ws3 ON wl3.session_id = ws3.id
+                            WHERE ws3.user_id = ?1 AND wl3.exercise_id = wl.exercise_id
+                              AND datetime(wl3.created_at) >= datetime(?4)
+                        ) THEN 1 ELSE 0 END as is_recent_pr
                  FROM workout_logs wl
                  JOIN workout_sessions ws ON wl.session_id = ws.id
                  JOIN exercises e ON wl.exercise_id = e.id
-                 WHERE ws.user_id = ? AND wl.exercise_id = ?
+                 WHERE ws.user_id = ?1 AND wl.exercise_id = ?2
                  ORDER BY ws.date DESC, wl.set_number
-                 LIMIT ?",
+                 LIMIT ?3",
             )?;
             let logs = stmt
                 .query_map(
-                    rusqlite::params![user_id, user_id, exercise_id, limit],
+                    rusqlite::params![user_id, exercise_id, limit, since],
                     WorkoutLogWithExercise::from_row,
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -642,7 +679,7 @@ impl WorkoutRepository {
             let mut stmt = conn.prepare(
                 "SELECT wl.id, wl.session_id, wl.exercise_id, e.name as exercise_name,
                         wl.set_number, wl.reps, wl.weight, wl.rpe,
-                        0 as is_pr
+                        0 as is_pr, 0 as is_recent_pr
                  FROM workout_logs wl
                  JOIN exercises e ON wl.exercise_id = e.id
                  WHERE wl.session_id = ?
@@ -662,6 +699,7 @@ mod tests {
     use super::*;
     use crate::db::create_memory_pool;
     use crate::migrations::run_migrations_for_tests;
+    use crate::models::recent_pr_window_start;
 
     fn setup_test_db() -> DbPool {
         let pool = create_memory_pool().expect("Failed to create test database");
@@ -851,7 +889,7 @@ mod tests {
             .unwrap();
 
         let logs = repo
-            .find_logs_by_session_with_pr(&session.id, "user1")
+            .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
             .await
             .unwrap();
 
@@ -861,6 +899,54 @@ mod tests {
         assert!(logs[0].is_pr); // 120.0 squat - PR (created last)
         assert!(logs[1].is_pr); // 105.0 bench - PR
         assert!(!logs[2].is_pr); // 100.0 bench (created first)
+        // All three were logged just now, so every all-time PR is also a
+        // 1-month PR.
+        assert!(logs[0].is_recent_pr);
+        assert!(logs[1].is_recent_pr);
+        assert!(!logs[2].is_recent_pr);
+    }
+
+    #[tokio::test]
+    async fn test_find_logs_by_session_marks_recent_pr_below_the_all_time_best() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        let repo = WorkoutRepository::new(pool.clone());
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let old_session = repo.create_session("user1", date, None).await.unwrap();
+        let recent_session = repo.create_session("user1", date, None).await.unwrap();
+
+        // An all-time best set from well outside the window.
+        let old_log = repo
+            .create_log(&old_session.id, "ex-bench-press", 1, 3, 140.0, None)
+            .await
+            .unwrap();
+        backdate_log(&pool, &old_log.id, Utc::now() - chrono::Duration::days(90));
+
+        // A lighter set logged today: not an all-time PR, but the best inside
+        // the rolling window.
+        repo.create_log(&recent_session.id, "ex-bench-press", 1, 8, 110.0, None)
+            .await
+            .unwrap();
+
+        let recent_logs = repo
+            .find_logs_by_session_with_pr(&recent_session.id, "user1", recent_pr_window_start())
+            .await
+            .unwrap();
+        assert_eq!(recent_logs.len(), 1);
+        assert!(!recent_logs[0].is_pr);
+        assert!(recent_logs[0].is_recent_pr);
+
+        // The old session still owns the all-time PR, but sits outside the
+        // window so it carries no 1-month badge.
+        let old_logs = repo
+            .find_logs_by_session_with_pr(&old_session.id, "user1", recent_pr_window_start())
+            .await
+            .unwrap();
+        assert_eq!(old_logs.len(), 1);
+        assert!(old_logs[0].is_pr);
+        assert!(!old_logs[0].is_recent_pr);
     }
 
     #[tokio::test]
@@ -969,9 +1055,21 @@ mod tests {
 
     // Dynamic Personal Record Tests
 
+    /// Backdate a log so it falls outside the recent PR window.
+    fn backdate_log(pool: &DbPool, log_id: &str, at: DateTime<Utc>) {
+        let conn = pool.get().unwrap();
+        let updated = conn
+            .execute(
+                "UPDATE workout_logs SET created_at = ? WHERE id = ?",
+                rusqlite::params![at, log_id],
+            )
+            .unwrap();
+        assert_eq!(updated, 1, "backdate targeted no row");
+    }
+
     #[tokio::test]
     #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
-    async fn test_get_all_prs_by_user() {
+    async fn test_get_pr_summaries_by_user() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
         create_test_exercise(&pool, "ex-bench-press", "user1");
@@ -991,7 +1089,8 @@ mod tests {
             .await
             .unwrap();
 
-        let prs = repo.get_all_prs_by_user("user1").await.unwrap();
+        let since = Utc::now() - chrono::Duration::days(30);
+        let prs = repo.get_pr_summaries_by_user("user1", since).await.unwrap();
 
         assert_eq!(prs.len(), 2);
         // Find each exercise's PR
@@ -999,8 +1098,67 @@ mod tests {
         let squat_pr = prs.iter().find(|p| p.exercise_id == "ex-squat");
         assert!(bench_pr.is_some());
         assert!(squat_pr.is_some());
-        assert_eq!(bench_pr.unwrap().value, 110.0);
-        assert_eq!(squat_pr.unwrap().value, 150.0);
+        assert_eq!(bench_pr.unwrap().all_time_value, 110.0);
+        assert_eq!(squat_pr.unwrap().all_time_value, 150.0);
+        // Everything was just logged, so the recent window mirrors all-time.
+        assert_eq!(bench_pr.unwrap().recent_value, Some(110.0));
+        assert!(bench_pr.unwrap().recent_is_all_time());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
+    async fn test_get_pr_summaries_recent_window_excludes_older_logs() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        create_test_exercise(&pool, "ex-bench-press", "user1");
+        create_test_exercise(&pool, "ex-squat", "user1");
+        let repo = WorkoutRepository::new(pool.clone());
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let session = repo.create_session("user1", date, None).await.unwrap();
+
+        // Bench: the all-time best is old, a lighter set is inside the window.
+        let old_bench = repo
+            .create_log(&session.id, "ex-bench-press", 1, 3, 140.0, None)
+            .await
+            .unwrap();
+        backdate_log(
+            &pool,
+            &old_bench.id,
+            Utc::now() - chrono::Duration::days(90),
+        );
+        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .await
+            .unwrap();
+
+        // Squat: only trained outside the window at all.
+        let old_squat = repo
+            .create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
+            .await
+            .unwrap();
+        backdate_log(
+            &pool,
+            &old_squat.id,
+            Utc::now() - chrono::Duration::days(45),
+        );
+
+        let since = Utc::now() - chrono::Duration::days(30);
+        let prs = repo.get_pr_summaries_by_user("user1", since).await.unwrap();
+
+        let bench = prs
+            .iter()
+            .find(|p| p.exercise_id == "ex-bench-press")
+            .unwrap();
+        assert_eq!(bench.all_time_value, 140.0);
+        assert_eq!(bench.recent_value, Some(110.0));
+        assert!(!bench.recent_is_all_time());
+        assert!(bench.recent_achieved_at.is_some());
+
+        let squat = prs.iter().find(|p| p.exercise_id == "ex-squat").unwrap();
+        assert_eq!(squat.all_time_value, 150.0);
+        assert_eq!(squat.recent_value, None);
+        assert_eq!(squat.recent_achieved_at, None);
+        assert!(!squat.recent_is_all_time());
     }
 
     #[tokio::test]
@@ -1049,7 +1207,7 @@ mod tests {
             .unwrap();
 
         let logs = repo
-            .find_logs_by_session_with_pr(&session.id, "user1")
+            .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
             .await
             .unwrap();
         assert!(logs[0].is_pr); // 100.0 is the only set, so it's PR
@@ -1060,7 +1218,7 @@ mod tests {
             .unwrap();
 
         let logs = repo
-            .find_logs_by_session_with_pr(&session.id, "user1")
+            .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
             .await
             .unwrap();
         // With DESC ordering: newest (110.0) first
@@ -1090,7 +1248,7 @@ mod tests {
         repo.delete_log(&heavy_log.id, &session.id).await.unwrap();
 
         let logs = repo
-            .find_logs_by_session_with_pr(&session.id, "user1")
+            .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
             .await
             .unwrap();
         assert_eq!(logs.len(), 1);
@@ -1186,12 +1344,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_all_prs_by_user_empty() {
+    async fn test_get_pr_summaries_by_user_empty() {
         let pool = setup_test_db();
         create_test_user(&pool, "user1");
         let repo = WorkoutRepository::new(pool);
 
-        let prs = repo.get_all_prs_by_user("user1").await.unwrap();
+        let since = Utc::now() - chrono::Duration::days(30);
+        let prs = repo.get_pr_summaries_by_user("user1", since).await.unwrap();
 
         assert!(prs.is_empty());
     }

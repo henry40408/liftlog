@@ -12,7 +12,7 @@ use crate::middleware::AuthUser;
 use crate::models::exercise::{CATEGORIES, ExerciseCategory};
 use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, Exercise, LastExerciseWeight, UpdateWorkoutLog,
-    WorkoutLog, WorkoutLogWithExercise, WorkoutSession,
+    WorkoutLog, WorkoutLogWithExercise, WorkoutSession, recent_pr_window_start,
 };
 use crate::state::AppState;
 
@@ -145,7 +145,7 @@ pub async fn show(
 
     let logs = state
         .workout_repo
-        .find_logs_by_session_with_pr(&id, &auth_user.id)
+        .find_logs_by_session_with_pr(&id, &auth_user.id, recent_pr_window_start())
         .await?;
     let exercises = state
         .exercise_repo

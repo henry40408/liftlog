@@ -11,6 +11,11 @@
         <div class="subtitle">Your training overview</div>
     </div>
 
+    <div class="actions actions-lead">
+        <a href="/workouts/new" class="btn btn-primary">+ New Workout</a>
+        <a href="/stats/prs" class="btn btn-ghost">View PRs</a>
+    </div>
+
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-value">{{ workouts_this_week }}</div>
@@ -43,11 +48,5 @@
     </div>
     <p class="mt-4"><a href="/workouts">View All Workouts &rarr;</a></p>
     {% endif %}
-
-    <h2>Quick Actions</h2>
-    <div class="actions">
-        <a href="/workouts/new" class="btn btn-primary">+ New Workout</a>
-        <a href="/stats/prs" class="btn btn-ghost">View PRs</a>
-    </div>
 </main>
 {% endblock %}

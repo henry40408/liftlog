@@ -5,7 +5,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use liftlog::models::UserRole;
+use liftlog::models::{UserRole, recent_pr_window_start};
 use liftlog::repositories::WorkoutRepository;
 use tower::ServiceExt;
 
@@ -380,6 +380,99 @@ async fn test_edit_workout_page_renders() {
 }
 
 #[tokio::test]
+async fn test_workout_page_badges_a_one_month_pr_below_the_all_time_best() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+
+    // The all-time best, logged well outside the 1-month window.
+    let old_workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let old_log =
+        common::create_test_log(&pool, &old_workout.id, &exercise.id, 1, 3, 140.0, None).await;
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE workout_logs SET created_at = ? WHERE id = ?",
+            rusqlite::params![chrono::Utc::now() - chrono::Duration::days(90), old_log.id],
+        )
+        .unwrap();
+    }
+
+    // Today's session: lighter than the all-time PR, but the best this month.
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 8, 110.0, None).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains("class=\"pr-badge pr-badge-recent\""),
+        "expected a 1-month PR badge, body=\n{body_str}"
+    );
+    assert!(
+        body_str.contains("PR 1M"),
+        "expected the 1M badge label, body=\n{body_str}"
+    );
+
+    // The older workout keeps the all-time badge and gains no 1-month one.
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", old_workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        !body_str.contains("class=\"pr-badge pr-badge-recent\""),
+        "old workout should carry no 1-month badge, body=\n{body_str}"
+    );
+    assert!(
+        body_str.contains("class=\"pr-badge\""),
+        "old workout should still show the all-time PR badge, body=\n{body_str}"
+    );
+}
+
+#[tokio::test]
 async fn test_update_workout_success() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
@@ -513,7 +606,7 @@ async fn test_add_log_success() {
 
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
-        .find_logs_by_session_with_pr(&workout.id, &user.id)
+        .find_logs_by_session_with_pr(&workout.id, &user.id, recent_pr_window_start())
         .await
         .unwrap();
     assert_eq!(logs.len(), 1);
@@ -567,7 +660,7 @@ async fn test_add_log_rejects_exercise_owned_by_another_user() {
     // The write must not have happened at all, not merely been reported as denied.
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
-        .find_logs_by_session_with_pr(&workout.id, &attacker.id)
+        .find_logs_by_session_with_pr(&workout.id, &attacker.id, recent_pr_window_start())
         .await
         .unwrap();
     assert!(
@@ -617,7 +710,7 @@ async fn test_add_log_accepts_fractional_weight() {
 
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
-        .find_logs_by_session_with_pr(&workout.id, &user.id)
+        .find_logs_by_session_with_pr(&workout.id, &user.id, recent_pr_window_start())
         .await
         .unwrap();
     assert_eq!(logs.len(), 1);
@@ -700,7 +793,7 @@ async fn test_delete_log_success() {
 
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
-        .find_logs_by_session_with_pr(&workout.id, &user.id)
+        .find_logs_by_session_with_pr(&workout.id, &user.id, recent_pr_window_start())
         .await
         .unwrap();
     assert_eq!(logs.len(), 0);

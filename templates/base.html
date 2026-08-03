@@ -726,6 +726,14 @@
             animation: prPulse 2s ease-in-out infinite;
         }
 
+        /* The 1-month PR. Deliberately quieter than the all-time badge: solid
+           accent instead of the gold gradient, and no pulse, so a set that ties
+           a rolling-window best never reads as loud as an all-time record. */
+        .pr-badge-recent {
+            background: var(--accent);
+            animation: none;
+        }
+
         @keyframes prPulse {
             0%, 100% { box-shadow: 0 0 4px var(--gold-muted); }
             50% { box-shadow: 0 0 12px var(--gold-muted), 0 0 24px rgba(255, 184, 0, 0.08); }
@@ -844,6 +852,19 @@
             padding: var(--sp-2) var(--sp-4);
             font-size: var(--font-xs);
             font-weight: 600;
+        }
+
+        /* An actions row that leads the page, directly under the header, so the
+           primary action is reachable without scrolling. */
+        .actions-lead {
+            margin-bottom: var(--sp-6);
+        }
+
+        .actions-lead a,
+        .actions-lead button,
+        .actions-lead .btn {
+            padding: var(--sp-3) var(--sp-5);
+            font-size: var(--font-sm);
         }
 
         .actions .btn-danger {
