@@ -31,6 +31,10 @@
             --gold-hover: #FFD060;
             --gold-muted: rgba(255, 194, 51, 0.18);
 
+            /* Silver (1-month PRs — second place to the all-time gold) */
+            --silver: #E4E7EF;
+            --silver-dark: #A2A9BA;
+
             /* Danger */
             --danger: #F45555;
             --danger-hover: #FF7A7A;
@@ -726,11 +730,13 @@
             animation: prPulse 2s ease-in-out infinite;
         }
 
-        /* The 1-month PR. Deliberately quieter than the all-time badge: solid
-           accent instead of the gold gradient, and no pulse, so a set that ties
-           a rolling-window best never reads as loud as an all-time record. */
+        /* The 1-month PR. Silver to the all-time badge's gold — second place,
+           and legible on the dark surface without competing for attention: the
+           metallic gradient reads as a medal, but there's no pulse, so a set
+           that ties a rolling-window best never looks like an all-time record. */
         .pr-badge-recent {
-            background: var(--accent);
+            background: linear-gradient(135deg, var(--silver), var(--silver-dark));
+            color: var(--text-inverse);
             animation: none;
         }
 
