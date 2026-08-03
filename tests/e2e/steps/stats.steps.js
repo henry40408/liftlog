@@ -34,3 +34,20 @@ Then('the PR list shows my exercise', async ({ page, scenarioState }) => {
     page.getByRole('link', { name: scenarioState.exerciseName }),
   ).toBeVisible();
 });
+
+Then(
+  'the PR list shows {int} for my exercise in both the all-time and 1-month columns',
+  async ({ page, scenarioState }, weight) => {
+    await page.goto('/stats/prs');
+    const row = page.locator('tbody tr').filter({
+      has: page.getByRole('link', { name: scenarioState.exerciseName }),
+    });
+    await expect(row.locator('td[data-label="PR (All)"]')).toHaveText(
+      String(weight),
+    );
+    // Just logged, so the rolling 1-month window carries the same number.
+    await expect(row.locator('td[data-label="PR (1M)"]')).toHaveText(
+      String(weight),
+    );
+  },
+);

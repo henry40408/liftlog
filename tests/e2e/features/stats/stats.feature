@@ -17,3 +17,10 @@ Feature: Stats pages
     And I have a workout
     When I log a set of 100 kg for 5 reps using the exercise I created
     Then the PR list shows my exercise
+
+  Scenario: A freshly logged set fills both the all-time and 1-month PR columns
+    Given I am logged in as "lifter"
+    And I have an exercise in category "legs"
+    And I have a workout
+    When I log a set of 100 kg for 5 reps using the exercise I created
+    Then the PR list shows 100 for my exercise in both the all-time and 1-month columns

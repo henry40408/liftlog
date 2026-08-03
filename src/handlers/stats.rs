@@ -6,8 +6,18 @@ use axum::{
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
-use crate::models::{ChartPoint, DynamicPR, Exercise, WorkoutLogWithExercise};
+use crate::models::{
+    ChartPoint, DynamicPR, Exercise, PersonalRecordSummary, WorkoutLogWithExercise,
+};
 use crate::state::AppState;
+
+/// Width of the "PR (1M)" window. A rolling 30 days, not a calendar month, so
+/// the column never empties out just because a new month started.
+const RECENT_PR_WINDOW_DAYS: i64 = 30;
+
+fn recent_pr_since() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now() - chrono::Duration::days(RECENT_PR_WINDOW_DAYS)
+}
 
 #[derive(Template)]
 #[template(path = "stats/index.html")]
@@ -17,7 +27,7 @@ struct StatsTemplate {
     workouts_this_month: i64,
     total_volume: f64,
     total_workouts: i64,
-    prs: Vec<DynamicPR>,
+    prs: Vec<PersonalRecordSummary>,
 }
 
 /// Geometry + flags used to draw the *default* server-rendered SVG.
@@ -62,7 +72,7 @@ struct ExerciseStatsTemplate {
 #[template(path = "stats/prs.html")]
 struct PrsTemplate {
     user: AuthUser,
-    prs: Vec<DynamicPR>,
+    prs: Vec<PersonalRecordSummary>,
 }
 
 const CHART_W: f64 = 600.0;
@@ -174,7 +184,7 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
         .await?;
     let prs = state
         .workout_repo
-        .get_all_prs_by_user(&auth_user.id)
+        .get_pr_summaries_by_user(&auth_user.id, recent_pr_since())
         .await?;
 
     let template = StatsTemplate {
@@ -238,7 +248,7 @@ pub async fn exercise_stats(
 pub async fn prs_list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let prs = state
         .workout_repo
-        .get_all_prs_by_user(&auth_user.id)
+        .get_pr_summaries_by_user(&auth_user.id, recent_pr_since())
         .await?;
 
     let template = PrsTemplate {

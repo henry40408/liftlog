@@ -9,7 +9,7 @@ pub mod workout_session;
 pub use exercise::{CreateExercise, Exercise, UpdateExercise};
 pub use exercise_session_metric::{ChartPoint, ExerciseSessionMetric};
 pub use from_row::FromSqliteRow;
-pub use personal_record::{DynamicPR, LastExerciseWeight};
+pub use personal_record::{DynamicPR, LastExerciseWeight, PersonalRecordSummary};
 // The length bounds themselves are deliberately not re-exported here: every
 // in-crate caller goes through `password_length_error` instead, so a second
 // place enforcing its own idea of "too short" cannot quietly appear. Tests

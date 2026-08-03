@@ -281,6 +281,79 @@ async fn test_prs_list_shows_all_prs() {
 }
 
 #[tokio::test]
+async fn test_prs_list_separates_all_time_and_recent_windows() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let bench = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let squat = common::create_test_exercise(&pool, &user.id, "Squat", "legs").await;
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    // Bench was trained just now; squat only outside the 1-month window.
+    common::create_test_log(&pool, &workout.id, &bench.id, 1, 5, 100.0, None).await;
+    let old_squat = common::create_test_log(&pool, &workout.id, &squat.id, 1, 5, 150.0, None).await;
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE workout_logs SET created_at = ? WHERE id = ?",
+            rusqlite::params![
+                chrono::Utc::now() - chrono::Duration::days(60),
+                old_squat.id
+            ],
+        )
+        .unwrap();
+    }
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/stats/prs")
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(body_str.contains("PR (All)"), "body=\n{body_str}");
+    assert!(body_str.contains("PR (1M)"), "body=\n{body_str}");
+
+    let row = |name: &str| {
+        body_str
+            .split("<tr>")
+            .find(|row| row.contains(name))
+            .unwrap_or_else(|| panic!("no row for {name}, body=\n{body_str}"))
+            .to_string()
+    };
+
+    // Squat's all-time PR stands, but it has no record inside the window.
+    let squat_row = row("Squat");
+    assert!(squat_row.contains("150"), "squat_row=\n{squat_row}");
+    assert!(squat_row.contains("&mdash;"), "squat_row=\n{squat_row}");
+
+    // Bench was logged inside the window, so both columns carry a number.
+    let bench_row = row("Bench Press");
+    assert!(bench_row.contains("100"), "bench_row=\n{bench_row}");
+    assert!(!bench_row.contains("&mdash;"), "bench_row=\n{bench_row}");
+}
+
+#[tokio::test]
 async fn test_exercise_stats_chart_renders_with_two_or_more_sessions() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
