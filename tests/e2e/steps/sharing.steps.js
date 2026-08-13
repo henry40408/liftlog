@@ -4,13 +4,17 @@ import { test } from './fixtures.js';
 
 const { Given, When, Then } = createBdd(test);
 
+// Revoke Share is a link to its confirmation page now, so `.share-info a`
+// matches it too — pick the share URL by its href instead of by position.
+const shareLink = (page) => page.locator('.share-info a[href^="/shared/"]');
+
 async function shareCurrentWorkout(page, scenarioState) {
   await page.goto(`/workouts/${scenarioState.workoutId}`);
   await page
     .locator('form[action$="/share"]')
     .getByRole('button', { name: 'Share' })
     .click();
-  const link = page.locator('.share-info a');
+  const link = shareLink(page);
   await expect(link).toBeVisible();
   scenarioState.shareUrl = await link.getAttribute('href');
 }
@@ -35,8 +39,7 @@ Then(
   'a public share link is shown on the workout page',
   async ({ page, scenarioState }) => {
     await page.goto(`/workouts/${scenarioState.workoutId}`);
-    const link = page.locator('.share-info a');
-    await expect(link).toBeVisible();
+    await expect(shareLink(page)).toBeVisible();
     expect(scenarioState.shareUrl).toMatch(/^\/shared\/[A-Za-z0-9_-]+$/);
   },
 );

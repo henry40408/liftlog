@@ -469,6 +469,60 @@ async fn test_logout_others_is_gated_by_a_confirmation_page() {
     );
 }
 
+/// The other two phrasings of the session count. "0 other signed-in devices
+/// will be logged out" would be a confusing thing to offer, so that case gets
+/// its own wording.
+#[tokio::test]
+async fn test_logout_others_confirmation_page_phrases_the_session_count() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+    let app = common::create_test_app(pool.clone());
+
+    let current_token = common::create_session_token(&pool, &user).await;
+
+    // Only this session exists.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/settings/logout-others")
+                .header(header::COOKIE, common::cookie_header(&current_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(
+        body.contains("No other device is signed in, so nothing will be logged out."),
+        "a lone session should not be offered a logout of nobody, got: {body}"
+    );
+
+    // Two more devices sign in.
+    common::create_session_token(&pool, &user).await;
+    common::create_session_token(&pool, &user).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/settings/logout-others")
+                .header(header::COOKIE, common::cookie_header(&current_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(
+        body.contains("2 other signed-in devices will be logged out"),
+        "the count should be plural at two, got: {body}"
+    );
+}
+
 /// The confirmation page must name how many sessions are about to end, and
 /// must not end any of them itself — a GET that logged devices out would be
 /// triggerable by any prefetch.

@@ -1119,6 +1119,60 @@ async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting(
     );
 }
 
+/// The set count is the reason this page exists, so all three phrasings —
+/// none, one, many — are worth pinning. Grammar in generated prose is easy to
+/// get wrong and nothing else would catch "Its 1 recorded sets".
+#[tokio::test]
+async fn test_delete_workout_confirmation_page_phrases_the_set_count() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "Legs").await;
+
+    for (day, sets, expected) in [
+        (1, 0, "It has no sets recorded."),
+        (2, 1, "Its 1 recorded set will be deleted with it."),
+        (3, 3, "All 3 of its recorded sets will be deleted with it."),
+    ] {
+        let workout = common::create_test_workout(
+            &pool,
+            &user.id,
+            chrono::NaiveDate::from_ymd_opt(2024, 2, day).unwrap(),
+            None,
+        )
+        .await;
+        for set_number in 1..=sets {
+            common::create_test_log(&pool, &workout.id, &exercise.id, set_number, 5, 100.0, None)
+                .await;
+        }
+
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workouts/{}/delete", workout.id))
+                    .header(header::COOKIE, &cookie_header)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(
+            body_str.contains(expected),
+            "with {sets} set(s) the page should say {expected:?}, got: {body_str}"
+        );
+    }
+}
+
 /// A confirmation page for someone else's workout would leak that it exists,
 /// and offer to delete it. It has to 404 exactly like the POST does.
 #[tokio::test]
