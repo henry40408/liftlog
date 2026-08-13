@@ -8,6 +8,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer};
 
 use crate::error::{AppError, Result};
+use crate::handlers::confirm;
 use crate::middleware::AuthUser;
 use crate::models::exercise::{CATEGORIES, ExerciseCategory};
 use crate::models::{
@@ -216,6 +217,41 @@ pub async fn update(
     Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
 }
 
+/// Interstitial for `delete`. Counts the sets first: deleting a session
+/// cascades to its `workout_logs` rows (migrations/004), and that is the part
+/// worth spelling out before the click.
+pub async fn confirm_delete(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Response> {
+    let workout = state
+        .workout_repo
+        .find_owned_session(&id, &auth_user.id)
+        .await?;
+    let logs = state
+        .workout_repo
+        .find_logs_by_session_with_pr(&id, &auth_user.id, recent_pr_window_start())
+        .await?;
+
+    let sets = match logs.len() {
+        0 => "It has no sets recorded.".to_string(),
+        1 => "Its 1 recorded set will be deleted with it.".to_string(),
+        n => format!("All {n} of its recorded sets will be deleted with it."),
+    };
+
+    confirm::page(
+        auth_user,
+        "Delete workout",
+        format!(
+            "The workout on {date} will be permanently deleted. {sets} This cannot be undone.",
+            date = workout.date
+        ),
+        format!("/workouts/{id}/delete"),
+        format!("/workouts/{id}"),
+    )
+}
+
 pub async fn delete(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -265,6 +301,43 @@ pub async fn add_log(
         .await?;
 
     Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
+}
+
+/// Interstitial for `delete_log`. Names the set being removed by pulling it
+/// out of the session's own logs, which also proves it belongs to that
+/// session — a log id from someone else's workout is a 404 here, exactly as
+/// it is in `delete_log`.
+pub async fn confirm_delete_log(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((session_id, log_id)): Path<(String, String)>,
+) -> Result<Response> {
+    state
+        .workout_repo
+        .find_owned_session(&session_id, &auth_user.id)
+        .await?;
+
+    let log = state
+        .workout_repo
+        .find_logs_by_session_with_pr(&session_id, &auth_user.id, recent_pr_window_start())
+        .await?
+        .into_iter()
+        .find(|l| l.id == log_id)
+        .ok_or_else(|| AppError::NotFound("Set not found".to_string()))?;
+
+    confirm::page(
+        auth_user,
+        "Delete set",
+        format!(
+            "Set {set} of {exercise} — {weight} kg × {reps} — will be permanently deleted.",
+            set = log.set_number,
+            exercise = log.exercise_name,
+            weight = log.weight,
+            reps = log.reps
+        ),
+        format!("/workouts/{session_id}/logs/{log_id}/delete"),
+        format!("/workouts/{session_id}"),
+    )
 }
 
 pub async fn delete_log(
@@ -395,6 +468,30 @@ pub async fn share_workout(
         .await?;
 
     Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
+}
+
+/// Interstitial for `revoke_share`. Revoking drops the token, so the link
+/// already handed out stops working for everyone at once and a fresh share
+/// produces a different URL — not obvious from a button labelled "Revoke".
+pub async fn confirm_revoke_share(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Response> {
+    state
+        .workout_repo
+        .find_owned_session(&id, &auth_user.id)
+        .await?;
+
+    confirm::page(
+        auth_user,
+        "Revoke share link",
+        "The existing share link will stop working for anyone who already has it. \
+         Sharing this workout again will produce a different link."
+            .to_string(),
+        format!("/workouts/{id}/revoke-share"),
+        format!("/workouts/{id}"),
+    )
 }
 
 pub async fn revoke_share(

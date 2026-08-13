@@ -6,6 +6,7 @@ use axum::{
 };
 
 use crate::error::Result;
+use crate::handlers::confirm;
 use crate::middleware::AuthUser;
 use crate::models::exercise::{CATEGORIES, ExerciseCategory};
 use crate::models::{CreateExercise, Exercise, UpdateExercise};
@@ -124,6 +125,29 @@ pub async fn update(
         .await?;
 
     Ok(Redirect::to("/exercises").into_response())
+}
+
+/// Interstitial for `delete`. The repository refuses to delete an exercise
+/// that any workout log still references (`ON DELETE RESTRICT`), so this page
+/// promises deletion only for one that is genuinely unused; the check itself
+/// stays in `delete`, which is what a POST straight to the route hits.
+pub async fn confirm_delete(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Response> {
+    let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
+
+    confirm::page(
+        auth_user,
+        "Delete exercise",
+        format!(
+            "{name} will be permanently deleted. If any workout still logs it, the deletion will be refused instead.",
+            name = exercise.name
+        ),
+        format!("/exercises/{id}/delete"),
+        "/exercises".to_string(),
+    )
 }
 
 pub async fn delete(

@@ -76,15 +76,14 @@ When(
   },
 );
 
+// Delete is a link to a confirmation page, which is what a browser with
+// scripts off follows. Here scripts are on, so base.html intercepts the
+// click and asks in a dialog instead — hence the handler. The page itself
+// is covered by the Rust integration tests.
 When('I delete the workout', async ({ page, scenarioState }) => {
   await page.goto(`/workouts/${scenarioState.workoutId}`);
   page.once('dialog', (d) => d.accept());
-  await page
-    .locator('form[action$="/delete"]')
-    .filter({ has: page.getByRole('button', { name: 'Delete' }) })
-    .first()
-    .getByRole('button', { name: 'Delete' })
-    .click();
+  await page.getByRole('link', { name: 'Delete', exact: true }).click();
   await expect(page).toHaveURL('/workouts');
 });
 
@@ -132,7 +131,8 @@ When('I delete my set', async ({ page, scenarioState }) => {
     .filter({ hasText: scenarioState.exerciseName })
     .first();
   page.once('dialog', (d) => d.accept());
-  await row.locator('form[action*="/logs/"][action$="/delete"] button').click();
+  await row.locator('a[href*="/logs/"][href$="/delete"]').click();
+  await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}`);
 });
 
 Then(
@@ -299,3 +299,10 @@ Then('visiting {string} returns a 404', async ({ page }, path) => {
   const response = await page.goto(path);
   expect(response?.status()).toBe(404);
 });
+
+// The no-JS path — the confirmation page itself — is covered in Rust
+// (`workout_test.rs`, `exercises_test.rs`, `settings_test.rs`): the page
+// renders the right consequence, is inert, and refuses another user's row.
+// A `javaScriptEnabled: false` scenario was tried here and hung in CI, and
+// a real browser adds little over those tests beyond proving that an
+// `<a href>` navigates.

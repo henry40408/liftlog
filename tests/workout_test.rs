@@ -1058,3 +1058,304 @@ async fn test_workouts_list_pagination_page_2() {
     // First page has workouts 15-6
     assert!(body_str.contains("2024-01-01") || body_str.contains("2024-01-05"));
 }
+
+/// Deleting a workout cascades to its sets, so the confirmation page has to
+/// say so — and, being a GET, must not delete anything itself.
+#[tokio::test]
+async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "Legs").await;
+    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, 100.0, None).await;
+    common::create_test_log(&pool, &workout.id, &exercise.id, 2, 5, 105.0, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}/delete", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains("All 2 of its recorded sets will be deleted with it."),
+        "the page must spell out the cascade, got: {body_str}"
+    );
+    assert!(
+        body_str.contains(&format!(
+            r#"<form method="post" action="/workouts/{}/delete">"#,
+            workout.id
+        )),
+        "the page should post back to the same route"
+    );
+
+    // The GET must have been inert.
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    assert_eq!(
+        workout_repo.count_sessions_by_user(&user.id).await.unwrap(),
+        1,
+        "viewing the confirmation page must not delete the workout"
+    );
+}
+
+/// The delete trigger has to carry both halves of the arrangement: an `href`
+/// to the confirmation page (the path a browser with scripts off takes) and
+/// a `data-confirm` for base.html to intercept (the path everyone else
+/// takes). Losing the attribute would silently cost every JS user a page
+/// load; losing the href would silently cost no-JS users the confirmation.
+#[tokio::test]
+async fn test_workout_delete_trigger_carries_both_confirmation_paths() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains(&format!(r#"href="/workouts/{}/delete""#, workout.id)),
+        "the trigger must link to the confirmation page"
+    );
+    assert!(
+        body_str.contains(r#"data-confirm="Delete this workout?"#),
+        "the trigger must carry the dialog text for the scripted path"
+    );
+    assert!(
+        !body_str.contains("onsubmit"),
+        "nothing on the page may fall back to an inline onsubmit guard"
+    );
+}
+
+/// The set count is the reason this page exists, so all three phrasings —
+/// none, one, many — are worth pinning. Grammar in generated prose is easy to
+/// get wrong and nothing else would catch "Its 1 recorded sets".
+#[tokio::test]
+async fn test_delete_workout_confirmation_page_phrases_the_set_count() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "Legs").await;
+
+    for (day, sets, expected) in [
+        (1, 0, "It has no sets recorded."),
+        (2, 1, "Its 1 recorded set will be deleted with it."),
+        (3, 3, "All 3 of its recorded sets will be deleted with it."),
+    ] {
+        let workout = common::create_test_workout(
+            &pool,
+            &user.id,
+            chrono::NaiveDate::from_ymd_opt(2024, 2, day).unwrap(),
+            None,
+        )
+        .await;
+        for set_number in 1..=sets {
+            common::create_test_log(&pool, &workout.id, &exercise.id, set_number, 5, 100.0, None)
+                .await;
+        }
+
+        let response = test_app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workouts/{}/delete", workout.id))
+                    .header(header::COOKIE, &cookie_header)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(
+            body_str.contains(expected),
+            "with {sets} set(s) the page should say {expected:?}, got: {body_str}"
+        );
+    }
+}
+
+/// A confirmation page for someone else's workout would leak that it exists,
+/// and offer to delete it. It has to 404 exactly like the POST does.
+#[tokio::test]
+async fn test_delete_workout_confirmation_page_rejects_another_users_workout() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let owner = common::create_test_user(&pool, "owner", "password123", UserRole::User).await;
+    let intruder = common::create_test_user(&pool, "intruder", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &intruder).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &owner.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}/delete", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// The set-delete page names the set it is about to remove, which means
+/// resolving the log through the session that owns it.
+#[tokio::test]
+async fn test_delete_set_confirmation_page_names_the_set_without_acting() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "Chest").await;
+    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 3, 8, 80.0, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}/logs/{}/delete", workout.id, log.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains("Set 3 of Bench Press"),
+        "the page must name the set, got: {body_str}"
+    );
+
+    // The GET must have been inert.
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    let logs = workout_repo
+        .find_logs_by_session_with_pr(&workout.id, &user.id, recent_pr_window_start())
+        .await
+        .unwrap();
+    assert_eq!(
+        logs.len(),
+        1,
+        "viewing the confirmation page must not delete the set"
+    );
+}
+
+/// A log id that belongs to a different session must not render a page
+/// offering to delete it.
+#[tokio::test]
+async fn test_delete_set_confirmation_page_rejects_a_log_from_another_session() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "Legs").await;
+    let first = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let second = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 16).unwrap(),
+        None,
+    )
+    .await;
+    let log = common::create_test_log(&pool, &second.id, &exercise.id, 1, 5, 100.0, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}/logs/{}/delete", first.id, log.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

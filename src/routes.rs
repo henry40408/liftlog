@@ -59,11 +59,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/workouts/{id}", get(workouts::show))
         .route("/workouts/{id}/edit", get(workouts::edit_page))
         .route("/workouts/{id}", post(workouts::update))
-        .route("/workouts/{id}/delete", post(workouts::delete))
+        .route(
+            "/workouts/{id}/delete",
+            get(workouts::confirm_delete).post(workouts::delete),
+        )
         .route("/workouts/{id}/logs", post(workouts::add_log))
         .route(
             "/workouts/{id}/logs/{log_id}/delete",
-            post(workouts::delete_log),
+            get(workouts::confirm_delete_log).post(workouts::delete_log),
         )
         .route(
             "/workouts/{id}/logs/{log_id}/edit",
@@ -71,7 +74,10 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/workouts/{id}/logs/{log_id}", post(workouts::update_log))
         .route("/workouts/{id}/share", post(workouts::share_workout))
-        .route("/workouts/{id}/revoke-share", post(workouts::revoke_share))
+        .route(
+            "/workouts/{id}/revoke-share",
+            get(workouts::confirm_revoke_share).post(workouts::revoke_share),
+        )
         // Public shared workout route (no auth required)
         .route("/shared/{token}", get(workouts::view_shared))
         .route("/exercises", get(exercises::list))
@@ -79,13 +85,19 @@ pub fn create_router(state: AppState) -> Router {
         .route("/exercises", post(exercises::create))
         .route("/exercises/{id}/edit", get(exercises::edit_page))
         .route("/exercises/{id}", post(exercises::update))
-        .route("/exercises/{id}/delete", post(exercises::delete))
+        .route(
+            "/exercises/{id}/delete",
+            get(exercises::confirm_delete).post(exercises::delete),
+        )
         .route("/stats", get(stats::index))
         .route("/stats/exercise/{id}", get(stats::exercise_stats))
         .route("/stats/prs", get(stats::prs_list))
         .route("/settings", get(settings::index))
         .route("/settings/password", post(settings::change_password))
-        .route("/settings/logout-others", post(settings::logout_others))
+        .route(
+            "/settings/logout-others",
+            get(settings::confirm_logout_others).post(settings::logout_others),
+        )
         .with_state(state)
         // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
         .layer(from_fn_with_state(

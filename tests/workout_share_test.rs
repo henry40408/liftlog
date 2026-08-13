@@ -466,7 +466,9 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    assert!(body_str.contains("Revoke Share</button>"));
+    // A link to the confirmation page, not a POST button: the old
+    // confirm() guard did nothing with JavaScript off.
+    assert!(body_str.contains("Revoke Share</a>"));
     assert!(body_str.contains("Share link:"));
     assert!(body_str.contains(&format!("/shared/{share_token}")));
     // Should not show share button (only the revoke form, not the share form)
@@ -833,4 +835,63 @@ async fn test_cleanup_expired_share_tokens_nulls_them() {
         .unwrap();
     assert!(future_row.share_token.is_some());
     assert!(future_row.share_expires_at.is_some());
+}
+
+/// Revoking is irreversible for anyone holding the old link, which the old
+/// `confirm()` said and — with JavaScript off — never asked. The interstitial
+/// must say it, and must leave the token alone until the POST.
+#[tokio::test]
+async fn test_revoke_share_confirmation_page_warns_without_revoking() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    let share_token = workout_repo
+        .set_share_token(&workout.id, &user.id, None)
+        .await
+        .unwrap();
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}/revoke-share", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains("will stop working for anyone who already has it"),
+        "the page must warn that the existing link dies, got: {body_str}"
+    );
+
+    // The GET must have been inert: the share link still resolves.
+    let row = workout_repo
+        .find_session_by_share_token(&share_token)
+        .await
+        .unwrap();
+    assert!(
+        row.is_some(),
+        "viewing the confirmation page must not revoke the token"
+    );
 }

@@ -62,11 +62,10 @@
         </tbody>
     </table>
 
-    <form method="post" action="/settings/logout-others"
-          onsubmit="return confirm('Log out of all other devices?');"
-          style="margin-top: var(--sp-4);">
-        <button type="submit">Log out all other devices</button>
-    </form>
+    <p style="margin-top: var(--sp-4);">
+        <a href="/settings/logout-others" class="btn btn-primary"
+           data-confirm="Log out of all other devices? This device stays signed in.">Log out all other devices</a>
+    </p>
 
     <h2>Application Info</h2>
     <table class="data-table">

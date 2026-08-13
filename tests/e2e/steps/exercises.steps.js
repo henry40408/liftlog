@@ -72,7 +72,8 @@ When('I delete my exercise', async ({ page, scenarioState }) => {
     })
     .first();
   page.once('dialog', (d) => d.accept());
-  await row.getByRole('button', { name: 'Delete' }).click();
+  await row.getByRole('link', { name: 'Delete' }).click();
+  await expect(page).toHaveURL('/exercises');
 });
 
 Then(

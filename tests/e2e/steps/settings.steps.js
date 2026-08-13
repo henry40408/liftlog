@@ -73,12 +73,16 @@ When(
   },
 );
 
+// The trigger is a link to a confirmation page; with scripts on, base.html
+// intercepts it and asks in a dialog. The POST renders the settings page in
+// place rather than redirecting, so assert on the success alert.
 When('I log out all other devices', async ({ page }) => {
   await page.goto('/settings');
   page.once('dialog', (d) => d.accept());
-  await page
-    .getByRole('button', { name: 'Log out all other devices' })
-    .click();
+  await page.getByRole('link', { name: 'Log out all other devices' }).click();
+  await expect(page.locator('.alert-success')).toContainText(
+    'Logged out of all other devices.',
+  );
 });
 
 Then(
