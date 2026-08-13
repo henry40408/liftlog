@@ -644,6 +644,54 @@ async fn test_exercise_stats_chart_plots_the_requested_metric() {
     );
 }
 
+/// e1RM is the other series that scripts-off users could not reach, and it
+/// is the only one that is *derived* (`weight * (1 + reps/30)`) rather than
+/// stored — so plotting the wrong column would still produce a plausible
+/// chart. Reps of 10 put the axis in a band that neither top set (98–122)
+/// nor volume (980–1220) can produce.
+#[tokio::test]
+async fn test_exercise_stats_chart_plots_e1rm() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = common::create_test_exercise(&pool, &user.id, "Deadlift", "back").await;
+
+    for (i, weight) in [100.0_f64, 110.0, 120.0].iter().enumerate() {
+        let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32 * 2).unwrap();
+        let workout = common::create_test_workout(&pool, &user.id, date, None).await;
+        common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, *weight, None).await;
+    }
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}?metric=e1rm", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    // e1RM of 133.3 / 146.7 / 160.0, padded to 130.7..162.7.
+    assert!(
+        body_str.contains(">163</text>") && body_str.contains(">131</text>"),
+        "the y axis should be scaled to e1RM, got:\n{body_str}"
+    );
+    assert!(
+        body_str.contains(r#"class="btn btn-sm btn-tab is-active" data-metric="e1rm""#),
+        "the e1RM tab should be the active one"
+    );
+}
+
 /// `?range=all` has to widen the window, not just relabel the tab.
 #[tokio::test]
 async fn test_exercise_stats_chart_range_controls_the_window() {
