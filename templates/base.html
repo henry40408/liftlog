@@ -318,7 +318,10 @@
             transition: all var(--transition);
         }
 
+        /* `background` is repeated here because the button is a real submit:
+           `button[type="submit"]:hover` below would otherwise paint it accent. */
         .nav-user .sign-out-btn:hover {
+            background: none;
             color: var(--text-primary);
             border-color: var(--text-secondary);
         }

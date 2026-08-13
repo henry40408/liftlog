@@ -15,7 +15,7 @@
     <div class="nav-user">
         <span class="username">{{ user.username }}{% if user.is_admin() %} <span class="admin-badge">Admin</span>{% endif %}</span>
         <form action="/auth/logout" method="post" style="display:inline;">
-            <button type="button" class="sign-out-btn" onclick="this.closest('form').submit()">Sign Out</button>
+            <button type="submit" class="sign-out-btn">Sign Out</button>
         </form>
     </div>
 </nav>

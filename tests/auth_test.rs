@@ -1993,3 +1993,43 @@ async fn test_repeated_failures_against_one_account_are_delayed() {
         "expected the attempt to be held for at least {base:?}, took {elapsed:?}"
     );
 }
+
+/// Sign Out has to be a real submit button. It was once `type="button"`
+/// driven by an inline `onclick` that called `form.submit()`, which meant a
+/// browser with JavaScript off could never end its session — the one control
+/// in the app with no non-JS path at all. Asserting the rendered markup keeps
+/// it from regressing.
+#[tokio::test]
+async fn test_sign_out_button_works_without_javascript() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie = common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+
+    assert!(
+        html.contains(r#"<form action="/auth/logout" method="post""#),
+        "the nav must post to /auth/logout with a plain form"
+    );
+    assert!(
+        html.contains(r#"<button type="submit" class="sign-out-btn">"#),
+        "Sign Out must submit the form itself, not rely on an onclick handler"
+    );
+}
