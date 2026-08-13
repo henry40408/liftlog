@@ -562,3 +562,222 @@ async fn test_exercise_stats_rejects_exercise_owned_by_another_user() {
         "the other user's exercise name must not be disclosed, body=\n{body_str}"
     );
 }
+
+/// Three sessions whose top-set weights and volumes cannot be confused:
+/// weights land the y-axis in the 99–111 band, volumes in 495–555. Any
+/// assertion on a tick label therefore proves *which* series was plotted.
+async fn seed_three_sessions(
+    pool: &liftlog::db::DbPool,
+    user_id: &str,
+) -> liftlog::models::Exercise {
+    let exercise = common::create_test_exercise(pool, user_id, "Bench Press", "chest").await;
+    for (i, weight) in [100.0_f64, 105.0, 110.0].iter().enumerate() {
+        let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32 * 2).unwrap();
+        let workout = common::create_test_workout(pool, user_id, date, None).await;
+        common::create_test_log(pool, &workout.id, &exercise.id, 1, 5, *weight, None).await;
+    }
+    exercise
+}
+
+/// Volume and e1RM had no representation anywhere in the UI once scripts
+/// were off — only the client redraw could reach them. The tabs are links
+/// now, so the server has to honour `?metric=`.
+#[tokio::test]
+async fn test_exercise_stats_chart_plots_the_requested_metric() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = seed_three_sessions(&pool, &user.id).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}?metric=volume", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    // Volume axis: 500/525/550 padded to 495..555.
+    assert!(
+        body_str.contains(">555</text>") && body_str.contains(">495</text>"),
+        "the y axis should be scaled to volume, got:\n{body_str}"
+    );
+    assert!(
+        !body_str.contains(">111</text>"),
+        "the top-set axis must not survive into the volume chart"
+    );
+    assert!(
+        body_str.contains(r#"class="btn btn-sm btn-tab is-active" data-metric="volume""#),
+        "the Volume tab should be the active one"
+    );
+
+    // And the default is still the top-set axis.
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains(">111</text>") && body_str.contains(">99</text>"),
+        "the default chart should still plot top set, got:\n{body_str}"
+    );
+}
+
+/// `?range=all` has to widen the window, not just relabel the tab.
+#[tokio::test]
+async fn test_exercise_stats_chart_range_controls_the_window() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "legs").await;
+
+    // 22 sessions, so the default 20-session window drops the first two.
+    for day in 1..=22u32 {
+        let date = chrono::NaiveDate::from_ymd_opt(2024, 1, day).unwrap();
+        let workout = common::create_test_workout(&pool, &user.id, date, None).await;
+        common::create_test_log(
+            &pool,
+            &workout.id,
+            &exercise.id,
+            1,
+            5,
+            100.0 + f64::from(day),
+            None,
+        )
+        .await;
+    }
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let default_body = String::from_utf8_lossy(&body).into_owned();
+
+    assert!(
+        !default_body.contains(">01-01</text>"),
+        "the last-20 window should start after the first session"
+    );
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}?range=all", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let all_body = String::from_utf8_lossy(&body);
+
+    assert!(
+        all_body.contains(">01-01</text>"),
+        "range=all should reach back to the first session, got:\n{all_body}"
+    );
+    assert!(
+        all_body.contains(r#"data-range="all""#) && all_body.contains("is-active"),
+        "the All tab should be the active one"
+    );
+}
+
+/// The tabs are links, so the query string is user-editable and arrives from
+/// stale bookmarks. Nonsense falls back to the default view rather than
+/// erroring, and each tab's href carries the *other* axis's current value so
+/// switching metric does not silently reset the range.
+#[tokio::test]
+async fn test_exercise_stats_chart_query_is_forgiving_and_links_compose() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = seed_three_sessions(&pool, &user.id).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/stats/exercise/{}?metric=bogus&range=bogus",
+                    exercise.id
+                ))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains(">111</text>"),
+        "a bad metric should fall back to top set, got:\n{body_str}"
+    );
+
+    // On the volume + all view, the range tabs must keep metric=volume and
+    // the metric tabs must keep range=all.
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/stats/exercise/{}?metric=volume&range=all",
+                    exercise.id
+                ))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(
+        body_str.contains(r#"href="?metric=volume&amp;range=20""#),
+        "the Last 20 tab should stay on volume, got:\n{body_str}"
+    );
+    assert!(
+        body_str.contains(r#"href="?metric=e1rm&amp;range=all""#),
+        "the e1RM tab should stay on the all-sessions range, got:\n{body_str}"
+    );
+}

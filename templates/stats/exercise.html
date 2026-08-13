@@ -29,15 +29,20 @@
         {% if session_count == 0 %}
         <p class="muted">No progress data yet — log this exercise to see your trend.</p>
         {% else %}
+        {# Links, not buttons: without them e1RM and Volume had no
+           representation anywhere in the UI once scripts were off, since
+           only the client redraw could reach those series. The server
+           renders whichever combination the query string names; the script
+           below intercepts the clicks so switching stays instant. #}
         <div id="exercise-chart-controls" style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);">
             <div role="group" aria-label="Metric" style="display: flex; gap: var(--sp-2);">
-                <button type="button" class="btn btn-sm btn-tab is-active" data-metric="top_set">Top Set</button>
-                <button type="button" class="btn btn-sm btn-tab" data-metric="e1rm">e1RM</button>
-                <button type="button" class="btn btn-sm btn-tab" data-metric="volume">Volume</button>
+                <a href="?metric=top_set&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "top_set" %} is-active{% endif %}" data-metric="top_set">Top Set</a>
+                <a href="?metric=e1rm&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "e1rm" %} is-active{% endif %}" data-metric="e1rm">e1RM</a>
+                <a href="?metric=volume&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "volume" %} is-active{% endif %}" data-metric="volume">Volume</a>
             </div>
             <div role="group" aria-label="Range" style="display: flex; gap: var(--sp-2);">
-                <button type="button" class="btn btn-sm btn-tab is-active" data-range="20">Last 20</button>
-                <button type="button" class="btn btn-sm btn-tab" data-range="all">All</button>
+                <a href="?metric={{ metric }}&amp;range=20" class="btn btn-sm btn-tab{% if range == "20" %} is-active{% endif %}" data-range="20">Last 20</a>
+                <a href="?metric={{ metric }}&amp;range=all" class="btn btn-sm btn-tab{% if range == "all" %} is-active{% endif %}" data-range="all">All</a>
             </div>
         </div>
 
@@ -151,19 +156,17 @@
     var W = 600, H = 220, PL = 44, PR_ = 12, PT = 14, PB = 28;
     var plotW = W - PL - PR_, plotH = H - PT - PB;
 
-    var activeMetric = 'top_set';
-    var activeRange = '20';
+    /* Start from what the server drew, not from a hardcoded default:
+       arriving at ?metric=volume must not have the script silently redraw
+       Top Set over it. */
+    var activeMetric = '{{ metric }}';
+    var activeRange = '{{ range }}';
     var lastYMin = 0, lastYMax = 1;
 
     function metricValue(p, m) {
         if (m === 'top_set') return p.top_weight;
         if (m === 'e1rm') return p.e1rm;
         return p.volume;
-    }
-    function metricLabel(m) {
-        if (m === 'top_set') return 'Top Set (kg)';
-        if (m === 'e1rm') return 'e1RM (kg)';
-        return 'Volume (kg)';
     }
 
     function redraw() {
@@ -273,20 +276,51 @@
         tooltip.style.top = top + 'px';
     }
 
-    // Tab wiring
+    /* Tab wiring. The tabs are real links to the same page with a different
+       query string, so doing nothing here would still work — it would just
+       cost a page load. Intercept and redraw in place instead, then put the
+       matching URL in the address bar so reloading, bookmarking or sharing
+       lands on the same view the server would render. */
     var controls = document.getElementById('exercise-chart-controls');
     controls.addEventListener('click', function(e) {
-        var t = e.target;
+        if (e.defaultPrevented || e.button !== 0 ||
+            e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+            /* Leave ctrl/cmd-click to the browser: it opens the tab's own
+               URL in a new tab, which the server renders correctly. */
+            return;
+        }
+        var t = e.target.closest ? e.target.closest('[data-metric],[data-range]') : null;
+        if (!t || !controls.contains(t)) {
+            return;
+        }
+
+        e.preventDefault();
         if (t.dataset.metric) {
             activeMetric = t.dataset.metric;
             controls.querySelectorAll('[data-metric]').forEach(function(b) { b.classList.toggle('is-active', b === t); });
-            redraw();
-        } else if (t.dataset.range) {
+        } else {
             activeRange = t.dataset.range;
             controls.querySelectorAll('[data-range]').forEach(function(b) { b.classList.toggle('is-active', b === t); });
-            redraw();
         }
+        redraw();
+        syncLinks();
     });
+
+    /* Keep every tab's href, and the address bar, pointing at the state now
+       on screen — otherwise a redraw leaves the links describing the state
+       the page was loaded in. */
+    function syncLinks() {
+        var qs = '?metric=' + activeMetric + '&range=' + activeRange;
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', qs);
+        }
+        controls.querySelectorAll('[data-metric]').forEach(function(a) {
+            a.href = '?metric=' + a.dataset.metric + '&range=' + activeRange;
+        });
+        controls.querySelectorAll('[data-range]').forEach(function(a) {
+            a.href = '?metric=' + activeMetric + '&range=' + a.dataset.range;
+        });
+    }
 
     redraw();
 })();
