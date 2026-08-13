@@ -1,8 +1,9 @@
 use askama::Template;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{Html, IntoResponse, Response},
 };
+use serde::Deserialize;
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
@@ -54,11 +55,17 @@ struct ExerciseStatsTemplate {
     pr: Option<DynamicPR>,
     /// Total session count for this exercise (for the empty/sparse copy).
     session_count: usize,
-    /// Default-state rendered chart. `None` when fewer than 2 sessions.
+    /// Rendered chart for the requested metric/range. `None` when fewer
+    /// than 2 sessions.
     chart: Option<RenderedChart>,
     /// JSON-encoded full `Vec<ChartPoint>` for the client switcher.
     /// Already escaped: `</` → `<\/` so it cannot break out of `<script>`.
     chart_data_json: String,
+    /// Active tab, as the query-string spellings the links use. The template
+    /// compares these to mark `is-active`, so the server-rendered SVG and the
+    /// highlighted tab cannot disagree.
+    metric: &'static str,
+    range: &'static str,
 }
 
 #[derive(Template)]
@@ -75,18 +82,98 @@ const PAD_R: f64 = 12.0;
 const PAD_T: f64 = 14.0;
 const PAD_B: f64 = 28.0;
 
-fn render_default_chart(points: &[ChartPoint]) -> Option<RenderedChart> {
+/// Which series the chart plots.
+///
+/// The tabs are links, so this arrives in the query string and has to
+/// survive anything typed there — hence `from_query` falling back to the
+/// default rather than erroring. A bad `?metric=` is a stale bookmark, not
+/// something worth a 400.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ChartMetric {
+    #[default]
+    TopSet,
+    E1rm,
+    Volume,
+}
+
+impl ChartMetric {
+    fn from_query(raw: Option<&str>) -> Self {
+        match raw {
+            Some("e1rm") => Self::E1rm,
+            Some("volume") => Self::Volume,
+            _ => Self::TopSet,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::TopSet => "top_set",
+            Self::E1rm => "e1rm",
+            Self::Volume => "volume",
+        }
+    }
+
+    /// Must agree with `metricValue` in `templates/stats/exercise.html`,
+    /// which recomputes the same series client-side.
+    fn value(self, p: &ChartPoint) -> f64 {
+        match self {
+            Self::TopSet => p.top_weight,
+            Self::E1rm => p.e1rm,
+            Self::Volume => p.volume,
+        }
+    }
+}
+
+/// How many sessions the chart covers.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ChartRange {
+    #[default]
+    Last20,
+    All,
+}
+
+impl ChartRange {
+    fn from_query(raw: Option<&str>) -> Self {
+        match raw {
+            Some("all") => Self::All,
+            _ => Self::Last20,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Last20 => "20",
+            Self::All => "all",
+        }
+    }
+}
+
+/// `?metric=&range=` on the exercise stats page. Both are optional and both
+/// tolerate nonsense; see `ChartMetric::from_query`.
+#[derive(Deserialize)]
+pub struct ChartQuery {
+    metric: Option<String>,
+    range: Option<String>,
+}
+
+fn render_chart(
+    points: &[ChartPoint],
+    metric: ChartMetric,
+    range: ChartRange,
+) -> Option<RenderedChart> {
     if points.len() < 2 {
         return None;
     }
 
-    // Default state: top set weight, last 20 sessions.
-    let slice: Vec<&ChartPoint> = points.iter().rev().take(20).rev().collect();
+    let slice: Vec<&ChartPoint> = match range {
+        ChartRange::All => points.iter().collect(),
+        ChartRange::Last20 => points.iter().rev().take(20).rev().collect(),
+    };
     if slice.len() < 2 {
         return None;
     }
 
-    let values: Vec<f64> = slice.iter().map(|p| p.top_weight).collect();
+    let values: Vec<f64> = slice.iter().map(|p| metric.value(p)).collect();
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     // Pad y range a bit so the line isn't flush against the top.
@@ -108,10 +195,14 @@ fn render_default_chart(points: &[ChartPoint]) -> Option<RenderedChart> {
 
     for (i, p) in slice.iter().enumerate() {
         let x = PAD_L + (i as f64 / (n as f64 - 1.0)) * plot_w;
-        let y = PAD_T + (1.0 - (p.top_weight - y_min) / (y_max - y_min)) * plot_h;
-        let is_pr = p.top_weight > running_max;
+        // A "PR" dot is a running best *of the plotted series*, matching what
+        // the client redraw does — on the volume tab the gold dots mark the
+        // biggest sessions, not the heaviest top sets.
+        let value = metric.value(p);
+        let y = PAD_T + (1.0 - (value - y_min) / (y_max - y_min)) * plot_h;
+        let is_pr = value > running_max;
         if is_pr {
-            running_max = p.top_weight;
+            running_max = value;
         }
         polyline_parts.push(format!("{x:.2},{y:.2}"));
         rendered_points.push(RenderedPoint { x, y, is_pr });
@@ -196,6 +287,7 @@ pub async fn exercise_stats(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(exercise_id): Path<String>,
+    Query(query): Query<ChartQuery>,
 ) -> Result<Response> {
     // The history/PR/metrics queries below are all scoped by `auth_user.id`, but
     // the exercise record itself is rendered, so fetching it unscoped disclosed
@@ -220,9 +312,12 @@ pub async fn exercise_stats(
         .get_session_metrics_for_exercise(&auth_user.id, &exercise_id)
         .await?;
 
+    let metric = ChartMetric::from_query(query.metric.as_deref());
+    let range = ChartRange::from_query(query.range.as_deref());
+
     let chart_points: Vec<ChartPoint> = metrics.iter().map(ChartPoint::from_metric).collect();
     let session_count = chart_points.len();
-    let chart = render_default_chart(&chart_points);
+    let chart = render_chart(&chart_points, metric, range);
     let chart_data_json = encode_chart_data(&chart_points)?;
 
     let template = ExerciseStatsTemplate {
@@ -233,6 +328,8 @@ pub async fn exercise_stats(
         session_count,
         chart,
         chart_data_json,
+        metric: metric.as_str(),
+        range: range.as_str(),
     };
 
     Ok(Html(template.render()?).into_response())
