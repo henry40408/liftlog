@@ -1119,6 +1119,59 @@ async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting(
     );
 }
 
+/// The delete trigger has to carry both halves of the arrangement: an `href`
+/// to the confirmation page (the path a browser with scripts off takes) and
+/// a `data-confirm` for base.html to intercept (the path everyone else
+/// takes). Losing the attribute would silently cost every JS user a page
+/// load; losing the href would silently cost no-JS users the confirmation.
+#[tokio::test]
+async fn test_workout_delete_trigger_carries_both_confirmation_paths() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains(&format!(r#"href="/workouts/{}/delete""#, workout.id)),
+        "the trigger must link to the confirmation page"
+    );
+    assert!(
+        body_str.contains(r#"data-confirm="Delete this workout?"#),
+        "the trigger must carry the dialog text for the scripted path"
+    );
+    assert!(
+        !body_str.contains("onsubmit"),
+        "nothing on the page may fall back to an inline onsubmit guard"
+    );
+}
+
 /// The set count is the reason this page exists, so all three phrasings —
 /// none, one, many — are worth pinning. Grammar in generated prose is easy to
 /// get wrong and nothing else would catch "Its 1 recorded sets".

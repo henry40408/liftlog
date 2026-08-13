@@ -21,7 +21,8 @@
             <a href="/stats/exercise/{{ ex.id }}">{{ ex.name }}</a>
             <div class="actions">
                 <a href="/exercises/{{ ex.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
-                <a href="/exercises/{{ ex.id }}/delete" class="btn btn-danger btn-sm">Delete</a>
+                <a href="/exercises/{{ ex.id }}/delete" class="btn btn-danger btn-sm"
+                   data-confirm="Delete {{ ex.name }}?">Delete</a>
             </div>
         </div>
         {% endif %}

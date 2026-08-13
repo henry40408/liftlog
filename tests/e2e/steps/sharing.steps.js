@@ -29,8 +29,8 @@ Given('I have shared the workout', async ({ page, scenarioState }) => {
 
 When('I revoke the share', async ({ page, scenarioState }) => {
   await page.goto(`/workouts/${scenarioState.workoutId}`);
+  page.once('dialog', (d) => d.accept());
   await page.getByRole('link', { name: 'Revoke Share' }).click();
-  await page.getByRole('button', { name: 'Revoke share link' }).click();
   await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}`);
   await expect(page.locator('.share-info')).toHaveCount(0);
 });

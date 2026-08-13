@@ -1384,6 +1384,48 @@
                 }
             });
         })();
+
+        /* Destructive actions are links to a server-rendered confirmation
+           page, so they still ask when scripts are off. With scripts on,
+           short-circuit the extra page load: ask in a dialog and POST
+           straight to the same URL, which is what the page's own form does.
+
+           The dialog text is the short form of the question; the page stays
+           the authority on the detail (how many sets cascade, how many
+           devices sign out) because only the server knows those counts.
+           Delegated from the document so rows added later are covered. */
+        (function () {
+            document.addEventListener('click', function (e) {
+                if (e.defaultPrevented || e.button !== 0 ||
+                    e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+                    /* Let ctrl/cmd-click open the confirmation page in a new
+                       tab, exactly as it would for any other link. */
+                    return;
+                }
+                var target = e.target;
+                if (!target || typeof target.closest !== 'function') {
+                    return;
+                }
+                var link = target.closest('a[data-confirm]');
+                if (!link) {
+                    return;
+                }
+
+                e.preventDefault();
+                if (!window.confirm(link.dataset.confirm)) {
+                    return;
+                }
+
+                /* A real form POST, not fetch(): it navigates, so the
+                   redirect the handler returns lands the user where the
+                   no-JS path would have put them. */
+                var form = document.createElement('form');
+                form.method = 'post';
+                form.action = link.getAttribute('href');
+                document.body.appendChild(form);
+                form.submit();
+            });
+        })();
     </script>
 </head>
 <body>

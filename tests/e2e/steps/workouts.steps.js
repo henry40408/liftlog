@@ -76,14 +76,14 @@ When(
   },
 );
 
-// Delete is a link to a confirmation page now, not a POST form guarded by
-// window.confirm() — that guard never ran with JavaScript off, so the
-// workout and all its sets went on the first click.
+// Delete is a link to a confirmation page, which is what a browser with
+// scripts off follows. Here scripts are on, so base.html intercepts the
+// click and asks in a dialog instead — hence the handler. The page itself
+// is covered by `no_js.feature`.
 When('I delete the workout', async ({ page, scenarioState }) => {
   await page.goto(`/workouts/${scenarioState.workoutId}`);
+  page.once('dialog', (d) => d.accept());
   await page.getByRole('link', { name: 'Delete', exact: true }).click();
-  await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}/delete`);
-  await page.getByRole('button', { name: 'Delete workout' }).click();
   await expect(page).toHaveURL('/workouts');
 });
 
@@ -130,8 +130,8 @@ When('I delete my set', async ({ page, scenarioState }) => {
     .locator('.set-row')
     .filter({ hasText: scenarioState.exerciseName })
     .first();
+  page.once('dialog', (d) => d.accept());
   await row.locator('a[href*="/logs/"][href$="/delete"]').click();
-  await page.getByRole('button', { name: 'Delete set' }).click();
   await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}`);
 });
 
@@ -299,3 +299,42 @@ Then('visiting {string} returns a 404', async ({ page }, path) => {
   const response = await page.goto(path);
   expect(response?.status()).toBe(404);
 });
+
+// Self-contained like the guest steps in sharing.steps.js: the whole point
+// is a context configured differently from the shared `page` fixture, so it
+// builds its own and carries the logged-in cookies across.
+Then(
+  'deleting that workout without JavaScript asks for confirmation first',
+  async ({ browser, context, baseURL, scenarioState }) => {
+    const noJs = await browser.newContext({
+      baseURL,
+      javaScriptEnabled: false,
+    });
+    try {
+      await noJs.addCookies(await context.cookies());
+      const page = await noJs.newPage();
+      const workoutUrl = `/workouts/${scenarioState.workoutId}`;
+
+      // Nothing can intercept this click, so it is a plain navigation to the
+      // confirmation page rather than a dialog.
+      await page.goto(workoutUrl);
+      await page.getByRole('link', { name: 'Delete', exact: true }).click();
+      await expect(page).toHaveURL(`${workoutUrl}/delete`);
+      await expect(page.locator('main')).toContainText(
+        'Its 1 recorded set will be deleted with it.',
+      );
+
+      // Reaching the page must not have deleted anything.
+      await page.goto('/workouts');
+      await expect(page.locator(`a[href="${workoutUrl}"]`)).toBeVisible();
+
+      // Confirming does.
+      await page.goto(`${workoutUrl}/delete`);
+      await page.getByRole('button', { name: 'Delete workout' }).click();
+      await expect(page).toHaveURL('/workouts');
+      await expect(page.locator(`a[href="${workoutUrl}"]`)).toHaveCount(0);
+    } finally {
+      await noJs.close();
+    }
+  },
+);

@@ -19,8 +19,11 @@
         <a href="/workouts/{{ workout.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
         {# A link to the confirmation page, not a POST form with confirm():
            that handler never runs with JavaScript off, so the workout — and
-           every set in it, by cascade — used to go on the first click. #}
-        <a href="/workouts/{{ workout.id }}/delete" class="btn btn-danger btn-sm">Delete</a>
+           every set in it, by cascade — used to go on the first click.
+           `data-confirm` restores the one-click feel where scripts do run;
+           see the delegated handler in base.html. #}
+        <a href="/workouts/{{ workout.id }}/delete" class="btn btn-danger btn-sm"
+           data-confirm="Delete this workout? Every set recorded in it is deleted too, and this cannot be undone.">Delete</a>
         {% match share_url %}
         {% when None %}
         <form action="/workouts/{{ workout.id }}/share" method="post" class="share-form">
@@ -47,7 +50,8 @@
         {% when None %}
         <p class="muted" style="margin: 0 0 var(--sp-3) 0;">Never expires</p>
         {% endmatch %}
-        <a href="/workouts/{{ workout.id }}/revoke-share" class="btn btn-danger btn-sm">Revoke Share</a>
+        <a href="/workouts/{{ workout.id }}/revoke-share" class="btn btn-danger btn-sm"
+           data-confirm="Revoke the share link? Anyone who already has it loses access, and sharing again produces a different link.">Revoke Share</a>
     </div>
     {% when None %}
     {% endmatch %}
@@ -117,7 +121,8 @@
                 <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>
                 <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete"
-                   class="btn btn-danger btn-sm" aria-label="Delete set">&times;</a>
+                   class="btn btn-danger btn-sm" aria-label="Delete set"
+                   data-confirm="Delete set {{ log.set_number }} of {{ log.exercise_name }}?">&times;</a>
             </div>
         </div>
         {% endfor %}
