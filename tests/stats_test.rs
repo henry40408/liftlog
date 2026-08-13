@@ -692,6 +692,65 @@ async fn test_exercise_stats_chart_plots_e1rm() {
     );
 }
 
+/// The HTML tooltip is built by script on pointer events, so the figures
+/// behind each point were unreadable without it. SVG `<title>` gets a native
+/// tooltip out of the browser for free — provided the bands are rendered
+/// server-side, which the client redraw otherwise replaces.
+#[tokio::test]
+async fn test_exercise_stats_chart_has_native_hover_titles() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+    let exercise = seed_three_sessions(&pool, &user.id).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stats/exercise/{}", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    // Scoped to the hit-area group: the document's own <title> is in <head>.
+    let start = body_str
+        .find(r#"<g id="chart-hit-areas">"#)
+        .expect("hit-area group missing");
+    let end = body_str[start..]
+        .find("</g>")
+        .expect("hit-area group close");
+    let bands = &body_str[start..start + end];
+
+    // One band per session, each carrying the full figures for that session.
+    assert_eq!(
+        bands.matches("<title>").count(),
+        3,
+        "expected one hover band per session, got:\n{bands}"
+    );
+    assert!(
+        bands.contains("Top: 100 kg × 5"),
+        "the title should carry the top set, got:\n{bands}"
+    );
+    assert!(
+        bands.contains("Volume: 500 kg"),
+        "the title should carry the volume, got:\n{bands}"
+    );
+    assert!(
+        bands.contains("e1RM: 116.7 kg"),
+        "the title should carry e1RM to one decimal, got:\n{bands}"
+    );
+}
+
 /// `?range=all` has to widen the window, not just relabel the tab.
 #[tokio::test]
 async fn test_exercise_stats_chart_range_controls_the_window() {

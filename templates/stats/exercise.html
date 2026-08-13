@@ -81,7 +81,21 @@
                 <circle cx="300" cy="110" r="5" fill="var(--accent)" stroke="var(--bg-root)" stroke-width="1.5" />
                 {% endif %}
                 {% endmatch %}
-                <g id="chart-hit-areas"></g>
+                {# Server-rendered hover bands carrying an SVG <title>, which
+                   browsers show as a native tooltip without any scripting.
+                   The client redraw replaces this group with its own bands
+                   and uses the richer HTML tooltip instead. #}
+                <g id="chart-hit-areas">
+                    {% match chart %}
+                    {% when Some with (c) %}
+                    {% for pt in c.points %}
+                    <rect x="{{ pt.hit_x }}" y="{{ c.padding_top }}"
+                          width="{{ pt.hit_width }}" height="{{ c.plot_height }}"
+                          fill="transparent" style="cursor:crosshair"><title>{{ pt.title }}</title></rect>
+                    {% endfor %}
+                    {% when None %}
+                    {% endmatch %}
+                </g>
             </svg>
 
             <div id="exercise-chart-tooltip"

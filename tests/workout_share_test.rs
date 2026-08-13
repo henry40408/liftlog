@@ -837,6 +837,64 @@ async fn test_cleanup_expired_share_tokens_nulls_them() {
     assert!(future_row.share_expires_at.is_some());
 }
 
+/// Copying needs the clipboard API, so unlike the rest of the no-JS work
+/// there is no server-side equivalent to build. The button therefore ships
+/// `hidden` and is revealed by base.html — a dead button that looks alive is
+/// worse than an absent one. The link itself stays selectable either way.
+#[tokio::test]
+async fn test_copy_share_link_button_is_hidden_until_scripts_reveal_it() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+
+    let workout_repo = WorkoutRepository::new(pool.clone());
+    let share_token = workout_repo
+        .set_share_token(&workout.id, &user.id, None)
+        .await
+        .unwrap();
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains("hidden data-requires-js"),
+        "the Copy button should ship hidden, got:\n{body_str}"
+    );
+    assert!(
+        !body_str.contains("onclick=\"copyShareLink"),
+        "the button should be wired by delegation, not an inline handler"
+    );
+    // The link itself is always there, so the URL is reachable regardless.
+    assert!(
+        body_str.contains(&format!(r#"href="/shared/{share_token}""#)),
+        "the share URL should still be a plain link"
+    );
+}
+
 /// Revoking is irreversible for anyone holding the old link, which the old
 /// `confirm()` said and — with JavaScript off — never asked. The interstitial
 /// must say it, and must leave the token alone until the POST.
