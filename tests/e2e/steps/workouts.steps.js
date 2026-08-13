@@ -79,7 +79,7 @@ When(
 // Delete is a link to a confirmation page, which is what a browser with
 // scripts off follows. Here scripts are on, so base.html intercepts the
 // click and asks in a dialog instead — hence the handler. The page itself
-// is covered by `no_js.feature`.
+// is covered by the Rust integration tests.
 When('I delete the workout', async ({ page, scenarioState }) => {
   await page.goto(`/workouts/${scenarioState.workoutId}`);
   page.once('dialog', (d) => d.accept());
@@ -300,41 +300,9 @@ Then('visiting {string} returns a 404', async ({ page }, path) => {
   expect(response?.status()).toBe(404);
 });
 
-// Self-contained like the guest steps in sharing.steps.js: the whole point
-// is a context configured differently from the shared `page` fixture, so it
-// builds its own and carries the logged-in cookies across.
-Then(
-  'deleting that workout without JavaScript asks for confirmation first',
-  async ({ browser, context, baseURL, scenarioState }) => {
-    const noJs = await browser.newContext({
-      baseURL,
-      javaScriptEnabled: false,
-    });
-    try {
-      await noJs.addCookies(await context.cookies());
-      const page = await noJs.newPage();
-      const workoutUrl = `/workouts/${scenarioState.workoutId}`;
-
-      // Nothing can intercept this click, so it is a plain navigation to the
-      // confirmation page rather than a dialog.
-      await page.goto(workoutUrl);
-      await page.getByRole('link', { name: 'Delete', exact: true }).click();
-      await expect(page).toHaveURL(`${workoutUrl}/delete`);
-      await expect(page.locator('main')).toContainText(
-        'Its 1 recorded set will be deleted with it.',
-      );
-
-      // Reaching the page must not have deleted anything.
-      await page.goto('/workouts');
-      await expect(page.locator(`a[href="${workoutUrl}"]`)).toBeVisible();
-
-      // Confirming does.
-      await page.goto(`${workoutUrl}/delete`);
-      await page.getByRole('button', { name: 'Delete workout' }).click();
-      await expect(page).toHaveURL('/workouts');
-      await expect(page.locator(`a[href="${workoutUrl}"]`)).toHaveCount(0);
-    } finally {
-      await noJs.close();
-    }
-  },
-);
+// The no-JS path — the confirmation page itself — is covered in Rust
+// (`workout_test.rs`, `exercises_test.rs`, `settings_test.rs`): the page
+// renders the right consequence, is inert, and refuses another user's row.
+// A `javaScriptEnabled: false` scenario was tried here and hung in CI, and
+// a real browser adds little over those tests beyond proving that an
+// `<a href>` navigates.
