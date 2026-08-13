@@ -34,6 +34,31 @@ struct NewWorkoutTemplate {
     error: Option<String>,
 }
 
+/// Values the Add Set form starts with when `?prefill=<log_id>` names a set
+/// in this workout — the scripts-off half of the Clone button.
+pub(crate) struct PrefillSet {
+    pub(crate) exercise_id: String,
+    pub(crate) weight: f64,
+    pub(crate) reps: i32,
+    pub(crate) rpe: Option<i32>,
+}
+
+/// One row of the scripts-off "last weights" list. With scripts on, the same
+/// figures appear inline as the exercise `<select>` changes; nothing can
+/// react to that select without them, so the whole set is listed instead.
+pub(crate) struct LastWeightRow {
+    pub(crate) exercise_name: String,
+    pub(crate) weight: f64,
+    pub(crate) rpe: Option<i32>,
+    pub(crate) logged_at: DateTime<Utc>,
+}
+
+/// `?prefill=` on the workout page.
+#[derive(Deserialize)]
+pub struct ShowQuery {
+    prefill: Option<String>,
+}
+
 #[derive(Template)]
 #[template(path = "workouts/show.html")]
 struct ShowWorkoutTemplate {
@@ -43,6 +68,10 @@ struct ShowWorkoutTemplate {
     exercises: Vec<Exercise>,
     categories: &'static [ExerciseCategory],
     exercise_last_weights: Vec<LastExerciseWeight>,
+    /// Same figures as `exercise_last_weights`, joined to exercise names and
+    /// sorted, for the `<noscript>` list.
+    last_weight_rows: Vec<LastWeightRow>,
+    prefill: Option<PrefillSet>,
     share_url: Option<String>,
     share_expires_at: Option<DateTime<Utc>>,
     error: Option<String>,
@@ -138,6 +167,7 @@ pub async fn show(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(id): Path<String>,
+    Query(query): Query<ShowQuery>,
 ) -> Result<Response> {
     let workout = state
         .workout_repo
@@ -157,6 +187,36 @@ pub async fn show(
         .get_last_weight_per_exercise_by_user(&auth_user.id)
         .await?;
 
+    // Resolved against this session's own logs, which are already scoped to
+    // the caller — so a `prefill` id from someone else's workout simply
+    // fails to match rather than disclosing anything.
+    let prefill = query.prefill.as_ref().and_then(|log_id| {
+        logs.iter().find(|l| &l.id == log_id).map(|l| PrefillSet {
+            exercise_id: l.exercise_id.clone(),
+            weight: l.weight,
+            reps: l.reps,
+            rpe: l.rpe,
+        })
+    });
+
+    let mut last_weight_rows: Vec<LastWeightRow> = exercises
+        .iter()
+        .filter_map(|ex| {
+            exercise_last_weights
+                .iter()
+                .find(|w| w.exercise_id == ex.id)
+                .map(|w| LastWeightRow {
+                    exercise_name: ex.name.clone(),
+                    weight: w.weight,
+                    rpe: w.rpe,
+                    logged_at: w.logged_at,
+                })
+        })
+        .collect();
+    // `exercises` is ordered by category then name; a flat alphabetical list
+    // is easier to scan when the point is looking one exercise up.
+    last_weight_rows.sort_by(|a, b| a.exercise_name.cmp(&b.exercise_name));
+
     let share_url = workout
         .share_token
         .as_ref()
@@ -170,6 +230,8 @@ pub async fn show(
         exercises,
         categories: CATEGORIES,
         exercise_last_weights,
+        last_weight_rows,
+        prefill,
         share_url,
         share_expires_at,
         error: None,

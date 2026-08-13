@@ -56,7 +56,7 @@
     {% when None %}
     {% endmatch %}
 
-    <h3>Add Set</h3>
+    <h3 id="add-set">Add Set</h3>
     <div class="card card-accent" style="margin: var(--sp-4) 0;">
         <form method="post" action="/workouts/{{ workout.id }}/logs">
             <div class="form-group">
@@ -67,7 +67,7 @@
                     <optgroup label="{{ cat.display_name }}">
                         {% for ex in exercises %}
                         {% if ex.category == cat.name %}
-                        <option value="{{ ex.id }}">{{ ex.name }}</option>
+                        <option value="{{ ex.id }}"{% if let Some(p) = prefill %}{% if p.exercise_id == ex.id %} selected{% endif %}{% endif %}>{{ ex.name }}</option>
                         {% endif %}
                         {% endfor %}
                     </optgroup>
@@ -77,18 +77,48 @@
             </div>
             <div class="form-group">
                 <label for="weight">Weight</label>
-                <input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" required>
+                <input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" required{% if let Some(p) = prefill %} value="{{ p.weight }}"{% endif %}>
             </div>
             <div class="form-group">
                 <label for="reps">Reps</label>
-                <input type="number" inputmode="numeric" id="reps" name="reps" min="1" required>
+                <input type="number" inputmode="numeric" id="reps" name="reps" min="1" required{% if let Some(p) = prefill %} value="{{ p.reps }}"{% endif %}>
             </div>
             <div class="form-group">
                 <label for="rpe">RPE (1-10, optional)</label>
-                <input type="number" inputmode="numeric" id="rpe" name="rpe" min="1" max="10">
+                <input type="number" inputmode="numeric" id="rpe" name="rpe" min="1" max="10"{% if let Some(p) = prefill %}{% match p.rpe %}{% when Some with (r) %} value="{{ r }}"{% when None %}{% endmatch %}{% endif %}>
             </div>
             <button type="submit">Add Set</button>
         </form>
+
+        {# The inline hint above reacts to the <select>, which nothing can do
+           without scripts. Listing every exercise's last set covers the same
+           question — "what did I do last time?" — in a form that needs no
+           interaction. Hidden when scripts run, where the hint is better. #}
+        <noscript>
+            {% if !last_weight_rows.is_empty() %}
+            <h4 style="margin: var(--sp-5) 0 var(--sp-2) 0;">Last time</h4>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Exercise</th>
+                        <th>Weight</th>
+                        <th>RPE</th>
+                        <th>Logged</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in last_weight_rows %}
+                    <tr>
+                        <td data-label="Exercise">{{ row.exercise_name }}</td>
+                        <td data-label="Weight">{{ row.weight }} kg</td>
+                        <td data-label="RPE">{% match row.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
+                        <td data-label="Logged"><time datetime="{{ row.logged_at.to_rfc3339() }}" data-fmt="date">{{ row.logged_at.format("%Y-%m-%d") }}</time></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </noscript>
     </div>
 
     <h2>Sets</h2>
@@ -119,7 +149,14 @@
             <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge" title="All-time best for this exercise">PR</span>{% else if log.is_recent_pr %}<span class="pr-badge pr-badge-recent" title="Best for this exercise in the last month">PR 1M</span>{% endif %}</div>
             <div class="set-row-actions">
                 <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="cloneSet('{{ log.exercise_id }}', {{ log.weight }}, {{ log.reps }}, {% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}null{% endmatch %})">Clone</button>
+                {# A link that reloads the page with the form prefilled, so
+                   Clone still works with scripts off; the handler below
+                   intercepts it and fills the form in place instead. #}
+                <a href="?prefill={{ log.id }}#add-set" class="btn btn-ghost btn-sm"
+                   data-clone-exercise="{{ log.exercise_id }}"
+                   data-clone-weight="{{ log.weight }}"
+                   data-clone-reps="{{ log.reps }}"
+                   data-clone-rpe="{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}{% endmatch %}">Clone</a>
                 <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/delete"
                    class="btn btn-danger btn-sm" aria-label="Delete set"
                    data-confirm="Delete set {{ log.set_number }} of {{ log.exercise_name }}?">&times;</a>
@@ -177,13 +214,43 @@ function cloneSet(exerciseId, weight, reps, rpe) {
     exerciseSelect.value = exerciseId;
     document.getElementById('weight').value = weight;
     document.getElementById('reps').value = reps;
-    if (rpe !== null) {
-        document.getElementById('rpe').value = rpe;
-    } else {
-        document.getElementById('rpe').value = '';
-    }
+    document.getElementById('rpe').value = rpe === null ? '' : rpe;
     showLastWeightInfo(exerciseId);
     exerciseSelect.scrollIntoView({ behavior: 'smooth' });
+}
+
+/* Clone is a link to `?prefill=<log id>`, which the server honours. Filling
+   the form in place is quicker, so intercept the click — but leave
+   ctrl/cmd-click alone, where the href opens the prefilled page in a new
+   tab. Delegated, so it covers rows the page did not render itself. */
+document.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button !== 0 ||
+        e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+        return;
+    }
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') {
+        return;
+    }
+    var link = target.closest('a[data-clone-exercise]');
+    if (!link) {
+        return;
+    }
+
+    e.preventDefault();
+    var rpe = link.dataset.cloneRpe;
+    cloneSet(
+        link.dataset.cloneExercise,
+        link.dataset.cloneWeight,
+        link.dataset.cloneReps,
+        rpe === '' ? null : rpe
+    );
+});
+
+/* Arriving at ?prefill=… the server has already filled the form; show the
+   matching hint too, so the scripted view matches what a reload gives. */
+if (exerciseSelect.value) {
+    showLastWeightInfo(exerciseSelect.value);
 }
 
 function copyShareLink(url) {
