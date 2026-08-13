@@ -76,15 +76,14 @@ When(
   },
 );
 
+// Delete is a link to a confirmation page now, not a POST form guarded by
+// window.confirm() — that guard never ran with JavaScript off, so the
+// workout and all its sets went on the first click.
 When('I delete the workout', async ({ page, scenarioState }) => {
   await page.goto(`/workouts/${scenarioState.workoutId}`);
-  page.once('dialog', (d) => d.accept());
-  await page
-    .locator('form[action$="/delete"]')
-    .filter({ has: page.getByRole('button', { name: 'Delete' }) })
-    .first()
-    .getByRole('button', { name: 'Delete' })
-    .click();
+  await page.getByRole('link', { name: 'Delete', exact: true }).click();
+  await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}/delete`);
+  await page.getByRole('button', { name: 'Delete workout' }).click();
   await expect(page).toHaveURL('/workouts');
 });
 
@@ -131,8 +130,9 @@ When('I delete my set', async ({ page, scenarioState }) => {
     .locator('.set-row')
     .filter({ hasText: scenarioState.exerciseName })
     .first();
-  page.once('dialog', (d) => d.accept());
-  await row.locator('form[action*="/logs/"][action$="/delete"] button').click();
+  await row.locator('a[href*="/logs/"][href$="/delete"]').click();
+  await page.getByRole('button', { name: 'Delete set' }).click();
+  await expect(page).toHaveURL(`/workouts/${scenarioState.workoutId}`);
 });
 
 Then(

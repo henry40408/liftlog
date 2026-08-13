@@ -71,8 +71,9 @@ When('I delete my exercise', async ({ page, scenarioState }) => {
       has: page.getByRole('link', { name: scenarioState.exerciseName }),
     })
     .first();
-  page.once('dialog', (d) => d.accept());
-  await row.getByRole('button', { name: 'Delete' }).click();
+  await row.getByRole('link', { name: 'Delete' }).click();
+  await page.getByRole('button', { name: 'Delete exercise' }).click();
+  await expect(page).toHaveURL('/exercises');
 });
 
 Then(

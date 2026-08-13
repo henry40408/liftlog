@@ -434,8 +434,12 @@ async fn test_logout_others_deletes_siblings_only() {
     );
 }
 
+/// The guard used to be `onsubmit="return confirm(...)"`, which a browser
+/// with JavaScript off never runs — the form posted straight through and every
+/// other session died on the first click. The trigger is now a link to a
+/// confirmation page, so the confirmation step survives without scripts.
 #[tokio::test]
-async fn test_logout_others_form_has_confirm_attr() {
+async fn test_logout_others_is_gated_by_a_confirmation_page() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
@@ -456,8 +460,62 @@ async fn test_logout_others_form_has_confirm_attr() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body = std::str::from_utf8(&body).unwrap();
     assert!(
-        body.contains("onsubmit=\"return confirm("),
-        "logout-others form should carry a confirm() guard"
+        !body.contains("onsubmit=\"return confirm("),
+        "the settings page must not depend on confirm() to guard anything"
+    );
+    assert!(
+        body.contains(r#"<a href="/settings/logout-others""#),
+        "logout-others should be reached through its confirmation page"
+    );
+}
+
+/// The confirmation page must name how many sessions are about to end, and
+/// must not end any of them itself — a GET that logged devices out would be
+/// triggerable by any prefetch.
+#[tokio::test]
+async fn test_logout_others_confirmation_page_counts_sessions_without_acting() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
+
+    let current_token = common::create_session_token(&pool, &user).await;
+    let sibling_token = common::create_session_token(&pool, &user).await;
+
+    let app = common::create_test_app(pool.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/settings/logout-others")
+                .header(header::COOKIE, common::cookie_header(&current_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(
+        body.contains("1 other signed-in device will be logged out"),
+        "the page should say how many devices are affected, got: {body}"
+    );
+    assert!(
+        body.contains(r#"<form method="post" action="/settings/logout-others">"#),
+        "the page should post back to the same route"
+    );
+
+    // The GET must have been inert.
+    let session_repo = liftlog::repositories::SessionRepository::new(pool);
+    assert!(
+        matches!(
+            session_repo
+                .validate_and_touch(&sibling_token)
+                .await
+                .unwrap(),
+            liftlog::repositories::ValidateOutcome::Valid(_)
+        ),
+        "the sibling session must survive merely viewing the confirmation page"
     );
 }
 

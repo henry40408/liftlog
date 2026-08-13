@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action_label }} - LiftLog{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<main>
+    <div class="page-header">
+        <h1>{{ action_label }}</h1>
+    </div>
+
+    <p class="mb-4">{{ consequence }}</p>
+
+    <div class="actions">
+        <form method="post" action="{{ form_action }}">
+            <button type="submit" class="btn btn-danger">{{ action_label }}</button>
+        </form>
+        <a href="{{ cancel_url }}" class="btn btn-ghost">Cancel</a>
+    </div>
+</main>
+{% endblock %}

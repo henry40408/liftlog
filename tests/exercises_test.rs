@@ -575,3 +575,81 @@ async fn test_delete_unreferenced_exercise_still_succeeds() {
     let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
     assert!(found.is_none());
 }
+
+/// The exercise list reaches deletion through a confirmation page now; the
+/// old `confirm()` guard did nothing with JavaScript off.
+#[tokio::test]
+async fn test_delete_exercise_confirmation_page_names_it_without_acting() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let exercise =
+        common::create_test_exercise(&pool, &user.id, "Overhead Press", "shoulders").await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/exercises/{}/delete", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains("Overhead Press will be permanently deleted."),
+        "the page must name the exercise, got: {body_str}"
+    );
+
+    // The GET must have been inert.
+    let exercise_repo = ExerciseRepository::new(pool);
+    assert!(
+        exercise_repo
+            .find_by_id(&exercise.id)
+            .await
+            .unwrap()
+            .is_some(),
+        "viewing the confirmation page must not delete the exercise"
+    );
+}
+
+/// A confirmation page for someone else's exercise would offer to delete it.
+/// It reuses `find_owned`, so it refuses on exactly the same terms as the
+/// POST does — `403`, the answer that route has always given here.
+#[tokio::test]
+async fn test_delete_exercise_confirmation_page_rejects_another_users_exercise() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let owner = common::create_test_user(&pool, "owner", "password123", UserRole::User).await;
+    let intruder = common::create_test_user(&pool, "intruder", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &intruder).await);
+
+    let exercise = common::create_test_exercise(&pool, &owner.id, "Deadlift", "back").await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/exercises/{}/delete", exercise.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

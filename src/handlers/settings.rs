@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use crate::audit::{self, AuditContext};
 use crate::error::Result;
+use crate::handlers::confirm;
 use crate::middleware::{AuthUser, SuppressSessionRefresh};
 use crate::models::password_policy_error;
 use crate::repositories::SessionListRow;
@@ -230,6 +231,40 @@ pub async fn change_password(
     );
     response.extensions_mut().insert(SuppressSessionRefresh);
     Ok(response)
+}
+
+/// Interstitial for `logout_others`. Counts the sessions that will actually
+/// be dropped — "log out everywhere else" reads very differently when it is
+/// about to end five sessions than when there are none.
+pub async fn confirm_logout_others(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+) -> Result<Response> {
+    let others = state
+        .session_repo
+        .list_for_user(&auth_user.id)
+        .await?
+        .into_iter()
+        .filter(|s| s.token != auth_user.session_token)
+        .count();
+
+    let consequence = match others {
+        0 => "No other device is signed in, so nothing will be logged out.".to_string(),
+        1 => {
+            "1 other signed-in device will be logged out. This device stays signed in.".to_string()
+        }
+        n => {
+            format!("{n} other signed-in devices will be logged out. This device stays signed in.")
+        }
+    };
+
+    confirm::page(
+        auth_user,
+        "Log out other devices",
+        consequence,
+        "/settings/logout-others".to_string(),
+        "/settings".to_string(),
+    )
 }
 
 pub async fn logout_others(
