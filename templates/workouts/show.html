@@ -43,7 +43,13 @@
     {% when Some with (url) %}
     <div class="share-info">
         <p style="margin: 0 0 var(--sp-3) 0;">Share link: <a href="{{ url }}" target="_blank">{{ url }}</a>
-        <button type="button" class="btn btn-sm btn-inline" onclick="copyShareLink('{{ url }}')" style="background:var(--accent);color:var(--text-inverse);border-color:var(--accent);">Copy</button></p>
+        {# Copying needs the clipboard API, so there is no scripts-off
+           version of this button — it is hidden until the handler in
+           base.html reveals it, rather than sitting there doing nothing.
+           The link itself is above, selectable either way. #}
+        <button type="button" class="btn btn-sm btn-inline" hidden data-requires-js
+                data-copy-url="{{ url }}"
+                style="background:var(--accent);color:var(--text-inverse);border-color:var(--accent);">Copy</button></p>
         {% match share_expires_at %}
         {% when Some with (expires_at) %}
         <p class="muted" style="margin: 0 0 var(--sp-3) 0;">Expires <time datetime="{{ expires_at.to_rfc3339() }}" data-fmt="datetime">{{ expires_at.format("%Y-%m-%d %H:%M UTC") }}</time></p>
@@ -253,13 +259,22 @@ if (exerciseSelect.value) {
     showLastWeightInfo(exerciseSelect.value);
 }
 
-function copyShareLink(url) {
-    var fullUrl = window.location.origin + url;
+document.addEventListener('click', function (e) {
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') {
+        return;
+    }
+    var btn = target.closest('[data-copy-url]');
+    if (!btn) {
+        return;
+    }
+
+    var fullUrl = window.location.origin + btn.dataset.copyUrl;
     navigator.clipboard.writeText(fullUrl).then(function() {
         alert('Link copied to clipboard!');
     }, function() {
         prompt('Copy this link:', fullUrl);
     });
-}
+});
 </script>
 {% endblock %}

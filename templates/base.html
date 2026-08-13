@@ -377,6 +377,13 @@
         /* ============================================
            BUTTONS
            ============================================ */
+        /* `.btn` sets `display: inline-flex`, which outranks the user agent's
+           `[hidden] { display: none }` — without this, anything marked
+           `hidden` in the markup would still be painted. */
+        [hidden] {
+            display: none !important;
+        }
+
         button, .btn {
             font-family: var(--font-mono);
             font-size: var(--font-sm);
@@ -1381,6 +1388,20 @@
                     if (text) {
                         el.textContent = text;
                     }
+                }
+            });
+        })();
+
+        /* Controls that genuinely cannot work without scripts — the clipboard
+           button is the only one — ship as `hidden` and are revealed here.
+           A dead button that looks alive is worse than an absent one, and
+           `<noscript>` cannot express "show this only when scripts run". */
+        (function () {
+            /* This script is in <head>, so the body is not parsed yet. */
+            document.addEventListener('DOMContentLoaded', function () {
+                var nodes = document.querySelectorAll('[data-requires-js]');
+                for (var i = 0; i < nodes.length; i++) {
+                    nodes[i].hidden = false;
                 }
             });
         })();

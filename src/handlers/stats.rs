@@ -31,6 +31,9 @@ pub(crate) struct RenderedChart {
     pub(crate) height: f64,
     pub(crate) padding_left: f64,
     pub(crate) padding_right: f64,
+    pub(crate) padding_top: f64,
+    /// Height of the plotting area, for the hover bands.
+    pub(crate) plot_height: f64,
     pub(crate) points: Vec<RenderedPoint>,
     /// Polyline `points` attribute, e.g. "10,20 50,60 ..."
     pub(crate) polyline: String,
@@ -44,6 +47,14 @@ pub(crate) struct RenderedPoint {
     pub(crate) x: f64,
     pub(crate) y: f64,
     pub(crate) is_pr: bool,
+    /// Left edge and width of this point's hover band. The bands are
+    /// server-rendered `<rect>`s carrying an SVG `<title>`, which browsers
+    /// surface as a native tooltip with no scripting at all — the reason the
+    /// figures are readable on hover without the JS tooltip.
+    pub(crate) hit_x: f64,
+    pub(crate) hit_width: f64,
+    /// Tooltip text. Mirrors what `showTip` builds client-side.
+    pub(crate) title: String,
 }
 
 #[derive(Template)]
@@ -193,6 +204,10 @@ fn render_chart(
     let mut rendered_points = Vec::with_capacity(n);
     let mut polyline_parts = Vec::with_capacity(n);
 
+    // Hover bands, mirroring the geometry the client redraw uses: a full
+    // band per interior point, half-bands at the two ends.
+    let band_w = plot_w / (n as f64 - 1.0).max(1.0);
+
     for (i, p) in slice.iter().enumerate() {
         let x = PAD_L + (i as f64 / (n as f64 - 1.0)) * plot_w;
         // A "PR" dot is a running best *of the plotted series*, matching what
@@ -204,8 +219,30 @@ fn render_chart(
         if is_pr {
             running_max = value;
         }
+
+        let hit_x = if i == 0 { PAD_L } else { x - band_w / 2.0 };
+        let hit_width = if i == 0 || i == n - 1 {
+            band_w / 2.0
+        } else {
+            band_w
+        };
+
         polyline_parts.push(format!("{x:.2},{y:.2}"));
-        rendered_points.push(RenderedPoint { x, y, is_pr });
+        rendered_points.push(RenderedPoint {
+            x,
+            y,
+            is_pr,
+            hit_x,
+            hit_width,
+            title: format!(
+                "{date}\nTop: {top_weight} kg × {top_reps}\ne1RM: {e1rm:.1} kg\nVolume: {volume:.0} kg",
+                date = p.date,
+                top_weight = p.top_weight,
+                top_reps = p.top_reps,
+                e1rm = p.e1rm,
+                volume = p.volume
+            ),
+        });
     }
 
     // 4 evenly spaced y ticks.
@@ -236,6 +273,8 @@ fn render_chart(
         height: CHART_H,
         padding_left: PAD_L,
         padding_right: PAD_R,
+        padding_top: PAD_T,
+        plot_height: plot_h,
         points: rendered_points,
         polyline: polyline_parts.join(" "),
         y_ticks,
