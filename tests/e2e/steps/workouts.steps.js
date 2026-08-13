@@ -258,7 +258,9 @@ When('I click clone on my set', async ({ page, scenarioState }) => {
     .locator('.set-row')
     .filter({ hasText: scenarioState.exerciseName })
     .first();
-  await row.getByRole('button', { name: 'Clone' }).click();
+  // A link to `?prefill=<log id>` now, intercepted by the page's script so
+  // it still fills the form in place rather than reloading.
+  await row.getByRole('link', { name: 'Clone' }).click();
 });
 
 Then(

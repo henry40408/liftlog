@@ -1119,6 +1119,223 @@ async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting(
     );
 }
 
+/// Clone existed only as a JS call, so with scripts off it did nothing.
+/// `?prefill=<log id>` is its server-side half: the Add Set form comes back
+/// with the set's exercise selected and its numbers filled in.
+#[tokio::test]
+async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 8, 82.5, Some(7)).await;
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}?prefill={}", workout.id, log.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains(&format!(r#"<option value="{}" selected>"#, exercise.id)),
+        "the logged exercise should be preselected, got:\n{body_str}"
+    );
+    assert!(
+        body_str.contains(r#"required value="82.5""#),
+        "the weight should be prefilled"
+    );
+    assert!(
+        body_str.contains(r#"min="1" required value="8""#),
+        "the reps should be prefilled"
+    );
+    assert!(
+        body_str.contains(r#"max="10" value="7""#),
+        "the RPE should be prefilled"
+    );
+
+    // Without the query the form comes back empty, so a plain visit is
+    // unaffected.
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+    // Scoped to the exercise option: the share-expiry <select> legitimately
+    // carries a `selected` default of its own.
+    assert!(
+        !body_str.contains(&format!(r#"<option value="{}" selected>"#, exercise.id)),
+        "a plain visit should preselect no exercise"
+    );
+}
+
+/// A `prefill` id is resolved against this session's own logs, so one from
+/// another user's workout must not fill anything in — that would confirm the
+/// id exists and leak its numbers.
+#[tokio::test]
+async fn test_show_workout_ignores_a_prefill_from_another_users_log() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let owner = common::create_test_user(&pool, "owner", "password123", UserRole::User).await;
+    let intruder = common::create_test_user(&pool, "intruder", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &intruder).await);
+
+    let owner_workout = common::create_test_workout(
+        &pool,
+        &owner.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    let owner_exercise = common::create_test_exercise(&pool, &owner.id, "Squat", "legs").await;
+    let owner_log = common::create_test_log(
+        &pool,
+        &owner_workout.id,
+        &owner_exercise.id,
+        1,
+        5,
+        222.5,
+        None,
+    )
+    .await;
+
+    let own_workout = common::create_test_workout(
+        &pool,
+        &intruder.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 16).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/workouts/{}?prefill={}",
+                    own_workout.id, owner_log.id
+                ))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        !body_str.contains("222.5"),
+        "another user's numbers must not reach the form, got:\n{body_str}"
+    );
+    assert!(
+        !body_str.contains(&format!(
+            r#"<option value="{}" selected>"#,
+            owner_exercise.id
+        )),
+        "an unmatched prefill should preselect no exercise"
+    );
+}
+
+/// The inline last-weight hint is built by script from the exercise
+/// `<select>`, which nothing can drive with scripts off. The `<noscript>`
+/// list answers the same question without interaction.
+#[tokio::test]
+async fn test_show_workout_lists_last_weights_for_scriptless_browsers() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let cookie_header =
+        common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
+
+    let exercise =
+        common::create_test_exercise(&pool, &user.id, "Overhead Press", "shoulders").await;
+    let past = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 10).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &past.id, &exercise.id, 1, 5, 47.5, Some(8)).await;
+
+    let today = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 17).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", today.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    let start = body_str
+        .find("<noscript>")
+        .expect("the scriptless last-weight list should be present");
+    let end = body_str[start..]
+        .find("</noscript>")
+        .expect("noscript close tag");
+    let noscript = &body_str[start..start + end];
+
+    assert!(
+        noscript.contains("Overhead Press"),
+        "the list should name the exercise, got:\n{noscript}"
+    );
+    assert!(
+        noscript.contains("47.5 kg"),
+        "the list should carry the last weight, got:\n{noscript}"
+    );
+}
+
 /// The delete trigger has to carry both halves of the arrangement: an `href`
 /// to the confirmation page (the path a browser with scripts off takes) and
 /// a `data-confirm` for base.html to intercept (the path everyone else
