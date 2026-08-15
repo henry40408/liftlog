@@ -196,25 +196,22 @@ cargo nextest run
 
 ### UI BDD Tests
 
-End-to-end tests live in `tests/e2e/` (Playwright + [playwright-bdd](https://github.com/vitalets/playwright-bdd)). They lock in user-facing behavior so UI redesigns can't silently change it. Features are described in Gherkin (`tests/e2e/features/`) and step bindings are plain JS (`tests/e2e/steps/`).
+End-to-end tests live in `e2e/` ([cucumber](https://github.com/cucumber-rs/cucumber) + [thirtyfour](https://github.com/stevepryde/thirtyfour)). They lock in user-facing behavior so UI redesigns can't silently change it. Features are described in Gherkin (`e2e/features/`) and step bindings are Rust (`e2e/tests/e2e/steps.rs`).
 
-First-time setup:
+First-time setup — a local Chrome or Chromium, which the driver manager does *not* download:
 
 ```bash
-cd tests/e2e
-npm install
-npm run install-browsers   # downloads Chromium
+brew install --cask ungoogled-chromium   # macOS; most Linux distros ship a chromium package
 ```
 
 Run the suite (boots a fresh sqlite + Rust server per run):
 
 ```bash
-cd tests/e2e
-npm test                   # headless
-npm run test:headed        # watch the browser
-npm run test:ui            # interactive Playwright UI
-npm run report             # open last HTML report
+cd e2e
+cargo test --test e2e
 ```
+
+`e2e/` is its own Cargo workspace, so a `--workspace` build at the repository root never compiles the browser stack.
 
 ### Code Quality
 

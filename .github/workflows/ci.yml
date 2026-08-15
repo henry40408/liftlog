@@ -61,55 +61,47 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # full history so build.rs `git describe` resolves a tagged version
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: tests/e2e/package-lock.json
+          # `e2e` is its own workspace, deliberately outside the root one, so it
+          # has to be named or none of its dependencies are cached.
+          workspaces: |
+            .
+            e2e
+          # This job builds the server with the dev profile, unlike the release
+          # builds elsewhere. A cache key is only ever written once — an exact
+          # hit is restored and never re-saved — so without a key of its own
+          # this job would keep restoring whatever profile populated the key
+          # first and rebuild its dependencies every run.
+          key: dev
 
-      - name: Install npm deps
-        working-directory: tests/e2e
-        run: npm ci
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/e2e/package-lock.json') }}
-
-      - name: Install Playwright browsers + system deps
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: tests/e2e
-        run: npx playwright install --with-deps chromium
-
-      - name: Install Playwright system deps only
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        working-directory: tests/e2e
-        run: npx playwright install-deps chromium
-
+      # The suite starts this binary itself; building it here keeps the compile
+      # off the test's own startup timeout.
       - name: Build server
         run: cargo build
 
-      - name: Run E2E tests
-        working-directory: tests/e2e
-        run: npm test
+      # `e2e` is linted here rather than in build-and-test, so it shares the
+      # build this job already pays for. It is deliberately outside
+      # `cargo deny`: the browser stack pulls in licences the server's
+      # allow-list does not carry, and none of it is distributed — the Docker
+      # image contains the server alone.
+      - name: Check E2E formatting
+        working-directory: e2e
+        run: cargo fmt --all -- --check
 
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-report
-          path: |
-            tests/e2e/playwright-report/
-            tests/e2e/test-results/
-          retention-days: 7
+      - name: Run clippy on E2E
+        working-directory: e2e
+        run: cargo clippy --all-targets -- -D warnings
+
+      # No browser install step: thirtyfour's driver manager downloads a
+      # matching chromedriver on demand, and the runner image already ships
+      # Chrome. Nothing here needs Node.
+      - name: Run E2E tests
+        working-directory: e2e
+        run: cargo test --test e2e
 
   coverage:
     runs-on: ubuntu-latest

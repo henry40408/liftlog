@@ -16,15 +16,18 @@ cargo nextest run --test workout_test     # single integration file
 cargo nextest run -p liftlog session_repo # filter by name
 ```
 
-UI BDD suite (Playwright + playwright-bdd, lives in `tests/e2e/`):
+UI BDD suite (cucumber + thirtyfour, lives in `e2e/` — its own workspace):
 
 ```bash
-cd tests/e2e
-npm install && npm run install-browsers   # one-time
-npm test                                  # headless; boots cargo run on :3100
-npm run test:ui                           # interactive runner
-npx playwright test sharing               # filter by feature filename
+cd e2e
+cargo test --test e2e                     # headless; boots target/debug/liftlog itself
+cargo fmt --all -- --check                # e2e inherits nothing from the root workspace
+cargo clippy --all-targets -- -D warnings
 ```
+
+A local Chrome or Chromium is a prerequisite (`brew install --cask ungoogled-chromium`);
+thirtyfour's driver manager downloads a matching chromedriver itself but never the
+browser. There is no Node anywhere in this repository.
 
 ## Architecture
 
@@ -62,16 +65,19 @@ Where scripts do run, a delegated handler in `base.html` intercepts clicks on `a
 
 ## E2E test harness
 
-`npm test` runs `cargo build` once, then `bddgen && playwright test`. A worker-scoped fixture in `steps/fixtures.js` (`workerServer`) spawns one server per Playwright worker, on port `3100 + workerInfo.workerIndex` with sqlite at `tests/e2e/.tmp/liftlog-e2e-{idx}.sqlite3`; Playwright's `baseURL` fixture is overridden to point at that per-worker URL so steps stay worker-agnostic.
+`cargo test --test e2e` from `e2e/` runs the whole suite. `e2e/tests/e2e/main.rs` starts one `target/debug/liftlog` against a throwaway SQLite file on an OS-assigned port (building it first if it is missing), opens one browser per scenario, and kills the server on the way out. The `.feature` files are the Playwright suite's, reused verbatim apart from one tag.
 
-- **One DB per worker, not per run.** Workers run in parallel; within a worker, scenarios run sequentially. `workers: process.env.WORKERS ?? (CI ? 2 : '50%')` — override with `WORKERS=4 npm test`.
-- **Scenario data is still scoped.** The `scenarioState` fixture assigns each scenario a random suffix; steps use `scenarioState.unique('Squat')` and assert only on what the scenario built. Don't assume "lifter has no other workouts".
-- **`_bootstrap.feature` only needs its worker's DB empty at worker start.** Both scenarios are no-mutation, so they work no matter which worker they land on.
-- **Confirm dialogs fire from a link, not a form.** Workout-delete, set-delete, exercise-delete, revoke-share and logout-others are `<a data-confirm>` links that `base.html` intercepts — the click still raises `window.confirm()`, so keep `page.once('dialog', d => d.accept())` before it, but target the **link**, not a button. Promote-user and delete-user are not enhanced: they open a page that re-checks the admin's password, so those steps click a link, fill the password, and submit.
-- **The no-JS path is covered in Rust, not here.** The confirmation pages are asserted by the integration tests (right consequence, inert on GET, ownership enforced); a `javaScriptEnabled: false` scenario was tried and hung in CI, and a real browser adds little over those beyond proving an `<a href>` navigates. When changing a destructive trigger, keep the Rust assertions on both the `href` and the `data-confirm`.
-- **Guest views.** Public share URLs are tested via `browser.newContext()` so the logged-in cookie doesn't leak in.
-- **HTML form validation can swallow the request.** Every password field carries `minlength`/`maxlength`, so any scenario submitting a deliberately-invalid password sets `form.noValidate = true` first (the setup step in `auth.steps.js`, `fillPasswordForm` in `settings.steps.js`); otherwise the browser blocks it client-side and the server-side defense — which is the actual control — goes untested.
-- **Keep Playwright in step with the other repos sharing the browser cache.** `~/.cache/ms-playwright` (macOS: `~/Library/Caches/ms-playwright`) is shared by every checkout, and each `playwright-core` pins one exact chromium revision. A lagging repo misses the cache and falls back to a CDN download with no wall-clock timeout, and `playwright install` garbage-collects revisions no registered checkout references — so its browser gets deleted and re-downloaded repeatedly. Bump alongside the other repos; `npm` is in `dependabot.yml` (7-day cooldown).
+- **`e2e/` is deliberately its own workspace.** Nothing is inherited across that boundary — the lint set is copied into `e2e/Cargo.toml` and drifts if you edit only the root. It is also outside `cargo deny` (the browser stack carries licences the server's allow-list does not, and none of it is shipped) and inside `.dockerignore`.
+- **One server and one database for the whole run**, not one per worker. Scenarios are cucumber tasks on a single runtime, so they share the server and stay isolated the way they always did — by scoping fixtures to a per-scenario suffix (`world.unique("Squat")`). Never assume "lifter has no other workouts".
+- **`@bootstrap` runs first, on the empty database.** The first-run scenarios assert on an install with no users, which stops being true the moment anything seeds its admin, so `main.rs` runs them as a separate pass before everything else. The tag is on the *feature*, and `gherkin` does not propagate feature tags onto scenarios — the filter checks both.
+- **Concurrency is `available_parallelism` capped at 4**, and `WAIT_TIMEOUT` is 30s. Both are set for the slowest machine that runs this: four browsers on a two-core runner contend until pages settle slower than the steps wait for.
+- **A form post is not finished when `click` returns.** WebDriver does not reliably block until a redirect has been followed, and the *next* navigation cancels the request still in flight — which shows up as a fixture that was silently never created. Every submit therefore waits for its own effect: the new URL, the row appearing, the entry leaving. When adding a step that posts, wait for something that only the completed write produces.
+- **Confirm dialogs are handled by the session, not per click.** `unhandledPromptBehavior: accept` is set on the capabilities, so the `window.confirm()` that `base.html` raises for `<a data-confirm>` triggers is accepted automatically — there is no per-click handler to forget. Promote-user and delete-user are not enhanced: they open a page that re-checks the admin's password, so those steps click a link, fill the password, and submit.
+- **The no-JS path is covered in Rust, not here.** The confirmation pages are asserted by the integration tests (right consequence, inert on GET, ownership enforced); a scripts-off scenario was tried in the Playwright suite and hung in CI, and a real browser adds little over those beyond proving an `<a href>` navigates. When changing a destructive trigger, keep the Rust assertions on both the `href` and the `data-confirm`.
+- **Status codes and guests go over HTTP, not through the browser.** WebDriver reports the rendered document and nothing about the exchange, so `e2e/src/http.rs` re-issues the request — with the browser's session cookie for the 403/404 assertions, without one for the share-link guest.
+- **`WebElement::text()` is *rendered* text.** An `<h1>` under `text-transform: uppercase` reports uppercase characters the document does not contain; use `pages::dom_text` (which reads `textContent`) when comparing against a name the scenario chose. XPath `normalize-space()` is unaffected — it reads the DOM.
+- **HTML form validation can swallow the request.** Every password field carries `minlength`/`maxlength`, so any scenario submitting a deliberately-invalid password sets `noValidate` first (`SetupPage::submit`, `SettingsPage::change_password`); otherwise the browser blocks it client-side and the server-side defense — which is the actual control — goes untested.
+- **The driver manager downloads the driver, never the browser.** A local Chrome or Chromium has to exist (`brew install --cask ungoogled-chromium` on macOS; GitHub's `ubuntu-latest` already ships Chrome), which is the one regression against Playwright, and why `Browser::open` names the prerequisite in its error. `Browser::prepare` runs one session up front so a cold driver cache is not downloaded by several sessions at once.
 
 ## Project conventions
 
