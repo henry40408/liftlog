@@ -1,3 +1,7 @@
+# Tagged so the runner can give these the empty database, before any other
+# scenario seeds its admin. None of the three creates an account, so the
+# install is still fresh when the second pass starts.
+@bootstrap
 Feature: First-time setup
 
   On a fresh install the login route should funnel the very first user

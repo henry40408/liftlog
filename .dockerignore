@@ -32,6 +32,9 @@ release/
 # CI/CD
 .github/
 
+# Browser E2E suite — its own workspace, and nothing the image needs
+e2e/
+
 # Misc
 Dockerfile
 .dockerignore

@@ -40,13 +40,15 @@ updates:
         patterns:
           - "*"
 
-  - package-ecosystem: "npm"
-    directory: "/tests/e2e"
+  # `e2e` is its own workspace, outside the root one, so its manifest needs its
+  # own entry — the `cargo` block above only covers `/`.
+  - package-ecosystem: "cargo"
+    directory: "/e2e"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
     groups:
-      npm:
+      cargo:
         patterns:
           - "*"
