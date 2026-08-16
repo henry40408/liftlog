@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -64,7 +64,7 @@ jobs:
           fetch-depth: 0 # full history so build.rs `git describe` resolves a tagged version
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           # `e2e` is its own workspace, deliberately outside the root one, so it
           # has to be named or none of its dependencies are cached.
@@ -114,7 +114,7 @@ jobs:
       # toolchain needs no extra declaration beyond rust-toolchain.toml.
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - uses: taiki-e/install-action@ad25acb6b9413207b3174a4202c12aa9133691c6 # cargo-llvm-cov
 
