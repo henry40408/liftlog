@@ -19,8 +19,10 @@ cargo nextest run -p liftlog session_repo # filter by name
 UI BDD suite (cucumber + thirtyfour, lives in `e2e/` — its own workspace):
 
 ```bash
+cargo build                               # first — see the stale-binary note below
 cd e2e
 cargo test --test e2e                     # headless; boots target/debug/liftlog itself
+cargo test --test e2e -- -n "Add Set"     # one scenario; -n/--name takes a regex
 cargo fmt --all -- --check                # e2e inherits nothing from the root workspace
 cargo clippy --all-targets -- -D warnings
 ```
@@ -37,7 +39,7 @@ browser. There is no Node anywhere in this repository.
 
 **CSRF origin guard.** `csrf_origin_guard` (`src/middleware/csrf.rs`) is layered outermost — registered after the session layer so it runs *first* — and rejects any state-changing request a browser reports as cross-site (`Sec-Fetch-Site: cross-site`, or a mismatched `Origin` vs `Host`) with `403`. It is header-only; safe methods and header-less non-browser clients (curl, the test harness) pass through. Together with the session cookie's `SameSite=Lax` this is the full CSRF defence — there is no synchronizer token.
 
-**First-user bootstrap.** When the `users` table is empty, `/auth/login` 302s to `/auth/setup`, and `/auth/setup` POST creates the first user as `UserRole::Admin` and signs them in. Subsequent users are admin-created via `/users/new`. The E2E `support/seeding.js` mirrors this flow.
+**First-user bootstrap.** When the `users` table is empty, `/auth/login` 302s to `/auth/setup`, and `/auth/setup` POST creates the first user as `UserRole::Admin` and signs them in. Subsequent users are admin-created via `/users/new`. `e2e/src/seeding.rs` mirrors this flow over HTTP rather than driving the browser through it, and does so idempotently — a scenario asks for an account without knowing whether it is the first one.
 
 **Server-rendered, classic POST→Redirect.** Templates are Askama (`templates/`), one struct per template. Success paths `Redirect::to(...)`, error paths re-render the template with an `error: Option<String>` field. There's no JSON API.
 
@@ -67,6 +69,7 @@ Where scripts do run, a delegated handler in `base.html` intercepts clicks on `a
 
 `cargo test --test e2e` from `e2e/` runs the whole suite. `e2e/tests/e2e/main.rs` starts one `target/debug/liftlog` against a throwaway SQLite file on an OS-assigned port (building it first if it is missing), opens one browser per scenario, and kills the server on the way out. The `.feature` files are the Playwright suite's, reused verbatim apart from one tag.
 
+- **A stale `target/debug/liftlog` is used as-is.** `ensure_binary` (`e2e/src/server.rs`) builds only when the file is *absent*, never when it is out of date, so an e2e run after a change to `src/` or `templates/` silently exercises the previous build — and because Askama compiles templates into the binary, a template change is invisible until you rebuild. The failure then reads as a bug in the change rather than as a stale artefact, so run `cargo build` at the root first. CI is unaffected: it builds in an earlier step.
 - **`e2e/` is deliberately its own workspace.** Nothing is inherited across that boundary — the lint set is copied into `e2e/Cargo.toml` and drifts if you edit only the root. It is also outside `cargo deny` (the browser stack carries licences the server's allow-list does not, and none of it is shipped) and inside `.dockerignore`.
 - **One server and one database for the whole run**, not one per worker. Scenarios are cucumber tasks on a single runtime, so they share the server and stay isolated the way they always did — by scoping fixtures to a per-scenario suffix (`world.unique("Squat")`). Never assume "lifter has no other workouts".
 - **`@bootstrap` runs first, on the empty database.** The first-run scenarios assert on an install with no users, which stops being true the moment anything seeds its admin, so `main.rs` runs them as a separate pass before everything else. The tag is on the *feature*, and `gherkin` does not propagate feature tags onto scenarios — the filter checks both.
