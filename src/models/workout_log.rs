@@ -18,6 +18,16 @@ where
     }
 }
 
+/// The rep counts worth offering as suggestions on the Add Set form, in the
+/// order a browser renders them: singles and triples for strength work, 5 and
+/// 6 for the 5x5 family, 8-12 for hypertrophy, 15 and 20 for endurance.
+///
+/// Code, not data, for the same reason `CATEGORIES` is: this is a vocabulary
+/// the application asserts, not something a user configures. And a suggestion
+/// only — the field still accepts any positive integer, exactly as it did
+/// before, because programmes exist that do none of these.
+pub const REP_SCHEMES: &[i32] = &[1, 3, 5, 6, 8, 10, 12, 15, 20];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkoutLog {
     pub id: String,

@@ -16,6 +16,7 @@ Track your training sessions, monitor progress, and celebrate personal records.
 ## Features
 
 - **Workout Tracking** - Log training sessions with exercises, sets, reps, and weight
+- **Fewer Keystrokes** - The Add Set weight field suggests the weights the workout already uses and each exercise's last, and the reps field the common schemes; both stay free-typed
 - **RPE Support** - Record Rate of Perceived Exertion (1-10) for each set
 - **Personal Records** - Automatic PR detection and tracking, all-time and over a rolling 1-month window
 - **Exercise Library** - Manage your custom exercise database

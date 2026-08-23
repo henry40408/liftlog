@@ -11,6 +11,7 @@ use crate::error::{AppError, Result};
 use crate::handlers::confirm;
 use crate::middleware::AuthUser;
 use crate::models::exercise::{CATEGORIES, ExerciseCategory};
+use crate::models::workout_log::REP_SCHEMES;
 use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, Exercise, LastExerciseWeight, UpdateWorkoutLog,
     WorkoutLog, WorkoutLogWithExercise, WorkoutSession, recent_pr_window_start,
@@ -71,6 +72,10 @@ struct ShowWorkoutTemplate {
     /// Same figures as `exercise_last_weights`, joined to exercise names and
     /// sorted, for the `<noscript>` list.
     last_weight_rows: Vec<LastWeightRow>,
+    /// Distinct weights to suggest under the weight field, ascending. See
+    /// `weight_suggestions`.
+    weight_suggestions: Vec<f64>,
+    rep_suggestions: &'static [i32],
     prefill: Option<PrefillSet>,
     share_url: Option<String>,
     share_expires_at: Option<DateTime<Utc>>,
@@ -163,6 +168,37 @@ pub async fn create(
     Ok(Redirect::to(&format!("/workouts/{}", workout.id)).into_response())
 }
 
+/// The distinct weights to offer under the Add Set weight field, ascending.
+///
+/// Two sources, because they answer two different questions. The sets already
+/// in this workout are what the next set most often repeats — you rarely
+/// change the bar between sets. The last weight logged against each exercise
+/// covers the other case: the first set of a lift you have not touched today,
+/// where the number you want is the one from last time.
+///
+/// Distinct from the "Last: 100 kg [Fill]" hint beside the exercise select,
+/// which names one weight for one exercise and needs scripts to react to the
+/// select at all. This list is the whole working vocabulary, rendered by the
+/// server, so it is there with scripts off too.
+///
+/// A suggestion and nothing more: the field's `step`/`min` are unchanged and
+/// any weight the form accepted before it is still accepted.
+fn weight_suggestions(logs: &[WorkoutLogWithExercise], last: &[LastExerciseWeight]) -> Vec<f64> {
+    let mut weights: Vec<f64> = logs
+        .iter()
+        .map(|l| l.weight)
+        .chain(last.iter().map(|w| w.weight))
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .collect();
+    // Ascending and deduplicated, because a browser renders a datalist in
+    // document order: an unsorted list reads as arbitrary rather than as a
+    // scale. `total_cmp` rather than `partial_cmp().unwrap()` so a stray NaN
+    // could never panic here, though the filter above already excludes one.
+    weights.sort_by(f64::total_cmp);
+    weights.dedup_by(|a, b| a.to_bits() == b.to_bits());
+    weights
+}
+
 pub async fn show(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -217,6 +253,8 @@ pub async fn show(
     // is easier to scan when the point is looking one exercise up.
     last_weight_rows.sort_by(|a, b| a.exercise_name.cmp(&b.exercise_name));
 
+    let weight_suggestions = weight_suggestions(&logs, &exercise_last_weights);
+
     let share_url = workout
         .share_token
         .as_ref()
@@ -231,6 +269,8 @@ pub async fn show(
         categories: CATEGORIES,
         exercise_last_weights,
         last_weight_rows,
+        weight_suggestions,
+        rep_suggestions: REP_SCHEMES,
         prefill,
         share_url,
         share_expires_at,
@@ -606,7 +646,9 @@ pub async fn view_shared(
 
 #[cfg(test)]
 mod tests {
-    use super::ShareForm;
+    use super::{
+        LastExerciseWeight, REP_SCHEMES, ShareForm, WorkoutLogWithExercise, weight_suggestions,
+    };
 
     // `Option<String>::deserialize` behaves identically regardless of the
     // wire format feeding it a field value, so exercising it through
@@ -644,5 +686,76 @@ mod tests {
     #[test]
     fn non_numeric_string_is_a_deserialization_error() {
         assert!(parse(r#"{"expires_in_days": "abc"}"#).is_err());
+    }
+
+    fn logged(weight: f64) -> WorkoutLogWithExercise {
+        WorkoutLogWithExercise {
+            id: "l".into(),
+            session_id: "s".into(),
+            exercise_id: "e".into(),
+            exercise_name: "Bench Press".into(),
+            set_number: 1,
+            reps: 5,
+            weight,
+            rpe: None,
+            is_pr: false,
+            is_recent_pr: false,
+        }
+    }
+
+    fn last(weight: f64) -> LastExerciseWeight {
+        LastExerciseWeight {
+            exercise_id: "e".into(),
+            weight,
+            rpe: None,
+            logged_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn weight_suggestions_are_ascending_and_distinct_across_both_sources() {
+        let got = weight_suggestions(
+            &[logged(100.0), logged(82.5), logged(100.0)],
+            &[last(60.0), last(100.0)],
+        );
+        assert_eq!(got, vec![60.0, 82.5, 100.0]);
+    }
+
+    #[test]
+    fn weight_suggestions_from_history_alone_still_appear() {
+        // The first set of a lift not yet touched today is exactly the case
+        // the per-exercise history covers, so it must survive an empty
+        // workout.
+        assert_eq!(weight_suggestions(&[], &[last(42.5)]), vec![42.5]);
+    }
+
+    #[test]
+    fn weight_suggestions_are_empty_for_a_first_ever_workout() {
+        // Nothing logged anywhere: the template must then render no
+        // `<datalist>` at all rather than an empty one, which would leave the
+        // field pointing at a list with nothing in it.
+        assert!(weight_suggestions(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn weight_suggestions_drop_non_positive_and_non_finite_weights() {
+        // A bodyweight set stored as 0 is not a weight anyone would pick from
+        // a dropdown, and `min="0"` means the field would accept it back.
+        let got = weight_suggestions(
+            &[logged(0.0), logged(f64::NAN), logged(-5.0), logged(20.0)],
+            &[],
+        );
+        assert_eq!(got, vec![20.0]);
+    }
+
+    #[test]
+    fn rep_schemes_are_ascending_distinct_and_valid_for_the_field() {
+        // `min="1"` on the reps input, and a browser renders a datalist in
+        // document order — an unsorted list reads as arbitrary, not a scale.
+        let mut sorted = REP_SCHEMES.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(REP_SCHEMES, sorted.as_slice());
+        assert!(REP_SCHEMES.iter().all(|r| *r >= 1));
     }
 }

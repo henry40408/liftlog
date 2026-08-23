@@ -1,6 +1,6 @@
 //! `/workouts`, `/workouts/new`, and the workout detail page with its set list.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use thirtyfour::prelude::*;
 
 use super::{
@@ -77,6 +77,34 @@ impl<'a> WorkoutPage<'a> {
     /// this `change` and fetches the previous set's figures.
     pub async fn select_exercise(&self, name: &str) -> Result<()> {
         select_by_label(self.driver, "exercise_id", name).await
+    }
+
+    /// The values an Add Set field's `<datalist>` offers, in document order.
+    ///
+    /// Read through the `list` attribute rather than a hardcoded list id, so
+    /// this fails if the field stops pointing at a list at all — which is the
+    /// half a browser can check and a markup assertion cannot. Filling the
+    /// field is unaffected either way: a datalist is a hint, and `fill` drives
+    /// these inputs exactly as it did before they had one.
+    pub async fn suggestions(&self, field: &str) -> Result<Vec<String>> {
+        let list = self
+            .driver
+            .find(By::Id(field))
+            .await?
+            .attr("list")
+            .await?
+            .with_context(|| format!("the `{field}` field points at no datalist"))?;
+        let mut values = Vec::new();
+        for option in all(self.driver, By::Css(format!("#{list} option"))).await? {
+            if let Some(value) = option.attr("value").await? {
+                values.push(value);
+            }
+        }
+        ensure!(
+            !values.is_empty(),
+            "the `{field}` field points at `{list}`, which offers nothing"
+        );
+        Ok(values)
     }
 
     /// Fills the Add Set form and submits it, then waits for the new row.

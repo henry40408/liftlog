@@ -243,6 +243,16 @@ async fn have_workout_with_set(world: &mut LiftLogWorld, weight: i64, reps: i64)
         .await
 }
 
+#[then(expr = "the {word} field suggests {string}")]
+async fn field_suggests(world: &mut LiftLogWorld, field: String, value: String) -> Result<()> {
+    let offered = world.workout()?.suggestions(&field).await?;
+    ensure!(
+        offered.contains(&value),
+        "the `{field}` field offers {offered:?}, which does not include {value:?}"
+    );
+    Ok(())
+}
+
 #[when(expr = "I log a set of {int} kg for {int} reps using the exercise I created")]
 async fn log_set(world: &mut LiftLogWorld, weight: i64, reps: i64) -> Result<()> {
     let exercise = world.exercise()?.to_string();

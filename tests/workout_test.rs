@@ -9,6 +9,14 @@ use liftlog::models::{UserRole, recent_pr_window_start};
 use liftlog::repositories::WorkoutRepository;
 use tower::ServiceExt;
 
+/// The opening `<input ...>` tag carrying `id="{id}"`, as raw markup. Lets a
+/// test assert on one attribute without pinning the order of the rest.
+fn input_tag<'a>(body: &'a str, id: &str) -> &'a str {
+    body.split('<')
+        .find(|tag| tag.starts_with("input") && tag.contains(&format!(r#"id="{id}""#)))
+        .unwrap_or_else(|| panic!("no <input id=\"{id}\"> in the rendered page"))
+}
+
 #[tokio::test]
 async fn test_workouts_list_requires_auth() {
     let pool = common::setup_test_db();
@@ -1162,18 +1170,17 @@ async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
         body_str.contains(&format!(r#"<option value="{}" selected>"#, exercise.id)),
         "the logged exercise should be preselected, got:\n{body_str}"
     );
-    assert!(
-        body_str.contains(r#"required value="82.5""#),
-        "the weight should be prefilled"
-    );
-    assert!(
-        body_str.contains(r#"min="1" required value="8""#),
-        "the reps should be prefilled"
-    );
-    assert!(
-        body_str.contains(r#"max="10" value="7""#),
-        "the RPE should be prefilled"
-    );
+    // Asserted per input rather than by matching neighbouring attributes:
+    // the point is that the field carries the value, and an assertion that
+    // also pins what sits next to it breaks on any unrelated attribute added
+    // to the tag.
+    for (field, value) in [("weight", "82.5"), ("reps", "8"), ("rpe", "7")] {
+        let tag = input_tag(&body_str, field);
+        assert!(
+            tag.contains(&format!(r#"value="{value}""#)),
+            "the {field} should be prefilled, got: {tag}"
+        );
+    }
 
     // Without the query the form comes back empty, so a plain visit is
     // unaffected.
@@ -1575,4 +1582,206 @@ async fn test_delete_set_confirmation_page_rejects_a_log_from_another_session() 
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// The weight field offers the weights this workout already uses plus each
+/// exercise's last, ascending and deduplicated, and the reps field offers the
+/// fixed rep schemes. Both are suggestions: the inputs keep their `step`/`min`
+/// and accept anything they accepted before.
+#[tokio::test]
+async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let bench = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let curl = common::create_test_exercise(&pool, &user.id, "Curl", "arms").await;
+
+    // An older session, so `curl` has history but no set in today's workout.
+    let past = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &past.id, &curl.id, 1, 10, 20.0, None).await;
+
+    // Today: two sets at the same weight, and one at a fractional weight.
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &workout.id, &bench.id, 1, 5, 100.0, None).await;
+    common::create_test_log(&pool, &workout.id, &bench.id, 2, 5, 100.0, None).await;
+    common::create_test_log(&pool, &workout.id, &bench.id, 3, 3, 82.5, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    // Both fields point at their list.
+    assert!(
+        body_str.contains(r#"id="weight""#) && body_str.contains(r#"list="weight-list""#),
+        "weight field is not wired to its suggestions, body=\n{body_str}"
+    );
+    assert!(
+        body_str.contains(r#"id="reps""#) && body_str.contains(r#"list="reps-list""#),
+        "reps field is not wired to its suggestions, body=\n{body_str}"
+    );
+
+    // Ascending, deduplicated, and spanning both sources: 20 comes from the
+    // older session's curl, 82.5 and 100 from today. The repeated 100 appears
+    // once. Rendered without trailing zeros, which is what the `step="0.25"`
+    // field expects back.
+    let list_start = body_str
+        .find(r#"<datalist id="weight-list">"#)
+        .expect("no weight datalist rendered");
+    let list = &body_str[list_start..];
+    let list_end = list
+        .find("</datalist>")
+        .expect("unterminated weight datalist");
+    let list = &list[..list_end];
+    let values: Vec<&str> = list
+        .match_indices(r#"<option value=""#)
+        .map(|(i, m)| {
+            let rest = &list[i + m.len()..];
+            &rest[..rest.find('"').unwrap()]
+        })
+        .collect();
+    assert_eq!(values, vec!["20", "82.5", "100"], "list was:\n{list}");
+
+    // The rep schemes are the constant, in its own order.
+    for reps in liftlog::models::workout_log::REP_SCHEMES {
+        assert!(
+            body_str.contains(&format!(r#"<option value="{reps}">"#)),
+            "reps list is missing {reps}, body=\n{body_str}"
+        );
+    }
+}
+
+/// A first-ever workout has no weights to suggest. The field must then render
+/// no `<datalist>` at all rather than an empty one — a field pointing at a
+/// list with nothing in it shows an empty dropdown on some browsers.
+#[tokio::test]
+async fn test_add_set_weight_list_is_absent_when_there_is_no_history() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+    common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+        None,
+    )
+    .await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        !body_str.contains(r#"<datalist id="weight-list">"#),
+        "an empty weight list was rendered, body=\n{body_str}"
+    );
+    // The reps schemes are fixed, so they are there from the very first set.
+    assert!(
+        body_str.contains(r#"<datalist id="reps-list">"#),
+        "the reps list must not depend on history, body=\n{body_str}"
+    );
+}
+
+/// Another user's weights must never reach the suggestions. The list is built
+/// from `find_logs_by_session_with_pr` and
+/// `get_last_weight_per_exercise_by_user`, both already scoped to the caller;
+/// this holds that scoping at the rendered page.
+#[tokio::test]
+async fn test_add_set_suggestions_exclude_another_users_weights() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let other = common::create_test_user(&pool, "other", "password123", UserRole::User).await;
+    let other_ex = common::create_test_exercise(&pool, &other.id, "Squat", "legs").await;
+    let other_workout = common::create_test_workout(
+        &pool,
+        &other.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 5).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &other_workout.id, &other_ex.id, 1, 5, 187.5, None).await;
+
+    let mine = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
+    let workout = common::create_test_workout(
+        &pool,
+        &user.id,
+        chrono::NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+        None,
+    )
+    .await;
+    common::create_test_log(&pool, &workout.id, &mine.id, 1, 5, 60.0, None).await;
+
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/workouts/{}", workout.id))
+                .header(header::COOKIE, &cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body);
+
+    assert!(
+        body_str.contains(r#"<option value="60">"#),
+        "own weight missing from the suggestions, body=\n{body_str}"
+    );
+    assert!(
+        !body_str.contains("187.5"),
+        "another user's weight leaked into the suggestions, body=\n{body_str}"
+    );
 }
