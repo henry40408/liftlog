@@ -16,6 +16,13 @@ Feature: Workout lifecycle
     When I log a set of 100 kg for 5 reps using the exercise I created
     Then I see my set logged at 100 kg for 5 reps
 
+  Scenario: The Add Set fields suggest weights already used and the common rep schemes
+    Given I am logged in as "lifter"
+    And I have an exercise in category "chest"
+    And I have a workout with a set of 100 kg for 5 reps
+    Then the weight field suggests "100"
+    And the reps field suggests "5"
+
   Scenario: Editing a set updates the weight and reps
     Given I am logged in as "lifter"
     And I have an exercise in category "shoulders"

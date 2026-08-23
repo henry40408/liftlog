@@ -83,11 +83,28 @@
             </div>
             <div class="form-group">
                 <label for="weight">Weight</label>
-                <input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" required{% if let Some(p) = prefill %} value="{{ p.weight }}"{% endif %}>
+                {# A datalist, not a <select>: any weight the field took before
+                   it still goes in, typed. What it saves is the typing itself,
+                   which on a phone number pad is most of the cost of logging a
+                   set. Suggestions are the weights this workout already uses
+                   plus each exercise's last — see `weight_suggestions`. #}
+                <input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" list="weight-list" autocomplete="off" required{% if let Some(p) = prefill %} value="{{ p.weight }}"{% endif %}>
+                {% if !weight_suggestions.is_empty() %}
+                <datalist id="weight-list">
+                    {% for w in weight_suggestions %}<option value="{{ w }}">{% endfor %}
+                </datalist>
+                {% endif %}
             </div>
             <div class="form-group">
                 <label for="reps">Reps</label>
-                <input type="number" inputmode="numeric" id="reps" name="reps" min="1" required{% if let Some(p) = prefill %} value="{{ p.reps }}"{% endif %}>
+                {# Fixed, unlike the weights: rep schemes are a vocabulary the
+                   application asserts rather than one read back from history,
+                   so it is the same list on a first workout as on a thousandth.
+                   See `models::workout_log::REP_SCHEMES`. #}
+                <input type="number" inputmode="numeric" id="reps" name="reps" min="1" list="reps-list" autocomplete="off" required{% if let Some(p) = prefill %} value="{{ p.reps }}"{% endif %}>
+                <datalist id="reps-list">
+                    {% for r in rep_suggestions %}<option value="{{ r }}">{% endfor %}
+                </datalist>
             </div>
             <div class="form-group">
                 <label for="rpe">RPE (1-10, optional)</label>
