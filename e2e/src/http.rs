@@ -22,7 +22,6 @@ use crate::server::url;
 pub struct Response {
     /// The HTTP status of the final response, after any redirects.
     pub status: u16,
-    /// The response body, as text.
     pub body: String,
 }
 

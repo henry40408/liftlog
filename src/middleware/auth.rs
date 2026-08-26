@@ -199,7 +199,6 @@ impl IntoResponse for AuthRedirect {
     }
 }
 
-// Admin user extractor - requires admin role, returns 403 if not admin
 #[derive(Clone, Debug)]
 pub struct AdminUser(pub AuthUser);
 

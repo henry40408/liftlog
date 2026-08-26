@@ -25,7 +25,6 @@ pub fn create_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health::health_check))
-        // Favicon (no auth, no state)
         .route("/favicon.svg", get(favicon::favicon_svg))
         .route("/apple-touch-icon.png", get(favicon::apple_touch_icon))
         .route("/", get(dashboard::index))
@@ -78,7 +77,6 @@ pub fn create_router(state: AppState) -> Router {
             "/workouts/{id}/revoke-share",
             get(workouts::confirm_revoke_share).post(workouts::revoke_share),
         )
-        // Public shared workout route (no auth required)
         .route("/shared/{token}", get(workouts::view_shared))
         .route("/exercises", get(exercises::list))
         .route("/exercises/new", get(exercises::new_page))
@@ -99,7 +97,6 @@ pub fn create_router(state: AppState) -> Router {
             get(settings::confirm_logout_others).post(settings::logout_others),
         )
         .with_state(state)
-        // Sliding session: validate cookie, slide expiry, re-issue Set-Cookie on touch
         .layer(from_fn_with_state(
             session_layer_state,
             sliding_session_middleware,

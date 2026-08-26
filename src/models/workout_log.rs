@@ -4,8 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::FromSqliteRow;
 
-/// Deserialize an optional integer from a form field.
-/// Handles empty strings by returning None instead of failing.
+/// Empty strings deserialize to `None` rather than failing.
 fn deserialize_optional_i32<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
     D: Deserializer<'de>,

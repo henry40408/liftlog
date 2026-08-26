@@ -473,7 +473,6 @@ impl<K: Eq + Hash + Clone> FailureBackoff<K> {
         scaled.min(self.max)
     }
 
-    /// Records one failed attempt against `key`.
     pub fn record_failure(&self, key: K) {
         let mut entries = self.lock();
 

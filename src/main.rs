@@ -187,10 +187,8 @@ async fn main() -> anyhow::Result<()> {
         log_salt: Arc::new(log_salt),
     };
 
-    // Build router
     let app = routes::create_router(app_state);
 
-    // Start server
     let addr = config.bind;
     tracing::info!("Starting server at http://{}", addr);
     // Not an `info!` like the rest of this block. liftlog never terminates

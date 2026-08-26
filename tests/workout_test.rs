@@ -346,8 +346,6 @@ async fn test_cannot_view_others_workout() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-// Session edit tests
-
 #[tokio::test]
 async fn test_edit_workout_page_renders() {
     let pool = common::setup_test_db();
@@ -562,8 +560,6 @@ async fn test_cannot_edit_others_workout_page() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
-
-// Log management tests
 
 #[tokio::test]
 #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
@@ -848,8 +844,6 @@ async fn test_delete_log_requires_ownership() {
     assert!(found.is_some());
 }
 
-// Log editing tests
-
 #[tokio::test]
 async fn test_edit_log_page_renders() {
     let pool = common::setup_test_db();
@@ -1018,8 +1012,6 @@ async fn test_update_log_requires_ownership() {
     assert_eq!(found.reps, 10);
     assert_eq!(found.weight, 100.0);
 }
-
-// Pagination tests
 
 #[tokio::test]
 async fn test_workouts_list_pagination_page_2() {

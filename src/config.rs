@@ -245,7 +245,6 @@ mod tests {
 
     #[test]
     fn parse_bind_defaults_when_absent_or_empty() {
-        // Unset or empty → default 127.0.0.1:8080 (loopback only).
         assert_eq!(
             parse_bind(None).unwrap(),
             SocketAddr::from(([127, 0, 0, 1], 8080))
@@ -258,7 +257,6 @@ mod tests {
 
     #[test]
     fn parse_bind_accepts_valid_socket_addr() {
-        // A valid host:port is honored, incl. a loopback-only bind.
         assert_eq!(
             parse_bind(Some("127.0.0.1:9000")).unwrap(),
             "127.0.0.1:9000".parse().unwrap()
@@ -422,7 +420,6 @@ mod tests {
         assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", None, true).unwrap());
         assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some(""), false).unwrap());
         assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some(""), true).unwrap());
-        // Whitespace-only also takes the default.
         assert!(!parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("   "), false).unwrap());
         assert!(parse_bool_env("LIFTLOG_COOKIE_SECURE", Some("   "), true).unwrap());
     }

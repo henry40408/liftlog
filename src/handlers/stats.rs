@@ -245,7 +245,6 @@ fn render_chart(
         });
     }
 
-    // 4 evenly spaced y ticks.
     let mut y_ticks = Vec::with_capacity(4);
     for i in 0..4 {
         let frac = i as f64 / 3.0;
@@ -254,7 +253,6 @@ fn render_chart(
         y_ticks.push((y, format!("{value:.0}")));
     }
 
-    // Up to 5 x-axis date labels, evenly sampled.
     let label_count = n.min(5);
     let mut x_ticks = Vec::with_capacity(label_count);
     if label_count >= 2 {

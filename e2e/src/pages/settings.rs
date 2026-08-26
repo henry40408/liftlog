@@ -13,11 +13,9 @@ use super::{click_button, click_link, disable_validation, fill, goto, optional, 
 const SESSIONS_TABLE: &str =
     "//table[contains(@class,'data-table')][.//th[normalize-space(.)='Device']]";
 
-/// The settings page.
 pub struct SettingsPage<'a>(pub &'a WebDriver);
 
 impl SettingsPage<'_> {
-    /// Navigates to the settings page.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/settings").await
     }

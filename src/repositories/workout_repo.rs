@@ -19,7 +19,6 @@ impl WorkoutRepository {
         Self { pool }
     }
 
-    // Workout Sessions
     pub async fn create_session(
         &self,
         user_id: &str,
@@ -165,7 +164,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    // Workout Logs
     pub async fn create_log(
         &self,
         session_id: &str,
@@ -324,8 +322,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    // Dynamic Personal Records
-
     /// Get all PRs for a user (one per exercise, max weight), each with a
     /// second max over the window starting at `since` — the "PR (1M)" column.
     ///
@@ -375,7 +371,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Get the most recently logged weight per exercise for a user
     pub async fn get_last_weight_per_exercise_by_user(
         &self,
         user_id: &str,
@@ -403,7 +398,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Get the max weight PR for a specific exercise
     pub async fn get_max_weight_for_exercise(
         &self,
         user_id: &str,
@@ -474,7 +468,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    // Statistics
     pub async fn count_workouts_this_week(&self, user_id: &str) -> Result<i64> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
@@ -574,8 +567,6 @@ impl WorkoutRepository {
         .await?
     }
 
-    // Share functionality
-
     /// Set share token for a workout session (creates a new token). `ttl` of
     /// `None` means the link never expires (see migration 012's rationale).
     pub async fn set_share_token(
@@ -667,7 +658,7 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Find logs by session for sharing (without PR calculation)
+    /// Like `find_logs_by_session_with_pr`, minus the PR calculation.
     pub async fn find_logs_by_session_for_share(
         &self,
         session_id: &str,
@@ -724,8 +715,6 @@ mod tests {
         )
         .unwrap();
     }
-
-    // Workout Session Tests
 
     #[tokio::test]
     async fn test_create_session() {
@@ -840,8 +829,6 @@ mod tests {
 
         assert!(!deleted);
     }
-
-    // Workout Log Tests
 
     #[tokio::test]
     #[allow(clippy::float_cmp, reason = "exact-value test assertion")]
@@ -1012,14 +999,12 @@ mod tests {
             .await
             .unwrap();
 
-        // Try to update with wrong session_id
         let updated = repo
             .update_log(&log.id, "wrong-session", 12, 110.0, Some(8))
             .await
             .unwrap();
 
         assert!(!updated);
-        // Verify log was not modified
         let found = repo.find_log_by_id(&log.id).await.unwrap().unwrap();
         assert_eq!(found.reps, 10);
         assert_eq!(found.weight, 100.0);
@@ -1035,14 +1020,12 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        // First set should be 1
         let next = repo
             .get_next_set_number(&session.id, "ex-bench-press")
             .await
             .unwrap();
         assert_eq!(next, 1);
 
-        // After creating a log, next should be 2
         repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
             .await
             .unwrap();
@@ -1052,8 +1035,6 @@ mod tests {
             .unwrap();
         assert_eq!(next, 2);
     }
-
-    // Dynamic Personal Record Tests
 
     /// Backdate a log so it falls outside the recent PR window.
     fn backdate_log(pool: &DbPool, log_id: &str, at: DateTime<Utc>) {
@@ -1093,7 +1074,6 @@ mod tests {
         let prs = repo.get_pr_summaries_by_user("user1", since).await.unwrap();
 
         assert_eq!(prs.len(), 2);
-        // Find each exercise's PR
         let bench_pr = prs.iter().find(|p| p.exercise_id == "ex-bench-press");
         let squat_pr = prs.iter().find(|p| p.exercise_id == "ex-squat");
         assert!(bench_pr.is_some());
@@ -1201,7 +1181,6 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        // First set
         repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
             .await
             .unwrap();
@@ -1212,7 +1191,6 @@ mod tests {
             .unwrap();
         assert!(logs[0].is_pr); // 100.0 is the only set, so it's PR
 
-        // Add heavier set
         repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
             .await
             .unwrap();
@@ -1244,7 +1222,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Delete the PR set
         repo.delete_log(&heavy_log.id, &session.id).await.unwrap();
 
         let logs = repo
@@ -1306,8 +1283,6 @@ mod tests {
             .unwrap();
         assert_eq!(page3.len(), 1);
     }
-
-    // Edge case tests for statistics
 
     #[tokio::test]
     async fn test_count_workouts_this_week_empty() {
@@ -1418,8 +1393,6 @@ mod tests {
         assert!(entries.is_empty());
     }
 
-    // Share functionality tests
-
     #[tokio::test]
     async fn test_set_share_token() {
         let pool = setup_test_db();
@@ -1492,7 +1465,6 @@ mod tests {
         let revoked = repo.revoke_share_token(&session.id, "user2").await.unwrap();
         assert!(!revoked);
 
-        // Token should still exist
         let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
         assert!(found.share_token.is_some());
     }

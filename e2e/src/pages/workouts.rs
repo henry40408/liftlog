@@ -13,7 +13,6 @@ use crate::wait::{eventually, eventually_eq};
 pub struct WorkoutsPage<'a>(pub &'a WebDriver);
 
 impl WorkoutsPage<'_> {
-    /// Navigates to the list.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/workouts").await
     }
@@ -58,7 +57,6 @@ pub struct WorkoutPage<'a> {
 }
 
 impl<'a> WorkoutPage<'a> {
-    /// Binds a page object to one workout.
     pub fn new(driver: &'a WebDriver, id: impl Into<String>) -> Self {
         Self {
             driver,
@@ -66,7 +64,6 @@ impl<'a> WorkoutPage<'a> {
         }
     }
 
-    /// Navigates to the workout.
     pub async fn goto(&self) -> Result<()> {
         goto(self.driver, &format!("/workouts/{}", self.id)).await
     }
@@ -303,7 +300,6 @@ pub struct EditWorkoutPage<'a> {
 }
 
 impl<'a> EditWorkoutPage<'a> {
-    /// Binds a page object to one workout.
     pub fn new(driver: &'a WebDriver, id: impl Into<String>) -> Self {
         Self {
             driver,

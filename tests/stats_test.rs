@@ -387,7 +387,6 @@ async fn test_exercise_stats_chart_renders_with_two_or_more_sessions() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Server-rendered SVG line is present
     assert!(body_str.contains("<polyline"), "polyline missing");
     assert!(body_str.contains("id=\"chart-line\""));
 

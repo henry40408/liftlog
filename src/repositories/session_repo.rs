@@ -57,7 +57,7 @@ impl SessionRepository {
         Self { pool }
     }
 
-    /// Create a new session for a user. Returns the session token.
+    /// Returns the new session's token.
     pub async fn create(&self, user_id: &str) -> Result<String> {
         let pool = self.pool.clone();
         let token = Uuid::new_v4().to_string();
@@ -174,7 +174,6 @@ impl SessionRepository {
         .await?
     }
 
-    /// Delete a single session (logout).
     pub async fn delete(&self, token: &str) -> Result<()> {
         let pool = self.pool.clone();
         let token = token.to_string();
@@ -187,7 +186,6 @@ impl SessionRepository {
         .await?
     }
 
-    /// Delete all sessions for a user except the given token (for password change).
     /// Returns the number of rows deleted, for the audit log.
     pub async fn delete_all_for_user_except(
         &self,
@@ -384,7 +382,6 @@ mod tests {
 
         let token = repo.create(&user_id).await.unwrap();
 
-        // Move expires_at into the past.
         {
             let conn = pool.get().unwrap();
             conn.execute(
@@ -397,7 +394,6 @@ mod tests {
         let outcome = repo.validate_and_touch(&token).await.unwrap();
         assert!(matches!(outcome, ValidateOutcome::ExpiredIdle));
 
-        // Row is gone.
         {
             let conn = pool.get().unwrap();
             let count: i64 = conn
@@ -451,7 +447,6 @@ mod tests {
             .expect("touch should advance expiry outside throttle window");
         assert!(new_expires > before_expires);
 
-        // last_touched_at was refreshed.
         let conn = pool.get().unwrap();
         let last_touched: chrono::DateTime<chrono::Utc> = conn
             .query_row(
@@ -962,7 +957,6 @@ mod tests {
         let count = repo.cleanup_expired().await.unwrap();
         assert_eq!(count, 2);
 
-        // The valid session should still be there.
         let conn = pool.get().unwrap();
         let remaining: i64 = conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))

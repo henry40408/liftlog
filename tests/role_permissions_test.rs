@@ -86,7 +86,6 @@ async fn test_user_cannot_access_new_user_page() {
         .await
         .unwrap();
 
-    // Regular users should get 403 Forbidden
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
@@ -319,7 +318,6 @@ async fn test_user_cannot_promote_user() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // User2 should still be a regular user
     let user_repo = UserRepository::new(pool);
     let found = user_repo.find_by_id(&user2.id).await.unwrap().unwrap();
     assert_eq!(found.role, UserRole::User);

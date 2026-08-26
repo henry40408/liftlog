@@ -475,8 +475,6 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     assert!(!body_str.contains(">Share</button>"));
 }
 
-// Share expiry tests (migration 012)
-
 #[tokio::test]
 async fn test_share_without_expiry_never_expires() {
     let pool = common::setup_test_db();
