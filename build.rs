@@ -7,7 +7,6 @@ const APPLE_TOUCH_ICON_SIZE: u32 = 180;
 const FAVICON_SVG_PATH: &str = "assets/favicon.svg";
 
 fn main() {
-    // Re-run build script when git state changes
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/index");
 
@@ -18,7 +17,6 @@ fn main() {
 }
 
 fn get_git_version() -> String {
-    // Tier 1: Use environment variable (for Docker/CI builds)
     if let Ok(version) = std::env::var("GIT_VERSION")
         && !version.is_empty()
         && version != "dev"
@@ -26,7 +24,6 @@ fn get_git_version() -> String {
         return version;
     }
 
-    // Tier 2: Use git describe
     Command::new("git")
         .args(["describe", "--tags", "--always", "--dirty"])
         .output()

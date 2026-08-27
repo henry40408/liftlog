@@ -538,11 +538,9 @@ mod tests {
         let changed = repo.change_password(&user.id, "newpass456").await.unwrap();
         assert!(changed);
 
-        // Old password should no longer work
         let result = repo.verify_password("pwuser", "oldpass123").await.unwrap();
         assert!(result.is_none());
 
-        // New password should work
         let result = repo.verify_password("pwuser", "newpass456").await.unwrap();
         assert!(result.is_some());
     }

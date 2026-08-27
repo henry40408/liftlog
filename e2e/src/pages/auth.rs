@@ -10,7 +10,6 @@ use crate::wait::eventually_eq;
 pub struct LoginPage<'a>(pub &'a WebDriver);
 
 impl LoginPage<'_> {
-    /// Navigates to the login page.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/auth/login").await
     }
@@ -42,7 +41,6 @@ impl LoginPage<'_> {
 pub struct SetupPage<'a>(pub &'a WebDriver);
 
 impl SetupPage<'_> {
-    /// Navigates to the setup page.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/auth/setup").await
     }

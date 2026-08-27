@@ -9,8 +9,6 @@ use liftlog::models::UserRole;
 use liftlog::repositories::ExerciseRepository;
 use tower::ServiceExt;
 
-// Auth tests
-
 #[tokio::test]
 async fn test_exercises_list_requires_auth() {
     let pool = common::setup_test_db();
@@ -69,8 +67,6 @@ async fn test_create_exercise_requires_auth() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
-
-// CRUD tests
 
 #[tokio::test]
 async fn test_create_exercise_success() {
@@ -241,8 +237,6 @@ async fn test_delete_exercise_success() {
     assert!(found.is_none());
 }
 
-// Authorization tests
-
 #[tokio::test]
 async fn test_cannot_edit_others_exercise() {
     let pool = common::setup_test_db();
@@ -342,8 +336,6 @@ async fn test_cannot_delete_others_exercise() {
     assert!(found.is_some());
 }
 
-// Not found tests
-
 #[tokio::test]
 async fn test_edit_nonexistent_exercise() {
     let pool = common::setup_test_db();
@@ -419,8 +411,6 @@ async fn test_delete_nonexistent_exercise() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-// Validation tests
-
 #[tokio::test]
 async fn test_create_exercise_empty_name_rejected() {
     let pool = common::setup_test_db();
@@ -495,8 +485,6 @@ async fn test_update_exercise_empty_name_rejected() {
     assert_eq!(found.name, "Bench Press");
 }
 
-// Foreign-key enforcement tests
-//
 // workout_logs.exercise_id REFERENCES exercises(id) ON DELETE RESTRICT is
 // enforced now that PRAGMA foreign_keys=ON (src/db.rs). These pin the
 // resulting behaviour change: a 400 for the user, not a 500.

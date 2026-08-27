@@ -83,14 +83,12 @@ impl LiftLogWorld {
         format!("{prefix}-{}", self.suffix)
     }
 
-    /// The scenario's browser.
     pub fn browser(&self) -> Result<&Browser> {
         self.browser
             .as_ref()
             .context("no browser session: the `before` hook did not open one")
     }
 
-    /// The scenario's driver.
     pub fn driver(&self) -> Result<&WebDriver> {
         Ok(self.browser()?.driver())
     }
@@ -149,7 +147,6 @@ impl LiftLogWorld {
         Ok(EditWorkoutPage::new(self.driver()?, self.workout_id()?))
     }
 
-    /// The login page.
     pub fn login_page(&self) -> Result<LoginPage<'_>> {
         Ok(LoginPage(self.driver()?))
     }
@@ -159,22 +156,18 @@ impl LiftLogWorld {
         Ok(SetupPage(self.driver()?))
     }
 
-    /// The nav bar.
     pub fn nav(&self) -> Result<NavBar<'_>> {
         Ok(NavBar(self.driver()?))
     }
 
-    /// The dashboard.
     pub fn dashboard(&self) -> Result<DashboardPage<'_>> {
         Ok(DashboardPage(self.driver()?))
     }
 
-    /// The workouts list.
     pub fn workouts_page(&self) -> Result<WorkoutsPage<'_>> {
         Ok(WorkoutsPage(self.driver()?))
     }
 
-    /// The new-workout form.
     pub fn new_workout_page(&self) -> Result<NewWorkoutPage<'_>> {
         Ok(NewWorkoutPage(self.driver()?))
     }
@@ -184,17 +177,14 @@ impl LiftLogWorld {
         Ok(EditLogPage(self.driver()?))
     }
 
-    /// The exercises list.
     pub fn exercises_page(&self) -> Result<ExercisesPage<'_>> {
         Ok(ExercisesPage(self.driver()?))
     }
 
-    /// The settings page.
     pub fn settings_page(&self) -> Result<SettingsPage<'_>> {
         Ok(SettingsPage(self.driver()?))
     }
 
-    /// The users list.
     pub fn users_page(&self) -> Result<UsersPage<'_>> {
         Ok(UsersPage(self.driver()?))
     }
@@ -204,7 +194,6 @@ impl LiftLogWorld {
         Ok(ConfirmActionPage(self.driver()?))
     }
 
-    /// The statistics pages.
     pub fn stats_page(&self) -> Result<StatsPage<'_>> {
         Ok(StatsPage(self.driver()?))
     }

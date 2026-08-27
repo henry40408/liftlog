@@ -5,11 +5,9 @@ use thirtyfour::prelude::*;
 
 use super::{count, goto, optional, text, top_of};
 
-/// The dashboard.
 pub struct DashboardPage<'a>(pub &'a WebDriver);
 
 impl DashboardPage<'_> {
-    /// Navigates to the dashboard.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/").await
     }

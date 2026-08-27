@@ -5,11 +5,9 @@ use thirtyfour::prelude::*;
 
 use super::{click_button, click_link_in, count, fill, goto, optional, quote, text};
 
-/// The users list.
 pub struct UsersPage<'a>(pub &'a WebDriver);
 
 impl UsersPage<'_> {
-    /// Navigates to the list.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/users").await
     }

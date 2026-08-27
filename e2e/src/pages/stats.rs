@@ -5,21 +5,17 @@ use thirtyfour::prelude::*;
 
 use super::{count, dom_text, goto, optional, quote, text};
 
-/// The statistics pages.
 pub struct StatsPage<'a>(pub &'a WebDriver);
 
 impl StatsPage<'_> {
-    /// Navigates to the overview.
     pub async fn goto_overview(&self) -> Result<()> {
         goto(self.0, "/stats").await
     }
 
-    /// Navigates to one exercise's progress page.
     pub async fn goto_exercise(&self, id: &str) -> Result<()> {
         goto(self.0, &format!("/stats/exercise/{id}")).await
     }
 
-    /// Navigates to the personal-records list.
     pub async fn goto_prs(&self) -> Result<()> {
         goto(self.0, "/stats/prs").await
     }

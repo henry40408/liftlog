@@ -83,11 +83,9 @@ async fn test_settings_shows_git_version() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should contain git version info (at least some version-like string)
-    // GIT_VERSION is set at build time, so we just check the page renders with version info
-    assert!(
-        body_str.contains("version") || body_str.contains("Version") || body_str.len() > 100 // Page has content
-    );
+    // GIT_VERSION is stamped in at build time, so the page's exact string is
+    // whatever this checkout describes as — only its presence is assertable.
+    assert!(body_str.contains("version") || body_str.contains("Version") || body_str.len() > 100);
 }
 
 #[tokio::test]

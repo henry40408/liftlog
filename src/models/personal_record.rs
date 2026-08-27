@@ -71,7 +71,6 @@ impl FromSqliteRow for PersonalRecordSummary {
     }
 }
 
-/// Most recently logged weight for a given exercise
 #[derive(Debug, Clone, Serialize)]
 pub struct LastExerciseWeight {
     pub exercise_id: String,

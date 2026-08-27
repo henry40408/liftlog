@@ -264,7 +264,6 @@ mod tests {
 
         assert!(!updated);
 
-        // Verify exercise was not modified
         let found = repo.find_by_id(&exercise.id).await.unwrap().unwrap();
         assert_eq!(found.name, "Bench Press");
     }
@@ -296,7 +295,6 @@ mod tests {
 
         assert!(!deleted);
 
-        // Verify exercise was not deleted
         let found = repo.find_by_id(&exercise.id).await.unwrap();
         assert!(found.is_some());
     }

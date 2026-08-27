@@ -12,7 +12,6 @@ use crate::wait::{eventually, eventually_eq};
 pub struct ExercisesPage<'a>(pub &'a WebDriver);
 
 impl ExercisesPage<'_> {
-    /// Navigates to the list.
     pub async fn goto(&self) -> Result<()> {
         goto(self.0, "/exercises").await
     }

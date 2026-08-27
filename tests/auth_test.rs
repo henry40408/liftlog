@@ -394,11 +394,9 @@ async fn test_logout_clears_session() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 
-    // Should clear the session cookie (max-age=0 or empty value)
     let set_cookie = response.headers().get(header::SET_COOKIE);
     assert!(set_cookie.is_some());
     let cookie_str = set_cookie.unwrap().to_str().unwrap();
-    // Cookie should be cleared (either empty or max-age=0)
     assert!(cookie_str.contains("Max-Age=0") || cookie_str.contains("session=;"));
 }
 
@@ -457,7 +455,6 @@ async fn test_logout_still_sends_removal_cookie() {
         .await
         .unwrap();
 
-    // Should clear the session cookie (max-age=0 or empty value)
     let set_cookie = response.headers().get(header::SET_COOKIE);
     assert!(set_cookie.is_some());
     let cookie_str = set_cookie.unwrap().to_str().unwrap();
@@ -991,14 +988,12 @@ async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
     assert_eq!(response.headers().get("location").unwrap(), "/");
 }
 
-// --- Fix 4: per-IP rate-limit bucketing at the HTTP level ---------------
-//
 // Nothing above ever attaches a `ConnectInfo`, so `login_submit` always sees
 // `peer = None` and every request falls into the single "no peer" bucket.
 // `oneshot` doesn't run the `into_make_service_with_connect_info` layer that
 // does this in production, so these tests attach it manually via
 // `common::with_peer` to actually exercise the per-IP dimension of
-// `crate::net::client_ip` (Fixes 1a-1e) end to end.
+// `crate::net::client_ip` end to end.
 
 /// Builds a login POST with a wrong password (so `release` never fires) and
 /// the given extra headers.
@@ -1292,8 +1287,6 @@ async fn test_x_real_ip_not_honoured_when_header_is_x_forwarded_for() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
-
-// --- Fix 5: secure-cookie path exercised end to end ----------------------
 
 async fn sliding_session_reissues_cookie_when_throttle_elapsed(cookie_secure: bool) {
     let pool = common::setup_test_db();
