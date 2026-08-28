@@ -43,19 +43,23 @@ where
 {
     type Rejection = AuthRedirect;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let validated = parts
-            .extensions
-            .get::<ValidatedSession>()
-            .cloned()
-            .ok_or(AuthRedirect)?;
-
-        Ok(AuthUser {
-            id: validated.user_id,
-            username: validated.username,
-            role: validated.role,
-            session_token: validated.session_token,
-        })
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> {
+        std::future::ready(
+            parts
+                .extensions
+                .get::<ValidatedSession>()
+                .cloned()
+                .ok_or(AuthRedirect)
+                .map(|validated| AuthUser {
+                    id: validated.user_id,
+                    username: validated.username,
+                    role: validated.role,
+                    session_token: validated.session_token,
+                }),
+        )
     }
 }
 

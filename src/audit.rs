@@ -92,26 +92,27 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
 impl FromRequestParts<AppState> for AuditContext {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(
+    fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> {
         // `sliding_session_middleware` already built one for every request that
         // carried a session token, so reuse it rather than recomputing the same
         // client-IP resolution and `User-Agent` truncation. The fallback is not
         // dead: the anonymous routes that take this extractor (login and first-user
         // setup) have no session token, so the middleware never built one for them.
-        if let Some(ctx) = parts.extensions.get::<Self>() {
-            return Ok(ctx.clone());
-        }
+        let ctx = match parts.extensions.get::<Self>() {
+            Some(ctx) => ctx.clone(),
+            None => Self::from_request_pieces(
+                &parts.extensions,
+                &parts.headers,
+                parts.uri.path(),
+                state.trusted_proxy_header,
+                &state.trusted_proxies,
+            ),
+        };
 
-        Ok(Self::from_request_pieces(
-            &parts.extensions,
-            &parts.headers,
-            parts.uri.path(),
-            state.trusted_proxy_header,
-            &state.trusted_proxies,
-        ))
+        std::future::ready(Ok(ctx))
     }
 }
 
