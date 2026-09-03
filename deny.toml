@@ -11,25 +11,7 @@ version = 2
 # Deny crates with a known security advisory (RUSTSEC) or that have been yanked.
 # `ignore` holds advisory IDs we've reviewed and consciously accept (none yet).
 yanked = "deny"
-ignore = [
-    # ttf-parser is unmaintained (author will not ship further fixes). It is a
-    # build-time-only dependency, pulled in transitively through
-    # resvg → usvg → fontdb/rustybuzz to render the app icon in build.rs, and
-    # never reaches the running server. No safe upgrade exists yet (resvg has
-    # not migrated to skrifa) — drop this entry once resvg replaces ttf-parser.
-    "RUSTSEC-2026-0192",
-    # rustybuzz is unmaintained — same build-time-only resvg → usvg → rustybuzz
-    # chain (text shaping for the build.rs app-icon render), never reaching the
-    # running server. Drop once resvg migrates off rustybuzz.
-    "RUSTSEC-2026-0206",
-    # chacha20 0.10.0 and 0.10.1 were yanked upstream on 2026-08-27; the only
-    # unyanked 0.10.x is 0.10.2, published the same day. It arrives transitively
-    # (uuid -> rand -> chacha20) and the yank is a packaging correction, not a
-    # security advisory, so this waives the gate rather than pulling in a
-    # day-old release. Drop this entry and `cargo update -p chacha20` once
-    # 0.10.2 clears the seven-day cooldown — tracked in the follow-up issue.
-    { crate = "chacha20@0.10.0", reason = "yanked upstream; 0.10.2 is too new to adopt yet" },
-]
+ignore = []
 
 [licenses]
 version = 2
