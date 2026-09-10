@@ -17,22 +17,103 @@
 //! while the forwarded `Host` carries no scheme and often no port. Matching on
 //! host alone keeps the check working in that standard deployment without a
 //! configured public URL.
+//!
+//! That tolerance is load-bearing rather than incidental, which is why this
+//! module is hand-rolled instead of delegating to `tower_http::csrf` (issue
+//! #187). Fetch metadata is only sent to potentially-trustworthy origins, so on
+//! a plain-HTTP LAN install — a deployment shape the README supports
+//! first-class — no `Sec-Fetch-Site` ever arrives and this comparison is the
+//! *only* check running, not a fallback. An upstream byte-exact authority match
+//! would then 403 every POST, login included, behind the widely-copied
+//! `proxy_set_header Host $host;` on a non-default port.
+//!
+//! Every rejection is logged as a `csrf.rejected` audit event naming which
+//! branch rejected it — the failure this guard produces is an unexplained
+//! `403`, and without the event an operator whose proxy trips it has nothing
+//! to work from.
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::{Method, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 
+use crate::audit::AuditContext;
+
+/// What the guard needs to attribute a rejection to a client IP. Deliberately
+/// not `SessionLayerState`: this layer runs outside session validation and has
+/// no business holding a session repository.
+#[derive(Clone)]
+pub struct CsrfLayerState {
+    pub trusted_proxy_header: crate::config::TrustedProxyHeader,
+    pub trusted_proxies: std::sync::Arc<Vec<std::net::IpAddr>>,
+}
+
+/// Which branch judged a request cross-site. Recorded on the audit event
+/// because the branches differ in what they prove: [`Self::SecFetchSite`] is
+/// the browser itself declaring the request cross-site, while the `Origin`
+/// reasons are inferred from headers a reverse proxy may have rewritten. An
+/// operator seeing the latter should suspect their proxy first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CrossSiteReason {
+    /// `Sec-Fetch-Site: cross-site` — the browser said so.
+    SecFetchSite,
+    /// `Origin: null`, opaque (a sandboxed iframe, a cross-origin redirect).
+    OriginOpaque,
+    /// An `Origin` with no readable `scheme://host` authority.
+    OriginMalformed,
+    /// `Origin` present but `Host` absent or unreadable — cannot be confirmed
+    /// same-origin. Overwhelmingly a proxy that dropped the header.
+    HostMissing,
+    /// `Origin`'s host and the request's `Host` name different hosts.
+    OriginHostMismatch,
+}
+
+impl CrossSiteReason {
+    /// Snake-case wire form for the `reason` field, matching `session.rejected`.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SecFetchSite => "sec_fetch_site",
+            Self::OriginOpaque => "origin_opaque",
+            Self::OriginMalformed => "origin_malformed",
+            Self::HostMissing => "host_missing",
+            Self::OriginHostMismatch => "origin_host_mismatch",
+        }
+    }
+}
+
 /// Reject a state-changing request that is provably cross-site. Safe methods
 /// (GET/HEAD/OPTIONS/TRACE) pass through untouched; a request that carries
 /// neither `Sec-Fetch-Site` nor `Origin` is treated as a non-browser client
 /// (curl, the integration-test harness) and allowed.
-pub async fn csrf_origin_guard(req: Request, next: Next) -> Response {
-    if is_safe(req.method()) || !is_cross_site(&req) {
+pub async fn csrf_origin_guard(
+    State(layer): State<CsrfLayerState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if is_safe(req.method()) {
         return next.run(req).await;
     }
+    let Some(reason) = cross_site_reason(&req) else {
+        return next.run(req).await;
+    };
+
+    // Built only on the reject path: the overwhelming majority of requests are
+    // same-origin and shouldn't pay for client-IP resolution they never log.
+    let ctx = AuditContext::from_request_pieces(
+        req.extensions(),
+        req.headers(),
+        req.uri().path(),
+        layer.trusted_proxy_header,
+        &layer.trusted_proxies,
+    );
+    let origin = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok());
+    crate::audit::csrf_rejected(&ctx, reason.as_str(), req.method().as_str(), origin);
+
     StatusCode::FORBIDDEN.into_response()
 }
 
@@ -44,38 +125,41 @@ fn is_safe(method: &Method) -> bool {
     )
 }
 
-/// Whether the request is one a browser has told us — via `Sec-Fetch-Site` or a
-/// mismatched `Origin` — is cross-site. A request a browser did not mark, and
-/// that carries no `Origin`, is treated as not-cross-site (a non-browser
-/// client); see the module docs.
-fn is_cross_site(req: &Request) -> bool {
+/// Why the request is one a browser has told us — via `Sec-Fetch-Site` or a
+/// mismatched `Origin` — is cross-site, or `None` when it is not. A request a
+/// browser did not mark, and that carries no `Origin`, is treated as
+/// not-cross-site (a non-browser client); see the module docs.
+fn cross_site_reason(req: &Request) -> Option<CrossSiteReason> {
     let headers = req.headers();
 
     // `Sec-Fetch-Site` is authoritative where the browser sends it.
     if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
-        return site.eq_ignore_ascii_case("cross-site");
+        return site
+            .eq_ignore_ascii_case("cross-site")
+            .then_some(CrossSiteReason::SecFetchSite);
     }
 
     // Fall back to comparing the Origin's host with the request's own Host.
-    let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
-        // No Sec-Fetch-Site and no Origin → a non-browser client.
-        return false;
-    };
+    let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())?;
     // `Origin: null` is opaque (a sandboxed iframe, a cross-origin redirect) and
     // never legitimate for a state-changing request here.
     if origin.eq_ignore_ascii_case("null") {
-        return true;
+        return Some(CrossSiteReason::OriginOpaque);
     }
     let Some(origin_host) = host_of(origin) else {
-        return true;
+        return Some(CrossSiteReason::OriginMalformed);
     };
-    let request_host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .map(strip_port);
     // A missing/garbled Host with a present Origin cannot be confirmed
     // same-origin, so treat it as cross-site.
-    request_host != Some(origin_host)
+    let Some(request_host) = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(strip_port)
+    else {
+        return Some(CrossSiteReason::HostMissing);
+    };
+
+    (request_host != origin_host).then_some(CrossSiteReason::OriginHostMismatch)
 }
 
 /// The host of an `Origin` value (`scheme://host[:port]`), lower-cased and with
@@ -114,6 +198,10 @@ mod tests {
         b.body(Body::empty()).unwrap()
     }
 
+    fn is_cross_site(req: &Request) -> bool {
+        cross_site_reason(req).is_some()
+    }
+
     #[test]
     fn safe_methods_are_never_cross_site_checked() {
         // Even an obviously cross-site GET passes — GET must not change state.
@@ -129,19 +217,22 @@ mod tests {
                 "{allowed} must be allowed"
             );
         }
-        assert!(is_cross_site(&req(
-            Method::POST,
-            &[("sec-fetch-site", "cross-site")]
-        )));
+        assert_eq!(
+            cross_site_reason(&req(Method::POST, &[("sec-fetch-site", "cross-site")])),
+            Some(CrossSiteReason::SecFetchSite)
+        );
         // It wins over a same-looking Origin/Host, in both directions.
-        assert!(is_cross_site(&req(
-            Method::POST,
-            &[
-                ("sec-fetch-site", "cross-site"),
-                ("origin", "https://app.example.com"),
-                ("host", "app.example.com"),
-            ]
-        )));
+        assert_eq!(
+            cross_site_reason(&req(
+                Method::POST,
+                &[
+                    ("sec-fetch-site", "cross-site"),
+                    ("origin", "https://app.example.com"),
+                    ("host", "app.example.com"),
+                ]
+            )),
+            Some(CrossSiteReason::SecFetchSite)
+        );
     }
 
     #[test]
@@ -160,18 +251,24 @@ mod tests {
             &[("origin", "http://localhost:8080"), ("host", "localhost"),]
         )));
         // Genuine cross-origin.
-        assert!(is_cross_site(&req(
-            Method::POST,
-            &[
-                ("origin", "https://evil.example.com"),
-                ("host", "app.example.com"),
-            ]
-        )));
+        assert_eq!(
+            cross_site_reason(&req(
+                Method::POST,
+                &[
+                    ("origin", "https://evil.example.com"),
+                    ("host", "app.example.com"),
+                ]
+            )),
+            Some(CrossSiteReason::OriginHostMismatch)
+        );
         // Opaque origin.
-        assert!(is_cross_site(&req(
-            Method::POST,
-            &[("origin", "null"), ("host", "app.example.com")]
-        )));
+        assert_eq!(
+            cross_site_reason(&req(
+                Method::POST,
+                &[("origin", "null"), ("host", "app.example.com")]
+            )),
+            Some(CrossSiteReason::OriginOpaque)
+        );
     }
 
     #[test]
@@ -188,5 +285,23 @@ mod tests {
         // ride an ambient session cookie the way a forged browser POST would, so
         // it is not a CSRF vector.
         assert!(!is_cross_site(&req(Method::POST, &[])));
+    }
+
+    /// The two ways the `Origin` branch fails short of an actual host
+    /// comparison. Distinguished on the audit event because a stripped `Host`
+    /// points at the reverse proxy, not at an attacker.
+    #[test]
+    fn unusable_origin_and_missing_host_are_reported_apart() {
+        assert_eq!(
+            cross_site_reason(&req(
+                Method::POST,
+                &[("origin", "not-an-origin"), ("host", "app.example.com")]
+            )),
+            Some(CrossSiteReason::OriginMalformed)
+        );
+        assert_eq!(
+            cross_site_reason(&req(Method::POST, &[("origin", "https://app.example.com")])),
+            Some(CrossSiteReason::HostMissing)
+        );
     }
 }

@@ -142,6 +142,14 @@ Authentication failures are logged alongside them (OWASP Authentication Cheat Sh
 | `auth.reauth.failed` | warn | A route that re-checks the password before acting was given the wrong one. Carries `user_id`, `actor_session_fp` and `action` (`password_change`, `promote_user`, `delete_user`) |
 | `auth.reauth.throttled` | warn | Such a re-check was refused by the per-user rate limiter. Same `action` field |
 
+Requests refused by the CSRF guard are logged too:
+
+| Event | Level | Meaning |
+|-------|-------|---------|
+| `csrf.rejected` | warn | A state-changing request was refused as cross-site. Carries `method`, the claimed `origin` (truncated to 256 chars), and `reason` — `sec_fetch_site` (the browser declared it cross-site), `origin_opaque` (an opaque `Origin: null`), `origin_malformed`, `host_missing`, or `origin_host_mismatch` |
+
+`reason` is worth reading before assuming an attack. `sec_fetch_site` is the browser itself reporting a cross-site request. The `origin_*` and `host_missing` reasons are inferred from headers a reverse proxy may have rewritten — a steady trickle of `host_missing` means your proxy is not forwarding `Host`, and the fix is at the proxy, not here.
+
 `auth.login.failed` is emitted identically for an unknown username and a wrong password — same event, same wording, same fields. Distinguishing them would rebuild in the log the user-enumeration oracle that the constant-cost login path exists to remove. Note the trade-off inherent in recording the attempted username at all: a user who types their password into the username field puts it in the log, the same way `sshd` does.
 
 Every request-scoped event carries `client_ip`, `user_agent` (truncated to 256 chars), and `path`, plus a `session_fp` field — a salted SHA-256 fingerprint of the session token, never the raw token itself. The salt is generated fresh at process startup and is never logged, so `session_fp` values let you correlate events for the same session **within one process's lifetime**, but they do NOT correlate across restarts. Bulk-delete events carry `actor_session_fp` (the session that performed the action) and `count` instead of a single `session_fp`, since there's no one session to name. The sweep event is an exception: it has no request context and carries only `count`.

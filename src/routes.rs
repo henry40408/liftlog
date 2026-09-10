@@ -6,8 +6,8 @@ use axum::{
 
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
 use crate::middleware::{
-    HstsHeader, SessionLayerState, baseline_headers_middleware, csrf_origin_guard, hsts_middleware,
-    sliding_session_middleware,
+    CsrfLayerState, HstsHeader, SessionLayerState, baseline_headers_middleware, csrf_origin_guard,
+    hsts_middleware, sliding_session_middleware,
 };
 use crate::state::AppState;
 
@@ -16,6 +16,10 @@ pub fn create_router(state: AppState) -> Router {
         session_repo: state.session_repo.clone(),
         cookie_secure: state.cookie_secure,
         log_salt: state.log_salt.clone(),
+        trusted_proxy_header: state.trusted_proxy_header,
+        trusted_proxies: state.trusted_proxies.clone(),
+    };
+    let csrf_layer_state = CsrfLayerState {
         trusted_proxy_header: state.trusted_proxy_header,
         trusted_proxies: state.trusted_proxies.clone(),
     };
@@ -104,7 +108,7 @@ pub fn create_router(state: AppState) -> Router {
         // First-line CSRF: reject provably cross-site state-changing requests.
         // Registered before HSTS below → runs before session validation, and
         // after HSTS in request order (outer layers run first).
-        .layer(from_fn(csrf_origin_guard))
+        .layer(from_fn_with_state(csrf_layer_state, csrf_origin_guard))
         // Baseline security headers, outside the CSRF guard for the same
         // reason HSTS is: the 403 that guard returns must carry them too.
         .layer(from_fn(baseline_headers_middleware))

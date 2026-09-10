@@ -560,3 +560,117 @@ async fn login_backoff_climbs_per_account_and_resets_on_success() {
         "a successful login should have cleared the accumulated penalty"
     );
 }
+
+/// The guard's only symptom is an unexplained `403`, so the event has to name
+/// which branch rejected: `sec_fetch_site` is the browser declaring the request
+/// cross-site, while `host_missing` means the `Host` header never arrived —
+/// almost always a reverse proxy stripping it rather than an attacker. An
+/// operator has to be able to tell those apart from the log alone.
+#[tokio::test]
+async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let response = test_app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workouts")
+                .header("sec-fetch-site", "cross-site")
+                .header(header::ORIGIN, "https://evil.example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let log = writer.contents();
+    assert!(
+        log.contains("csrf.rejected"),
+        "expected a csrf.rejected event, got: {log}"
+    );
+    assert_eq!(
+        extract_field(&log, "reason"),
+        Some("sec_fetch_site"),
+        "expected the browser-declared branch, got: {log}"
+    );
+    assert_eq!(extract_field(&log, "method"), Some("POST"));
+    assert_eq!(
+        extract_field(&log, "origin"),
+        Some("https://evil.example.com"),
+        "the event must record where the request claimed to come from, got: {log}"
+    );
+    assert_eq!(extract_field(&log, "path"), Some("/workouts"));
+
+    // A stripped `Host` is the misconfiguration case and must not be reported
+    // as the same thing as the one above.
+    let writer2 = CapturingWriter::default();
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workouts")
+                .header(header::ORIGIN, "https://app.example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // Both requests wrote to the same process-global subscriber, so read the
+    // accumulated buffer rather than `writer2` (which is a fresh, empty sink).
+    drop(writer2);
+    let log = writer.contents();
+    assert!(
+        log.contains("reason=\"host_missing\"") || log.contains("reason=host_missing"),
+        "expected the stripped-Host branch to be named, got: {log}"
+    );
+}
+
+/// A hostile `Origin` is attacker-controlled and unbounded, and reaches the log
+/// without anything having validated it — failing to parse is often precisely
+/// why the request was rejected.
+#[tokio::test]
+async fn a_hostile_origin_is_truncated_in_the_audit_log() {
+    let writer = CapturingWriter::default();
+    install_capturing_subscriber(writer.clone());
+
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+
+    let origin = format!("https://{}.example.com", "a".repeat(5000));
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workouts")
+                .header("sec-fetch-site", "cross-site")
+                .header(header::ORIGIN, &origin)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let log = writer.contents();
+    let logged = extract_field(&log, "origin").expect("origin field should be present");
+    assert_eq!(
+        logged.chars().count(),
+        256,
+        "origin should be capped at 256 chars, got {} chars",
+        logged.chars().count()
+    );
+    assert!(
+        !log.contains(&origin),
+        "the untruncated origin must not reach the log"
+    );
+}

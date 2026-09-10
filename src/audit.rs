@@ -44,6 +44,11 @@ const MAX_USER_AGENT_LEN: usize = 256;
 /// the length of a username that does not exist).
 const MAX_USERNAME_LEN: usize = 256;
 
+/// Same reasoning again, for the `Origin` of a rejected cross-site request:
+/// nothing has validated it by the time the guard logs it — that it failed
+/// to parse as an origin is often exactly why it was rejected.
+const MAX_ORIGIN_LEN: usize = 256;
+
 impl AuditContext {
     /// Builds the context from raw request pieces. Used directly by
     /// `sliding_session_middleware` (which holds a `Request`, not
@@ -338,6 +343,43 @@ pub fn session_rejected(ctx: &AuditContext, session_fp: &str) {
         path = %ctx.path,
         reason = "unknown_token",
         "session rejected"
+    );
+}
+
+/// A state-changing request refused by [`crate::middleware::csrf_origin_guard`]
+/// before it reached a handler. Until this existed the guard returned a bare
+/// `403` and left no trace, so an operator whose deployment shape made the
+/// guard reject legitimate traffic had nothing to debug from — the symptom is
+/// a login form that silently fails, and the log was silent too.
+///
+/// `warn`, not `debug` like [`session_rejected`]: unlike a scanner replaying
+/// random cookies, a CSRF rejection is either a genuine attack against a
+/// logged-in user or a misconfigured reverse proxy locking the operator out.
+/// Both need to be visible at the default log level.
+///
+/// `reason` names which branch rejected, because the branches differ in what
+/// they prove: `sec_fetch_site` is the browser itself declaring the request
+/// cross-site, while the `origin_*` reasons are inferred from headers a
+/// proxy may have rewritten. An operator seeing the latter should suspect
+/// their proxy before suspecting an attacker.
+///
+/// `origin` is recorded because it is the one field that says *where* the
+/// request claimed to come from, which is what distinguishes an attack from a
+/// misconfiguration. It is attacker-controlled and unbounded, hence the same
+/// truncation the `User-Agent` gets.
+pub fn csrf_rejected(ctx: &AuditContext, reason: &str, method: &str, origin: Option<&str>) {
+    let origin = origin.map(|o| truncate_chars(o, MAX_ORIGIN_LEN));
+    let user_agent = ctx.user_agent.as_deref();
+    tracing::warn!(
+        target: "liftlog::audit",
+        event = "csrf.rejected",
+        reason,
+        method,
+        origin,
+        client_ip = %ctx.client_ip,
+        user_agent,
+        path = %ctx.path,
+        "cross-site request rejected"
     );
 }
 
