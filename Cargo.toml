@@ -16,7 +16,7 @@ rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 axum-extra = { version = "0.12", features = ["cookie"] }
-argon2 = "0.5"
+argon2 = "0.6"
 rand_core = { version = "0.6", features = ["getrandom"] }
 # Pinned at 0.10, not 0.11: argon2 0.5's password-hash pins digest 0.10, and
 # sha2 0.11 would pull in a second copy of digest into the dependency tree.
