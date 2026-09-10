@@ -1,7 +1,4 @@
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use chrono::Utc;
 use rusqlite::OptionalExtension;
 use uuid::Uuid;
@@ -211,10 +208,9 @@ fn dummy_password_hash() -> &'static str {
 /// per request, and no rate limit, unlike login) is reachable by any
 /// authenticated user in a loop.
 fn hash_password(password: &str) -> Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     let password_hash = argon2
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|_e| AppError::PasswordHash)?
         .to_string();
     Ok(password_hash)
