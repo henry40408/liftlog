@@ -1701,7 +1701,7 @@ async fn test_hsts_header_includes_subdomains_when_configured() {
 }
 
 /// Layer-ordering regression guard: HSTS must be the *outermost* layer so it
-/// still lands on a response that `csrf_origin_guard` rejects before the
+/// still lands on a response that the CSRF guard rejects before the
 /// request reaches session validation or a handler. If the HSTS layer were
 /// registered inside the CSRF guard instead of outside it, this would fail.
 #[tokio::test]

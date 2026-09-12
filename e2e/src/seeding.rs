@@ -12,10 +12,10 @@
 //! lock two of them arriving at `/auth/setup` together would have one of the
 //! two see a half-created install.
 //!
-//! `csrf_origin_guard` lets these through: it is header-only, and rejects a
-//! request only when the browser *reports* it as cross-site. A `reqwest` call
-//! sends no `Sec-Fetch-Site` and no `Origin`, so it is treated as the
-//! non-browser client it is.
+//! The CSRF guard lets these through: it is header-only, and rejects a
+//! request only when the browser *reports*, or reveals, it to be cross-site.
+//! A `reqwest` call sends no `Sec-Fetch-Site` and no `Origin`, so it is
+//! treated as the non-browser client it is.
 
 use anyhow::{Context, Result, bail};
 use tokio::sync::Mutex;

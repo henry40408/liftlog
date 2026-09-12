@@ -563,9 +563,10 @@ async fn login_backoff_climbs_per_account_and_resets_on_success() {
 
 /// The guard's only symptom is an unexplained `403`, so the event has to name
 /// which branch rejected: `sec_fetch_site` is the browser declaring the request
-/// cross-site, while `host_missing` means the `Host` header never arrived —
-/// almost always a reverse proxy stripping it rather than an attacker. An
-/// operator has to be able to tell those apart from the log alone.
+/// cross-site, while `origin_fallback` means it did not send `Sec-Fetch-Site`
+/// at all and the `Origin`/`Host` comparison failed — which a reverse proxy
+/// rewriting `Host` trips just as readily as an attacker. An operator has to be
+/// able to tell those apart from the log alone.
 #[tokio::test]
 async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected() {
     let writer = CapturingWriter::default();
@@ -609,7 +610,8 @@ async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected()
     assert_eq!(extract_field(&log, "path"), Some("/workouts"));
 
     // A stripped `Host` is the misconfiguration case and must not be reported
-    // as the same thing as the one above.
+    // as the same thing as the one above: it reaches the `Origin` fallback
+    // instead of being declared cross-site by the browser.
     let writer2 = CapturingWriter::default();
     let response = test_app
         .router
@@ -629,8 +631,8 @@ async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected()
     drop(writer2);
     let log = writer.contents();
     assert!(
-        log.contains("reason=\"host_missing\"") || log.contains("reason=host_missing"),
-        "expected the stripped-Host branch to be named, got: {log}"
+        log.contains("reason=\"origin_fallback\"") || log.contains("reason=origin_fallback"),
+        "expected the Origin-fallback branch to be named, got: {log}"
     );
 }
 

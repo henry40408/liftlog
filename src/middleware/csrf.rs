@@ -1,43 +1,51 @@
-//! First-line CSRF defence: reject state-changing requests that a browser
-//! reports, or reveals, to be cross-site. Header-only; no token, no state.
-//! Combined with the session cookie's `SameSite=Lax`, this is liftlog's CSRF
-//! defence. See `rdrs/src/middleware/csrf.rs` for the original.
+//! First-line — and only — CSRF defence: reject state-changing requests that a
+//! browser reports, or reveals, to be cross-site. Header-only; no token, no
+//! state. Combined with the session cookie's `SameSite=Lax`, this is liftlog's
+//! CSRF defence; there is no synchronizer token.
+//!
+//! The check itself is [`tower_http::csrf::CsrfLayer`], which implements the
+//! scheme Go 1.25 shipped as `http.CrossOriginProtection`:
 //!
 //! - **`Sec-Fetch-Site`** (sent by every current browser) is authoritative when
-//!   present. `same-origin`, `same-site`, and `none` (a direct navigation or a
-//!   user-typed URL) are allowed; only `cross-site` is rejected.
+//!   present. Only `same-origin` and `none` — a direct navigation or a
+//!   user-typed URL — are allowed; `cross-site`, `same-site`, and any value the
+//!   layer does not know are rejected. `same-site` covers a sibling subdomain or
+//!   another port on the same host, which `SameSite=Lax` still hands the session
+//!   cookie, so allowing it would leave exactly the caller this guard exists to
+//!   stop.
 //! - **`Origin`** is the fallback for the rare browser that omits
-//!   `Sec-Fetch-Site`. Its host is compared against the request's own `Host`;
-//!   a mismatch — or an opaque `Origin: null` — is rejected.
+//!   `Sec-Fetch-Site` (Safari before 16.4) and for a plain-HTTP LAN install,
+//!   where fetch metadata never arrives because the origin is not
+//!   potentially-trustworthy. Its authority — host *and* port — is compared
+//!   byte-for-byte against the request's own (the request-target authority if
+//!   present, else `Host`); a mismatch, an opaque `Origin: null`, a malformed
+//!   `Origin`, or a missing `Host` is rejected. Scheme is ignored, so a
+//!   TLS-terminating proxy whose forwarded `Host` carries no scheme still
+//!   passes.
 //! - **Neither header** means a non-browser client (`curl`, the integration-test
 //!   harness). Those are not exposed to an ambient-cookie CSRF and pass through.
 //!
-//! Scheme and port are deliberately ignored in the `Origin`/`Host` comparison:
-//! behind a TLS-terminating reverse proxy the browser's `Origin` is `https://`
-//! while the forwarded `Host` carries no scheme and often no port. Matching on
-//! host alone keeps the check working in that standard deployment without a
-//! configured public URL.
+//! Matching the port is what this module used to give up (issue #187) to
+//! tolerate `proxy_set_header Host $host;` on a non-default port. That tolerance
+//! was worth less than it cost: cookies ignore ports, so another service on the
+//! same host — a second container, a dev server, anything an attacker can get a
+//! page onto — passed as same-origin while carrying the victim's session, and
+//! with no synchronizer token behind it nothing else would have caught it. The
+//! operator-facing price is one line in the README: forward `Host` with the port
+//! the browser sent (nginx's `$http_host`, not `$host`).
 //!
-//! That tolerance is load-bearing rather than incidental, which is why this
-//! module is hand-rolled instead of delegating to `tower_http::csrf` (issue
-//! #187). Fetch metadata is only sent to potentially-trustworthy origins, so on
-//! a plain-HTTP LAN install — a deployment shape the README supports
-//! first-class — no `Sec-Fetch-Site` ever arrives and this comparison is the
-//! *only* check running, not a fallback. An upstream byte-exact authority match
-//! would then 403 every POST, login included, behind the widely-copied
-//! `proxy_set_header Host $host;` on a non-default port.
-//!
-//! Every rejection is logged as a `csrf.rejected` audit event naming which
-//! branch rejected it — the failure this guard produces is an unexplained
-//! `403`, and without the event an operator whose proxy trips it has nothing
-//! to work from.
+//! What this module still owns is [`log_csrf_rejection`]: the layer answers with
+//! a bare `403` and its rejection builder never sees the request, so without an
+//! enclosing layer an operator whose proxy trips the guard has nothing to work
+//! from.
 
 use axum::{
     extract::{Request, State},
-    http::{Method, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, header},
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
 };
+use tower_http::csrf::{ProtectionError, ProtectionErrorKind};
 
 use crate::audit::AuditContext;
 
@@ -50,258 +58,151 @@ pub struct CsrfLayerState {
     pub trusted_proxies: std::sync::Arc<Vec<std::net::IpAddr>>,
 }
 
-/// Which branch judged a request cross-site. Recorded on the audit event
-/// because the branches differ in what they prove: [`Self::SecFetchSite`] is
-/// the browser itself declaring the request cross-site, while the `Origin`
-/// reasons are inferred from headers a reverse proxy may have rewritten. An
-/// operator seeing the latter should suspect their proxy first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CrossSiteReason {
-    /// `Sec-Fetch-Site: cross-site` — the browser said so.
-    SecFetchSite,
-    /// `Origin: null`, opaque (a sandboxed iframe, a cross-origin redirect).
-    OriginOpaque,
-    /// An `Origin` with no readable `scheme://host` authority.
-    OriginMalformed,
-    /// `Origin` present but `Host` absent or unreadable — cannot be confirmed
-    /// same-origin. Overwhelmingly a proxy that dropped the header.
-    HostMissing,
-    /// `Origin`'s host and the request's `Host` name different hosts.
-    OriginHostMismatch,
+/// The pieces of a request a rejection needs to log, captured on the way in
+/// because [`tower_http::csrf::CsrfLayer`] consumes the request it rejects and
+/// hands its rejection builder only a [`ProtectionError`].
+struct PendingAudit {
+    method: Method,
+    path: String,
+    headers: HeaderMap,
+    extensions: axum::http::Extensions,
 }
 
-impl CrossSiteReason {
-    /// Snake-case wire form for the `reason` field, matching `session.rejected`.
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::SecFetchSite => "sec_fetch_site",
-            Self::OriginOpaque => "origin_opaque",
-            Self::OriginMalformed => "origin_malformed",
-            Self::HostMissing => "host_missing",
-            Self::OriginHostMismatch => "origin_host_mismatch",
-        }
-    }
-}
-
-/// Reject a state-changing request that is provably cross-site. Safe methods
-/// (GET/HEAD/OPTIONS/TRACE) pass through untouched; a request that carries
-/// neither `Sec-Fetch-Site` nor `Origin` is treated as a non-browser client
-/// (curl, the integration-test harness) and allowed.
-pub async fn csrf_origin_guard(
+/// Log every rejection by the first-line CSRF guard, `tower_http`'s
+/// `CsrfLayer`, which must be layered directly *inside* this one so its 403 —
+/// and the [`ProtectionError`] it attaches to the response — passes through
+/// here.
+///
+/// The guard's only other symptom is an unexplained `403`, and the deployment
+/// shapes that produce one legitimately (a proxy rewriting `Host`) are
+/// indistinguishable in an access log from an attack. The *response* stays
+/// bodyless on purpose: an attacker's page cannot read it anyway, and naming the
+/// failed check only helps someone probing the guard.
+pub async fn log_csrf_rejection(
     State(layer): State<CsrfLayerState>,
     req: Request,
     next: Next,
 ) -> Response {
-    if is_safe(req.method()) {
-        return next.run(req).await;
-    }
-    let Some(reason) = cross_site_reason(&req) else {
-        return next.run(req).await;
-    };
+    // Only built for methods the guard can reject, so the overwhelming majority
+    // of requests — page loads — don't pay for a `HeaderMap` clone they never
+    // log. The `AuditContext` itself is still deferred to the reject path.
+    let pending = (!is_safe(req.method())).then(|| PendingAudit {
+        method: req.method().clone(),
+        path: req.uri().path().to_owned(),
+        headers: req.headers().clone(),
+        extensions: req.extensions().clone(),
+    });
 
-    // Built only on the reject path: the overwhelming majority of requests are
-    // same-origin and shouldn't pay for client-IP resolution they never log.
+    let res = next.run(req).await;
+
+    let (Some(err), Some(pending)) = (res.extensions().get::<ProtectionError>(), pending) else {
+        return res;
+    };
     let ctx = AuditContext::from_request_pieces(
-        req.extensions(),
-        req.headers(),
-        req.uri().path(),
+        &pending.extensions,
+        &pending.headers,
+        &pending.path,
         layer.trusted_proxy_header,
         &layer.trusted_proxies,
     );
-    let origin = req
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|v| v.to_str().ok());
-    crate::audit::csrf_rejected(&ctx, reason.as_str(), req.method().as_str(), origin);
-
-    StatusCode::FORBIDDEN.into_response()
+    let origin = header_str(pending.headers.get(header::ORIGIN));
+    crate::audit::csrf_rejected(
+        &ctx,
+        rejected_by(err.kind()),
+        pending.method.as_str(),
+        origin,
+    );
+    res
 }
 
-/// Whether `method` cannot change server state and so needs no CSRF check.
+/// Which of the guard's two checks fired. The `Origin` fallback is the one only
+/// an old browser — or a proxy that rewrites `Host` — can trip, so it is worth
+/// telling apart in the log from the browser declaring the request cross-site
+/// itself.
+fn rejected_by(kind: ProtectionErrorKind) -> &'static str {
+    match kind {
+        ProtectionErrorKind::CrossOriginRequest => "sec_fetch_site",
+        ProtectionErrorKind::CrossOriginRequestFromOldBrowser => "origin_fallback",
+        // `ProtectionErrorKind` is `#[non_exhaustive]`.
+        _ => "other",
+    }
+}
+
+/// A header value as a string, or `None` when absent or not ASCII.
+fn header_str(value: Option<&HeaderValue>) -> Option<&str> {
+    value.and_then(|v| v.to_str().ok())
+}
+
+/// Whether `method` cannot change server state and so is one `CsrfLayer` never
+/// rejects. Deliberately not [`Method::is_safe`], which also counts `TRACE`:
+/// this must mirror the layer's own set or a rejection would go unlogged.
 fn is_safe(method: &Method) -> bool {
-    matches!(
-        *method,
-        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
-    )
-}
-
-/// Why the request is one a browser has told us — via `Sec-Fetch-Site` or a
-/// mismatched `Origin` — is cross-site, or `None` when it is not. A request a
-/// browser did not mark, and that carries no `Origin`, is treated as
-/// not-cross-site (a non-browser client); see the module docs.
-fn cross_site_reason(req: &Request) -> Option<CrossSiteReason> {
-    let headers = req.headers();
-
-    // `Sec-Fetch-Site` is authoritative where the browser sends it.
-    if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
-        return site
-            .eq_ignore_ascii_case("cross-site")
-            .then_some(CrossSiteReason::SecFetchSite);
-    }
-
-    // Fall back to comparing the Origin's host with the request's own Host.
-    let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())?;
-    // `Origin: null` is opaque (a sandboxed iframe, a cross-origin redirect) and
-    // never legitimate for a state-changing request here.
-    if origin.eq_ignore_ascii_case("null") {
-        return Some(CrossSiteReason::OriginOpaque);
-    }
-    let Some(origin_host) = host_of(origin) else {
-        return Some(CrossSiteReason::OriginMalformed);
-    };
-    // A missing/garbled Host with a present Origin cannot be confirmed
-    // same-origin, so treat it as cross-site.
-    let Some(request_host) = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .map(strip_port)
-    else {
-        return Some(CrossSiteReason::HostMissing);
-    };
-
-    (request_host != origin_host).then_some(CrossSiteReason::OriginHostMismatch)
-}
-
-/// The host of an `Origin` value (`scheme://host[:port]`), lower-cased and with
-/// any port removed. `None` when there is no `://` authority to read.
-fn host_of(origin: &str) -> Option<String> {
-    let authority = origin.split_once("://").map(|(_, rest)| rest)?;
-    Some(strip_port(authority).to_ascii_lowercase())
-}
-
-/// Strip a trailing `:port` from a host authority, leaving the host. Handles
-/// bracketed IPv6 literals (`[::1]:8080` → `[::1]`).
-fn strip_port(authority: &str) -> String {
-    if let Some(end) = authority
-        .strip_prefix('[')
-        .and_then(|_| authority.find(']'))
-    {
-        // Bracketed IPv6: keep through the closing bracket, drop any `:port`.
-        return authority[..=end].to_ascii_lowercase();
-    }
-    authority
-        .rsplit_once(':')
-        .map_or(authority, |(host, _)| host)
-        .to_ascii_lowercase()
+    matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::Body;
+    use tower::{Layer, ServiceExt, service_fn};
+    use tower_http::csrf::CsrfLayer;
 
-    fn req(method: Method, headers: &[(&str, &str)]) -> Request {
-        let mut b = Request::builder().method(method).uri("/anything");
-        for (k, v) in headers {
-            b = b.header(*k, *v);
-        }
-        b.body(Body::empty()).unwrap()
-    }
+    /// Pins the assumption `log_csrf_rejection` makes when it skips capturing:
+    /// a method this returns `true` for is never rejected by the layer, so
+    /// nothing is lost by not capturing it. `TRACE` is "safe" per RFC 7231 but
+    /// *is* checked by the layer, hence the explicit set.
+    #[tokio::test]
+    async fn the_skipped_methods_are_exactly_the_ones_the_layer_never_rejects() {
+        for (method, safe) in [
+            (Method::GET, true),
+            (Method::HEAD, true),
+            (Method::OPTIONS, true),
+            (Method::TRACE, false),
+            (Method::POST, false),
+            (Method::PUT, false),
+            (Method::DELETE, false),
+            (Method::PATCH, false),
+        ] {
+            assert_eq!(is_safe(&method), safe, "{method} classified wrongly");
 
-    fn is_cross_site(req: &Request) -> bool {
-        cross_site_reason(req).is_some()
-    }
-
-    #[test]
-    fn safe_methods_are_never_cross_site_checked() {
-        // Even an obviously cross-site GET passes — GET must not change state.
-        let r = req(Method::GET, &[("sec-fetch-site", "cross-site")]);
-        assert!(is_safe(r.method()));
-    }
-
-    #[test]
-    fn sec_fetch_site_is_authoritative() {
-        for allowed in ["same-origin", "same-site", "none", "SAME-ORIGIN"] {
-            assert!(
-                !is_cross_site(&req(Method::POST, &[("sec-fetch-site", allowed)])),
-                "{allowed} must be allowed"
+            let svc = CsrfLayer::new().layer(service_fn(|_: Request| async {
+                Ok::<_, std::convert::Infallible>(Response::new(Body::empty()))
+            }));
+            let req = Request::builder()
+                .method(method.clone())
+                .uri("/anything")
+                .header("sec-fetch-site", "cross-site")
+                .body(Body::empty())
+                .unwrap();
+            let res = svc.oneshot(req).await.unwrap();
+            assert_eq!(
+                res.extensions().get::<ProtectionError>().is_some(),
+                !safe,
+                "{method}: the layer's own exempt set must match `is_safe`"
             );
         }
+    }
+
+    #[test]
+    fn each_rejection_kind_gets_its_own_reason() {
         assert_eq!(
-            cross_site_reason(&req(Method::POST, &[("sec-fetch-site", "cross-site")])),
-            Some(CrossSiteReason::SecFetchSite)
+            rejected_by(ProtectionErrorKind::CrossOriginRequest),
+            "sec_fetch_site"
         );
-        // It wins over a same-looking Origin/Host, in both directions.
         assert_eq!(
-            cross_site_reason(&req(
-                Method::POST,
-                &[
-                    ("sec-fetch-site", "cross-site"),
-                    ("origin", "https://app.example.com"),
-                    ("host", "app.example.com"),
-                ]
-            )),
-            Some(CrossSiteReason::SecFetchSite)
+            rejected_by(ProtectionErrorKind::CrossOriginRequestFromOldBrowser),
+            "origin_fallback"
         );
     }
 
     #[test]
-    fn origin_fallback_compares_host_ignoring_scheme_and_port() {
-        // TLS-terminating proxy: Origin is https://, Host has no scheme/port.
-        assert!(!is_cross_site(&req(
-            Method::POST,
-            &[
-                ("origin", "https://app.example.com"),
-                ("host", "app.example.com"),
-            ]
-        )));
-        // Port on the Origin, none on Host → still same host.
-        assert!(!is_cross_site(&req(
-            Method::POST,
-            &[("origin", "http://localhost:8080"), ("host", "localhost"),]
-        )));
-        // Genuine cross-origin.
-        assert_eq!(
-            cross_site_reason(&req(
-                Method::POST,
-                &[
-                    ("origin", "https://evil.example.com"),
-                    ("host", "app.example.com"),
-                ]
-            )),
-            Some(CrossSiteReason::OriginHostMismatch)
+    fn a_non_ascii_origin_is_dropped_rather_than_logged_as_garbage() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_bytes(b"\xff\xfe").unwrap(),
         );
-        // Opaque origin.
-        assert_eq!(
-            cross_site_reason(&req(
-                Method::POST,
-                &[("origin", "null"), ("host", "app.example.com")]
-            )),
-            Some(CrossSiteReason::OriginOpaque)
-        );
-    }
-
-    #[test]
-    fn ipv6_literal_host_is_compared_without_its_port() {
-        assert!(!is_cross_site(&req(
-            Method::POST,
-            &[("origin", "http://[::1]:8080"), ("host", "[::1]")]
-        )));
-    }
-
-    #[test]
-    fn non_browser_client_without_headers_passes() {
-        // curl / the integration-test harness sends neither header and does not
-        // ride an ambient session cookie the way a forged browser POST would, so
-        // it is not a CSRF vector.
-        assert!(!is_cross_site(&req(Method::POST, &[])));
-    }
-
-    /// The two ways the `Origin` branch fails short of an actual host
-    /// comparison. Distinguished on the audit event because a stripped `Host`
-    /// points at the reverse proxy, not at an attacker.
-    #[test]
-    fn unusable_origin_and_missing_host_are_reported_apart() {
-        assert_eq!(
-            cross_site_reason(&req(
-                Method::POST,
-                &[("origin", "not-an-origin"), ("host", "app.example.com")]
-            )),
-            Some(CrossSiteReason::OriginMalformed)
-        );
-        assert_eq!(
-            cross_site_reason(&req(Method::POST, &[("origin", "https://app.example.com")])),
-            Some(CrossSiteReason::HostMissing)
-        );
+        assert_eq!(header_str(headers.get(header::ORIGIN)), None);
+        assert_eq!(header_str(None), None);
     }
 }
