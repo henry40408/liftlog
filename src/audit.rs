@@ -346,8 +346,8 @@ pub fn session_rejected(ctx: &AuditContext, session_fp: &str) {
     );
 }
 
-/// A state-changing request refused by [`crate::middleware::csrf_origin_guard`]
-/// before it reached a handler. Until this existed the guard returned a bare
+/// A state-changing request refused by the first-line CSRF guard (see
+/// [`crate::middleware::csrf`]) before it reached a handler. Until this existed the guard returned a bare
 /// `403` and left no trace, so an operator whose deployment shape made the
 /// guard reject legitimate traffic had nothing to debug from — the symptom is
 /// a login form that silently fails, and the log was silent too.
@@ -359,9 +359,9 @@ pub fn session_rejected(ctx: &AuditContext, session_fp: &str) {
 ///
 /// `reason` names which branch rejected, because the branches differ in what
 /// they prove: `sec_fetch_site` is the browser itself declaring the request
-/// cross-site, while the `origin_*` reasons are inferred from headers a
-/// proxy may have rewritten. An operator seeing the latter should suspect
-/// their proxy before suspecting an attacker.
+/// cross-site, while `origin_fallback` is inferred from an `Origin`/`Host`
+/// pair a reverse proxy may have rewritten. An operator seeing the latter
+/// should suspect their proxy before suspecting an attacker.
 ///
 /// `origin` is recorded because it is the one field that says *where* the
 /// request claimed to come from, which is what distinguishes an attack from a

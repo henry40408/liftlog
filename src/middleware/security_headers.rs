@@ -58,7 +58,7 @@ impl HstsHeader {
 /// Appends `Strict-Transport-Security` to every response when enabled.
 ///
 /// Registered as the outermost layer in `create_router` so it also reaches
-/// responses that short-circuit inside inner layers — e.g. `csrf_origin_guard`'s
+/// responses that short-circuit inside inner layers — e.g. the CSRF guard's
 /// `403` and the sliding-session middleware's `AuthRedirect` `302` — not just
 /// ones that make it all the way to a handler.
 pub async fn hsts_middleware(
@@ -87,7 +87,7 @@ pub async fn hsts_middleware(
 ///   `X-Frame-Options: DENY` are the reason this middleware exists. Without
 ///   them any site can iframe liftlog and clickjack its buttons. `SameSite=Lax`
 ///   does not help — a top-level iframe navigation still carries the cookie —
-///   and neither does `csrf_origin_guard`, because the click comes from the
+///   and neither does the CSRF guard, because the click comes from the
 ///   victim's own browser and reports `Sec-Fetch-Site: same-origin`. Workout
 ///   delete, user delete, revoke-share and logout-others are all one-click
 ///   POST forms, so this is a live path, not a theoretical one.

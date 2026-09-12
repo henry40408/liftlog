@@ -4,10 +4,12 @@ use axum::{
     routing::{get, post},
 };
 
+use tower_http::csrf::CsrfLayer;
+
 use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
 use crate::middleware::{
-    CsrfLayerState, HstsHeader, SessionLayerState, baseline_headers_middleware, csrf_origin_guard,
-    hsts_middleware, sliding_session_middleware,
+    CsrfLayerState, HstsHeader, SessionLayerState, baseline_headers_middleware, hsts_middleware,
+    log_csrf_rejection, sliding_session_middleware,
 };
 use crate::state::AppState;
 
@@ -105,10 +107,15 @@ pub fn create_router(state: AppState) -> Router {
             session_layer_state,
             sliding_session_middleware,
         ))
-        // First-line CSRF: reject provably cross-site state-changing requests.
-        // Registered before HSTS below → runs before session validation, and
-        // after HSTS in request order (outer layers run first).
-        .layer(from_fn_with_state(csrf_layer_state, csrf_origin_guard))
+        // First-line CSRF: reject provably cross-site state-changing requests
+        // (see `middleware::csrf`). Registered before HSTS below → runs before
+        // session validation, and after HSTS in request order (outer layers run
+        // first).
+        .layer(CsrfLayer::new())
+        // Directly outside the guard: it reads the `ProtectionError` the guard
+        // attaches to its 403, which is the only way to log a rejection
+        // alongside the request that earned it.
+        .layer(from_fn_with_state(csrf_layer_state, log_csrf_rejection))
         // Baseline security headers, outside the CSRF guard for the same
         // reason HSTS is: the 403 that guard returns must carry them too.
         .layer(from_fn(baseline_headers_middleware))
