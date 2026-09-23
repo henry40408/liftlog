@@ -262,7 +262,7 @@ async fn test_cannot_edit_others_exercise() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -292,7 +292,7 @@ async fn test_cannot_update_others_exercise() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo
@@ -329,7 +329,7 @@ async fn test_cannot_delete_others_exercise() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let exercise_repo = ExerciseRepository::new(pool);
     let found = exercise_repo.find_by_id(&exercise.id).await.unwrap();
@@ -607,7 +607,7 @@ async fn test_delete_exercise_confirmation_page_names_it_without_acting() {
     );
 }
 
-/// Someone else's exercise: the confirmation page is `403`, like the POST.
+/// Someone else's exercise: the confirmation page is `404`, like the POST.
 #[tokio::test]
 async fn test_delete_exercise_confirmation_page_rejects_another_users_exercise() {
     let pool = common::setup_test_db();
@@ -632,5 +632,5 @@ async fn test_delete_exercise_confirmation_page_rejects_another_users_exercise()
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

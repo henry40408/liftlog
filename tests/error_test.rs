@@ -10,14 +10,6 @@ fn test_not_found_returns_404() {
 }
 
 #[test]
-fn test_forbidden_returns_403() {
-    let error = AppError::Forbidden("Access denied".to_string());
-    let response = error.into_response();
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-}
-
-#[test]
 fn test_bad_request_returns_400() {
     let error = AppError::BadRequest("Invalid input".to_string());
     let response = error.into_response();
