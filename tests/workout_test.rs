@@ -9,8 +9,8 @@ use liftlog::models::{UserRole, recent_pr_window_start};
 use liftlog::repositories::WorkoutRepository;
 use tower::ServiceExt;
 
-/// The opening `<input ...>` tag carrying `id="{id}"`, as raw markup. Lets a
-/// test assert on one attribute without pinning the order of the rest.
+/// The raw `<input ...>` tag with `id="{id}"`, so a test can check one
+/// attribute without pinning attribute order.
 fn input_tag<'a>(body: &'a str, id: &str) -> &'a str {
     body.split('<')
         .find(|tag| tag.starts_with("input") && tag.contains(&format!(r#"id="{id}""#)))
@@ -185,8 +185,7 @@ async fn test_workout_list_only_shows_own_workouts() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // User1 should see their workout but not User2's
-    assert!(body_str.contains("User1 workout") || body_str.contains("2024-01-15"));
+    assert!(body_str.contains("User1 workout"));
     assert!(!body_str.contains("User2 workout"));
 }
 
@@ -263,7 +262,7 @@ async fn test_cannot_delete_others_workout() {
         .await
         .unwrap();
 
-    // Should still redirect (delete returns success even if no rows affected)
+    // Deleting nothing still redirects.
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
     let found = workout_repo.find_session_by_id(&workout.id).await.unwrap();
@@ -342,7 +341,7 @@ async fn test_cannot_view_others_workout() {
         .await
         .unwrap();
 
-    // Should return 404 (not found - for security we don't reveal existence)
+    // 404, not 403: existence is not revealed.
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
@@ -396,7 +395,7 @@ async fn test_workout_page_badges_a_one_month_pr_below_the_all_time_best() {
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
 
-    // The all-time best, logged well outside the 1-month window.
+    // All-time best, outside the 1-month window.
     let old_workout = common::create_test_workout(
         &pool,
         &user.id,
@@ -415,7 +414,7 @@ async fn test_workout_page_badges_a_one_month_pr_below_the_all_time_best() {
         .unwrap();
     }
 
-    // Today's session: lighter than the all-time PR, but the best this month.
+    // Lighter than the all-time PR, but the best this month.
     let workout = common::create_test_workout(
         &pool,
         &user.id,
@@ -620,9 +619,8 @@ async fn test_add_log_success() {
 
 #[tokio::test]
 async fn test_add_log_rejects_exercise_owned_by_another_user() {
-    // Owning the workout session does not entitle the caller to reference an
-    // exercise belonging to somebody else: `exercise_id` comes straight from the
-    // form body, so it has to be authorized independently of the session.
+    // `exercise_id` comes from the form, so it is authorized separately from
+    // the workout.
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
@@ -661,7 +659,7 @@ async fn test_add_log_rejects_exercise_owned_by_another_user() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // The write must not have happened at all, not merely been reported as denied.
+    // Not merely reported as denied: nothing was written.
     let workout_repo = WorkoutRepository::new(pool);
     let logs = workout_repo
         .find_logs_by_session_with_pr(&workout.id, &attacker.id, recent_pr_window_start())
@@ -1022,7 +1020,7 @@ async fn test_workouts_list_pagination_page_2() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    // Create 15 workouts (more than one page of 10)
+    // 15 workouts: more than one page of 10.
     #[allow(
         clippy::cast_sign_loss,
         reason = "loop counter 1..=15 is always positive"
@@ -1054,13 +1052,13 @@ async fn test_workouts_list_pagination_page_2() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Page 2 should have the older workouts (workouts 1-5 since ordered by date DESC)
-    // First page has workouts 15-6
-    assert!(body_str.contains("2024-01-01") || body_str.contains("2024-01-05"));
+    // Newest first, so page 2 holds Jan 1-5.
+    assert!(body_str.contains("2024-01-01"));
+    assert!(body_str.contains("2024-01-05"));
+    assert!(!body_str.contains("2024-01-06"));
 }
 
-/// Deleting a workout cascades to its sets, so the confirmation page has to
-/// say so — and, being a GET, must not delete anything itself.
+/// The confirmation page mentions the cascading sets, and the GET is inert.
 #[tokio::test]
 async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting() {
     let pool = common::setup_test_db();
@@ -1119,9 +1117,7 @@ async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting(
     );
 }
 
-/// Clone existed only as a JS call, so with scripts off it did nothing.
-/// `?prefill=<log id>` is its server-side half: the Add Set form comes back
-/// with the set's exercise selected and its numbers filled in.
+/// `?prefill=<log id>` is Clone's no-JS path: the Add Set form comes back filled.
 #[tokio::test]
 async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
     let pool = common::setup_test_db();
@@ -1162,10 +1158,6 @@ async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
         body_str.contains(&format!(r#"<option value="{}" selected>"#, exercise.id)),
         "the logged exercise should be preselected, got:\n{body_str}"
     );
-    // Asserted per input rather than by matching neighbouring attributes:
-    // the point is that the field carries the value, and an assertion that
-    // also pins what sits next to it breaks on any unrelated attribute added
-    // to the tag.
     for (field, value) in [("weight", "82.5"), ("reps", "8"), ("rpe", "7")] {
         let tag = input_tag(&body_str, field);
         assert!(
@@ -1174,8 +1166,7 @@ async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
         );
     }
 
-    // Without the query the form comes back empty, so a plain visit is
-    // unaffected.
+    // Without the query the form is empty.
     let response = test_app
         .router
         .oneshot(
@@ -1190,17 +1181,15 @@ async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
-    // Scoped to the exercise option: the share-expiry <select> legitimately
-    // carries a `selected` default of its own.
+    // Scoped to the exercise option; the share-expiry <select> has its own
+    // `selected`.
     assert!(
         !body_str.contains(&format!(r#"<option value="{}" selected>"#, exercise.id)),
         "a plain visit should preselect no exercise"
     );
 }
 
-/// A `prefill` id is resolved against this session's own logs, so one from
-/// another user's workout must not fill anything in — that would confirm the
-/// id exists and leak its numbers.
+/// A `prefill` id from another user's workout fills nothing, leaking nothing.
 #[tokio::test]
 async fn test_show_workout_ignores_a_prefill_from_another_users_log() {
     let pool = common::setup_test_db();
@@ -1270,9 +1259,7 @@ async fn test_show_workout_ignores_a_prefill_from_another_users_log() {
     );
 }
 
-/// The inline last-weight hint is built by script from the exercise
-/// `<select>`, which nothing can drive with scripts off. The `<noscript>`
-/// list answers the same question without interaction.
+/// The last-weight hint needs JS, so `<noscript>` renders it as a list.
 #[tokio::test]
 async fn test_show_workout_lists_last_weights_for_scriptless_browsers() {
     let pool = common::setup_test_db();
@@ -1335,11 +1322,7 @@ async fn test_show_workout_lists_last_weights_for_scriptless_browsers() {
     );
 }
 
-/// The delete trigger has to carry both halves of the arrangement: an `href`
-/// to the confirmation page (the path a browser with scripts off takes) and
-/// a `data-confirm` for base.html to intercept (the path everyone else
-/// takes). Losing the attribute would silently cost every JS user a page
-/// load; losing the href would silently cost no-JS users the confirmation.
+/// The delete trigger needs both the `href` (no JS) and `data-confirm` (JS).
 #[tokio::test]
 async fn test_workout_delete_trigger_carries_both_confirmation_paths() {
     let pool = common::setup_test_db();
@@ -1388,9 +1371,7 @@ async fn test_workout_delete_trigger_carries_both_confirmation_paths() {
     );
 }
 
-/// The set count is the reason this page exists, so all three phrasings —
-/// none, one, many — are worth pinning. Grammar in generated prose is easy to
-/// get wrong and nothing else would catch "Its 1 recorded sets".
+/// Pins all three set-count phrasings: none, one, many.
 #[tokio::test]
 async fn test_delete_workout_confirmation_page_phrases_the_set_count() {
     let pool = common::setup_test_db();
@@ -1442,8 +1423,7 @@ async fn test_delete_workout_confirmation_page_phrases_the_set_count() {
     }
 }
 
-/// A confirmation page for someone else's workout would leak that it exists,
-/// and offer to delete it. It has to 404 exactly like the POST does.
+/// The confirmation page for someone else's workout 404s like the POST.
 #[tokio::test]
 async fn test_delete_workout_confirmation_page_rejects_another_users_workout() {
     let pool = common::setup_test_db();
@@ -1477,8 +1457,6 @@ async fn test_delete_workout_confirmation_page_rejects_another_users_workout() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// The set-delete page names the set it is about to remove, which means
-/// resolving the log through the session that owns it.
 #[tokio::test]
 async fn test_delete_set_confirmation_page_names_the_set_without_acting() {
     let pool = common::setup_test_db();
@@ -1533,8 +1511,6 @@ async fn test_delete_set_confirmation_page_names_the_set_without_acting() {
     );
 }
 
-/// A log id that belongs to a different session must not render a page
-/// offering to delete it.
 #[tokio::test]
 async fn test_delete_set_confirmation_page_rejects_a_log_from_another_session() {
     let pool = common::setup_test_db();
@@ -1576,10 +1552,8 @@ async fn test_delete_set_confirmation_page_rejects_a_log_from_another_session() 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// The weight field offers the weights this workout already uses plus each
-/// exercise's last, ascending and deduplicated, and the reps field offers the
-/// fixed rep schemes. Both are suggestions: the inputs keep their `step`/`min`
-/// and accept anything they accepted before.
+/// Weight suggestions: this workout's weights plus each exercise's last,
+/// ascending and deduplicated. Reps suggestions: the fixed rep schemes.
 #[tokio::test]
 async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
     let pool = common::setup_test_db();
@@ -1592,7 +1566,7 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
     let bench = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let curl = common::create_test_exercise(&pool, &user.id, "Curl", "arms").await;
 
-    // An older session, so `curl` has history but no set in today's workout.
+    // `curl` has history but no set today.
     let past = common::create_test_workout(
         &pool,
         &user.id,
@@ -1602,7 +1576,6 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
     .await;
     common::create_test_log(&pool, &past.id, &curl.id, 1, 10, 20.0, None).await;
 
-    // Today: two sets at the same weight, and one at a fractional weight.
     let workout = common::create_test_workout(
         &pool,
         &user.id,
@@ -1630,7 +1603,6 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Both fields point at their list.
     assert!(
         body_str.contains(r#"id="weight""#) && body_str.contains(r#"list="weight-list""#),
         "weight field is not wired to its suggestions, body=\n{body_str}"
@@ -1640,10 +1612,7 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
         "reps field is not wired to its suggestions, body=\n{body_str}"
     );
 
-    // Ascending, deduplicated, and spanning both sources: 20 comes from the
-    // older session's curl, 82.5 and 100 from today. The repeated 100 appears
-    // once. Rendered without trailing zeros, which is what the `step="0.25"`
-    // field expects back.
+    // 20 from the older curl, 82.5 and 100 from today; no trailing zeros.
     let list_start = body_str
         .find(r#"<datalist id="weight-list">"#)
         .expect("no weight datalist rendered");
@@ -1661,7 +1630,6 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
         .collect();
     assert_eq!(values, vec!["20", "82.5", "100"], "list was:\n{list}");
 
-    // The rep schemes are the constant, in its own order.
     for reps in liftlog::models::workout_log::REP_SCHEMES {
         assert!(
             body_str.contains(&format!(r#"<option value="{reps}">"#)),
@@ -1670,9 +1638,8 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
     }
 }
 
-/// A first-ever workout has no weights to suggest. The field must then render
-/// no `<datalist>` at all rather than an empty one — a field pointing at a
-/// list with nothing in it shows an empty dropdown on some browsers.
+/// No weights to suggest means no `<datalist>`; an empty one shows an empty
+/// dropdown in some browsers.
 #[tokio::test]
 async fn test_add_set_weight_list_is_absent_when_there_is_no_history() {
     let pool = common::setup_test_db();
@@ -1711,17 +1678,13 @@ async fn test_add_set_weight_list_is_absent_when_there_is_no_history() {
         !body_str.contains(r#"<datalist id="weight-list">"#),
         "an empty weight list was rendered, body=\n{body_str}"
     );
-    // The reps schemes are fixed, so they are there from the very first set.
     assert!(
         body_str.contains(r#"<datalist id="reps-list">"#),
         "the reps list must not depend on history, body=\n{body_str}"
     );
 }
 
-/// Another user's weights must never reach the suggestions. The list is built
-/// from `find_logs_by_session_with_pr` and
-/// `get_last_weight_per_exercise_by_user`, both already scoped to the caller;
-/// this holds that scoping at the rendered page.
+/// Another user's weights never reach the suggestions.
 #[tokio::test]
 async fn test_add_set_suggestions_exclude_another_users_weights() {
     let pool = common::setup_test_db();

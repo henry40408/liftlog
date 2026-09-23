@@ -12,10 +12,8 @@ pub use from_row::FromSqliteRow;
 pub use personal_record::{
     DynamicPR, LastExerciseWeight, PersonalRecordSummary, recent_pr_window_start,
 };
-// The length bounds themselves are deliberately not re-exported here: every
-// in-crate caller goes through `password_length_error` instead, so a second
-// place enforcing its own idea of "too short" cannot quietly appear. Tests
-// that need the numbers reach for `models::user::{MIN,MAX}_PASSWORD_LEN`.
+// Length bounds aren't re-exported: callers go through
+// `password_policy_error`, so there's one enforcement point.
 pub use user::{CreateUser, LoginCredentials, User, UserListItem, UserRole, password_policy_error};
 pub use workout_log::{CreateWorkoutLog, UpdateWorkoutLog, WorkoutLog, WorkoutLogWithExercise};
 pub use workout_session::{CreateWorkoutSession, WorkoutSession};

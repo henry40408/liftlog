@@ -35,8 +35,7 @@ struct NewWorkoutTemplate {
     error: Option<String>,
 }
 
-/// Values the Add Set form starts with when `?prefill=<log_id>` names a set
-/// in this workout — the scripts-off half of the Clone button.
+/// Add Set form values from `?prefill=<log_id>` (no-JS Clone).
 pub(crate) struct PrefillSet {
     pub(crate) exercise_id: String,
     pub(crate) weight: f64,
@@ -44,9 +43,7 @@ pub(crate) struct PrefillSet {
     pub(crate) rpe: Option<i32>,
 }
 
-/// One row of the scripts-off "last weights" list. With scripts on, the same
-/// figures appear inline as the exercise `<select>` changes; nothing can
-/// react to that select without them, so the whole set is listed instead.
+/// One row of the `<noscript>` last-weights list.
 pub(crate) struct LastWeightRow {
     pub(crate) exercise_name: String,
     pub(crate) weight: f64,
@@ -69,11 +66,8 @@ struct ShowWorkoutTemplate {
     exercises: Vec<Exercise>,
     categories: &'static [ExerciseCategory],
     exercise_last_weights: Vec<LastExerciseWeight>,
-    /// Same figures as `exercise_last_weights`, joined to exercise names and
-    /// sorted, for the `<noscript>` list.
     last_weight_rows: Vec<LastWeightRow>,
-    /// Distinct weights to suggest under the weight field, ascending. See
-    /// `weight_suggestions`.
+    /// Datalist values; see `weight_suggestions`.
     weight_suggestions: Vec<f64>,
     rep_suggestions: &'static [i32],
     prefill: Option<PrefillSet>,
@@ -168,21 +162,9 @@ pub async fn create(
     Ok(Redirect::to(&format!("/workouts/{}", workout.id)).into_response())
 }
 
-/// The distinct weights to offer under the Add Set weight field, ascending.
-///
-/// Two sources, because they answer two different questions. The sets already
-/// in this workout are what the next set most often repeats — you rarely
-/// change the bar between sets. The last weight logged against each exercise
-/// covers the other case: the first set of a lift you have not touched today,
-/// where the number you want is the one from last time.
-///
-/// Distinct from the "Last: 100 kg [Fill]" hint beside the exercise select,
-/// which names one weight for one exercise and needs scripts to react to the
-/// select at all. This list is the whole working vocabulary, rendered by the
-/// server, so it is there with scripts off too.
-///
-/// A suggestion and nothing more: the field's `step`/`min` are unchanged and
-/// any weight the form accepted before it is still accepted.
+/// Datalist weights for the Add Set field, ascending: this workout's sets (the
+/// next set usually repeats one) plus each exercise's last weight (the first
+/// set of a lift). A suggestion only; field validation is unchanged.
 fn weight_suggestions(logs: &[WorkoutLogWithExercise], last: &[LastExerciseWeight]) -> Vec<f64> {
     let mut weights: Vec<f64> = logs
         .iter()
@@ -190,10 +172,7 @@ fn weight_suggestions(logs: &[WorkoutLogWithExercise], last: &[LastExerciseWeigh
         .chain(last.iter().map(|w| w.weight))
         .filter(|w| w.is_finite() && *w > 0.0)
         .collect();
-    // Ascending and deduplicated, because a browser renders a datalist in
-    // document order: an unsorted list reads as arbitrary rather than as a
-    // scale. `total_cmp` rather than `partial_cmp().unwrap()` so a stray NaN
-    // could never panic here, though the filter above already excludes one.
+    // Sorted because datalists render in document order.
     weights.sort_by(f64::total_cmp);
     weights.dedup_by(|a, b| a.to_bits() == b.to_bits());
     weights
@@ -223,9 +202,7 @@ pub async fn show(
         .get_last_weight_per_exercise_by_user(&auth_user.id)
         .await?;
 
-    // Resolved against this session's own logs, which are already scoped to
-    // the caller — so a `prefill` id from someone else's workout simply
-    // fails to match rather than disclosing anything.
+    // Matched against this session's own logs, so a foreign id just misses.
     let prefill = query.prefill.as_ref().and_then(|log_id| {
         logs.iter().find(|l| &l.id == log_id).map(|l| PrefillSet {
             exercise_id: l.exercise_id.clone(),
@@ -249,8 +226,7 @@ pub async fn show(
                 })
         })
         .collect();
-    // `exercises` is ordered by category then name; a flat alphabetical list
-    // is easier to scan when the point is looking one exercise up.
+    // Flat alphabetical; `exercises` comes ordered by category.
     last_weight_rows.sort_by(|a, b| a.exercise_name.cmp(&b.exercise_name));
 
     let weight_suggestions = weight_suggestions(&logs, &exercise_last_weights);
@@ -319,9 +295,7 @@ pub async fn update(
     Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
 }
 
-/// Interstitial for `delete`. Counts the sets first: deleting a session
-/// cascades to its `workout_logs` rows (migrations/004), and that is the part
-/// worth spelling out before the click.
+/// Interstitial for `delete`; shows the set count the cascade will remove.
 pub async fn confirm_delete(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -377,9 +351,7 @@ pub async fn add_log(
         .find_owned_session(&session_id, &auth_user.id)
         .await?;
 
-    // `exercise_id` arrives from the form body, so owning the session is not
-    // enough — without this a caller could attach a log to another user's
-    // exercise, which the UI's own <select> would never offer.
+    // `exercise_id` comes from the form, so check it is the caller's too.
     state
         .exercise_repo
         .find_owned(&form.exercise_id, &auth_user.id)
@@ -405,10 +377,8 @@ pub async fn add_log(
     Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
 }
 
-/// Interstitial for `delete_log`. Names the set being removed by pulling it
-/// out of the session's own logs, which also proves it belongs to that
-/// session — a log id from someone else's workout is a 404 here, exactly as
-/// it is in `delete_log`.
+/// Interstitial for `delete_log`. Finding the log among the session's own
+/// proves ownership; a foreign id is a 404, as in `delete_log`.
 pub async fn confirm_delete_log(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -513,13 +483,8 @@ pub async fn update_log(
     Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
 }
 
-/// Deserialize an optional TTL (in days) from a form field. An absent field
-/// or an empty/whitespace-only string — what the "Never expires" `<select>`
-/// option submits — means `None`; anything else must parse as an integer.
-/// `Option<String>::deserialize` (rather than requiring a `String`) is what
-/// makes the absent-field case work at all: axum's form deserializer never
-/// invokes this function for a missing key unless the target type itself
-/// tolerates absence.
+/// Optional TTL in days. Absent or blank ("Never expires") is `None`.
+/// `Option<String>` is needed for axum to accept a missing key.
 fn empty_string_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<i64>, D::Error>
 where
     D: Deserializer<'de>,
@@ -534,9 +499,7 @@ where
 
 #[derive(Deserialize)]
 pub struct ShareForm {
-    /// Days the share link stays valid. `None` — the field absent, or an
-    /// empty string from the "never expires" <select> option — means never
-    /// expires, preserving pre-012 behaviour.
+    /// Days the share link stays valid; `None` never expires.
     #[serde(default, deserialize_with = "empty_string_as_none")]
     pub expires_in_days: Option<i64>,
 }
@@ -572,9 +535,8 @@ pub async fn share_workout(
     Ok(Redirect::to(&format!("/workouts/{id}")).into_response())
 }
 
-/// Interstitial for `revoke_share`. Revoking drops the token, so the link
-/// already handed out stops working for everyone at once and a fresh share
-/// produces a different URL — not obvious from a button labelled "Revoke".
+/// Interstitial for `revoke_share`: revoking kills the handed-out link, and a
+/// re-share gets a new URL.
 pub async fn confirm_revoke_share(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -650,11 +612,7 @@ mod tests {
         LastExerciseWeight, REP_SCHEMES, ShareForm, WorkoutLogWithExercise, weight_suggestions,
     };
 
-    // `Option<String>::deserialize` behaves identically regardless of the
-    // wire format feeding it a field value, so exercising it through
-    // `serde_json` (already a direct dependency) covers the same code path
-    // `axum::Form`'s urlencoded deserializer would, without adding a new
-    // dependency just for these tests.
+    // Exercised via `serde_json`; the deserializer is format-agnostic.
     fn parse(json: &str) -> std::result::Result<ShareForm, serde_json::Error> {
         serde_json::from_str(json)
     }
@@ -723,24 +681,19 @@ mod tests {
 
     #[test]
     fn weight_suggestions_from_history_alone_still_appear() {
-        // The first set of a lift not yet touched today is exactly the case
-        // the per-exercise history covers, so it must survive an empty
-        // workout.
+        // Per-exercise history must survive an empty workout.
         assert_eq!(weight_suggestions(&[], &[last(42.5)]), vec![42.5]);
     }
 
     #[test]
     fn weight_suggestions_are_empty_for_a_first_ever_workout() {
-        // Nothing logged anywhere: the template must then render no
-        // `<datalist>` at all rather than an empty one, which would leave the
-        // field pointing at a list with nothing in it.
+        // Nothing logged: no suggestions, so no empty `<datalist>`.
         assert!(weight_suggestions(&[], &[]).is_empty());
     }
 
     #[test]
     fn weight_suggestions_drop_non_positive_and_non_finite_weights() {
-        // A bodyweight set stored as 0 is not a weight anyone would pick from
-        // a dropdown, and `min="0"` means the field would accept it back.
+        // 0 is how bodyweight sets are stored; not a pickable weight.
         let got = weight_suggestions(
             &[logged(0.0), logged(f64::NAN), logged(-5.0), logged(20.0)],
             &[],
@@ -750,8 +703,7 @@ mod tests {
 
     #[test]
     fn rep_schemes_are_ascending_distinct_and_valid_for_the_field() {
-        // `min="1"` on the reps input, and a browser renders a datalist in
-        // document order — an unsorted list reads as arbitrary, not a scale.
+        // `min="1"` on the field; ascending for datalist order.
         let mut sorted = REP_SCHEMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

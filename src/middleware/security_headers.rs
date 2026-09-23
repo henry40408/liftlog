@@ -1,30 +1,10 @@
-//! `Strict-Transport-Security` (HSTS), per the [OWASP HTTP Strict Transport
-//! Security Cheat
-//! Sheet](https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html).
+//! Security response headers: opt-in HSTS and an unconditional baseline.
 //!
-//! Defaults off. liftlog never terminates TLS — it just binds a TCP listener
-//! (see `src/main.rs`) and expects a reverse proxy in front of it — so it has
-//! no way to know whether a given request really arrived over HTTPS; it can
-//! only trust the operator's configuration. HSTS is a promise a browser
-//! caches and enforces for `max-age` seconds, and that promise cannot be
-//! withdrawn from the server side once a browser has it: there is no
-//! "un-send", only waiting out the `max-age`. That makes a wrong HSTS
-//! deployment a uniquely bad failure mode for a self-hosted app, so the
-//! header is opt-in, and the README steers operators toward setting it on
-//! their TLS-terminating reverse proxy instead, where it belongs.
-//!
-//! There is deliberately no `preload` knob here. `preload` requires
-//! `includeSubDomains` plus `max-age >= 31536000` and submission to a
-//! browser-vendor list, and is effectively irreversible once accepted —
-//! nowhere near something that should be reachable from an env var. Anyone
-//! who wants it can configure it on their reverse proxy.
-//!
-//! Per RFC 6797 §7.2, a user agent MUST ignore any `Strict-Transport-Security`
-//! header received over a non-secure transport (plain HTTP). So enabling
-//! `LIFTLOG_HSTS_MAX_AGE` on a deployment that is not actually served over HTTPS is
-//! merely ineffective, not harmful in itself — but operators must not read
-//! "I set `LIFTLOG_HSTS_MAX_AGE`" as "my site is secure": the header only does
-//! anything once HTTPS is genuinely in place end to end.
+//! HSTS defaults off: liftlog never terminates TLS, so it cannot know a request
+//! arrived over HTTPS, and a cached HSTS promise cannot be withdrawn before
+//! `max-age` expires. Operators should prefer setting it on their proxy. No
+//! `preload` knob: it is effectively irreversible. Browsers ignore the header
+//! over plain HTTP (RFC 6797 §7.2), so enabling it there is merely ineffective.
 
 use axum::extract::State;
 use axum::http::HeaderValue;
@@ -36,9 +16,7 @@ use axum::response::Response;
 pub struct HstsHeader(Option<HeaderValue>);
 
 impl HstsHeader {
-    /// `max_age == 0` disables the header entirely. The value is rendered
-    /// once here rather than per request, since it never changes for the
-    /// lifetime of the process.
+    /// `max_age == 0` disables the header.
     #[must_use]
     pub fn new(max_age: u64, include_subdomains: bool) -> Self {
         if max_age == 0 {
@@ -55,12 +33,8 @@ impl HstsHeader {
     }
 }
 
-/// Appends `Strict-Transport-Security` to every response when enabled.
-///
-/// Registered as the outermost layer in `create_router` so it also reaches
-/// responses that short-circuit inside inner layers — e.g. the CSRF guard's
-/// `403` and the sliding-session middleware's `AuthRedirect` `302` — not just
-/// ones that make it all the way to a handler.
+/// Adds `Strict-Transport-Security` when enabled. Outermost layer, so it also
+/// covers short-circuited responses (CSRF 403, auth 302).
 pub async fn hsts_middleware(
     State(hsts): State<HstsHeader>,
     req: axum::extract::Request,
@@ -68,8 +42,6 @@ pub async fn hsts_middleware(
 ) -> Response {
     let mut response = next.run(req).await;
     if let Some(value) = &hsts.0 {
-        // `insert`, not `append`: liftlog must contribute at most one
-        // Strict-Transport-Security header.
         response
             .headers_mut()
             .insert(axum::http::header::STRICT_TRANSPORT_SECURITY, value.clone());
@@ -77,30 +49,15 @@ pub async fn hsts_middleware(
     response
 }
 
-/// Adds the baseline security headers to every response.
+/// Baseline headers on every response.
 ///
-/// Unconditional, unlike HSTS above: none of these can be wrong for a
-/// deployment the way a premature HSTS declaration can, and none of them
-/// depend on the transport.
-///
-/// - `Content-Security-Policy: frame-ancestors 'none'` and the legacy
-///   `X-Frame-Options: DENY` are the reason this middleware exists. Without
-///   them any site can iframe liftlog and clickjack its buttons. `SameSite=Lax`
-///   does not help — a top-level iframe navigation still carries the cookie —
-///   and neither does the CSRF guard, because the click comes from the
-///   victim's own browser and reports `Sec-Fetch-Site: same-origin`. Workout
-///   delete, user delete, revoke-share and logout-others are all one-click
-///   POST forms, so this is a live path, not a theoretical one.
-/// - The CSP deliberately carries *only* `frame-ancestors`. A `default-src`
-///   would have to enumerate `fonts.bunny.net` (see `templates/base.html`) and
-///   would be worth doing properly with nonces rather than bolted on here; CSP
-///   directives are independent, so a policy with one directive restricts
-///   exactly that one thing.
-/// - `X-Content-Type-Options: nosniff` stops a browser second-guessing the
-///   `Content-Type` liftlog sends.
-/// - `Referrer-Policy` is set to the value modern browsers already default to,
-///   so the `/shared/{token}` page's outbound link cannot leak the share token
-///   in a `Referer` on a browser whose default is older and laxer.
+/// - `frame-ancestors 'none'` / `X-Frame-Options: DENY` block clickjacking,
+///   which neither `SameSite=Lax` nor the CSRF guard stops: a click inside a
+///   framed page is same-origin, and the confirm pages are one click away.
+/// - The CSP carries only `frame-ancestors`; a `default-src` would need nonces
+///   and `fonts.bunny.net`, and is not attempted here.
+/// - `Referrer-Policy` pins the modern default so `/shared/{token}` cannot leak
+///   its token via `Referer` on older browsers.
 pub async fn baseline_headers_middleware(req: axum::extract::Request, next: Next) -> Response {
     const BASELINE: [(axum::http::HeaderName, HeaderValue); 4] = [
         (
@@ -124,8 +81,6 @@ pub async fn baseline_headers_middleware(req: axum::extract::Request, next: Next
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     for (name, value) in BASELINE {
-        // `insert`, not `append`: exactly one of each, and no handler sets
-        // these itself.
         headers.insert(name, value);
     }
     response

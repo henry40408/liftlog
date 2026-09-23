@@ -434,7 +434,6 @@ async fn test_create_exercise_empty_name_rejected() {
         .await
         .unwrap();
 
-    // Should return 200 with error message (re-renders form)
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -468,7 +467,6 @@ async fn test_update_exercise_empty_name_rejected() {
         .await
         .unwrap();
 
-    // Should return 200 with error message (re-renders form)
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -485,9 +483,7 @@ async fn test_update_exercise_empty_name_rejected() {
     assert_eq!(found.name, "Bench Press");
 }
 
-// workout_logs.exercise_id REFERENCES exercises(id) ON DELETE RESTRICT is
-// enforced now that PRAGMA foreign_keys=ON (src/db.rs). These pin the
-// resulting behaviour change: a 400 for the user, not a 500.
+// `ON DELETE RESTRICT` on a used exercise surfaces as a 400, not a 500.
 
 #[tokio::test]
 async fn test_delete_exercise_referenced_by_log_returns_bad_request() {
@@ -564,8 +560,7 @@ async fn test_delete_unreferenced_exercise_still_succeeds() {
     assert!(found.is_none());
 }
 
-/// The exercise list reaches deletion through a confirmation page now; the
-/// old `confirm()` guard did nothing with JavaScript off.
+/// Deletion goes through a confirmation page, so it works without JS.
 #[tokio::test]
 async fn test_delete_exercise_confirmation_page_names_it_without_acting() {
     let pool = common::setup_test_db();
@@ -612,9 +607,7 @@ async fn test_delete_exercise_confirmation_page_names_it_without_acting() {
     );
 }
 
-/// A confirmation page for someone else's exercise would offer to delete it.
-/// It reuses `find_owned`, so it refuses on exactly the same terms as the
-/// POST does — `404`, as if the exercise did not exist.
+/// Someone else's exercise: the confirmation page is `404`, like the POST.
 #[tokio::test]
 async fn test_delete_exercise_confirmation_page_rejects_another_users_exercise() {
     let pool = common::setup_test_db();

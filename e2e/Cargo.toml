@@ -5,36 +5,24 @@ edition = "2024"
 publish = false
 description = "Browser E2E tests for LiftLog"
 
-# Deliberately its own workspace, not a member of the one at the repository
-# root. CI runs coverage as `cargo llvm-cov nextest`, and every `--workspace`
-# build would otherwise compile thirtyfour and drive a real browser. `tests/e2e/`
-# was already a self-contained sub-project when it was JavaScript; this keeps
-# that boundary.
+# Its own workspace, so root builds (coverage included) never compile the
+# browser stack.
 [workspace]
 
 [dependencies]
 anyhow = "1.0.102"
 cucumber = "0.23.0"
-# Only ever talks to 127.0.0.1 over plain HTTP, so no TLS is asked for here —
-# thirtyfour pulls its own in for the driver connection. `cookies` is what makes
-# the seeding client hold an admin session across the setup → login →
-# create-user sequence, and `form` is how it posts the same
-# `application/x-www-form-urlencoded` bodies the browser does.
+# Plain HTTP to 127.0.0.1 only, so no TLS.
 reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "form"] }
 serde_json = "1.0.145"
-# Pinned exactly: 0.37.5 was published 2026-08-12, inside the seven-day
-# cooldown this project applies to fresh releases. Relax to a caret once it has
-# aged out.
-thirtyfour = "=0.37.5"
+thirtyfour = "0.37.5"
 tokio = { version = "1.53.1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
 
 [[test]]
 name = "e2e"
 harness = false
 
-# Mirrors the root crate's lint set, minus the entries that only apply to the
-# server. Being a separate workspace means none of it is inherited, and test
-# code that lints differently from the code it tests drifts.
+# Copied from the root lint set; nothing is inherited across workspaces.
 [lints.rust]
 unexpected_cfgs = "deny"
 unsafe_code = "deny"
@@ -46,12 +34,7 @@ pedantic = { level = "warn", priority = -1 }
 cast_lossless = "allow"
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
-# The one deliberate departure from the root set. This crate's documentation is
-# mostly prose about the port — what Playwright did, what WebDriver does
-# instead, which XPath replaced which locator — and `doc_markdown` reads every
-# one of those names as an identifier that should be in backticks. Quoting them
-# would make prose look like code; the root crate has no such vocabulary and so
-# keeps the lint on.
+# Deliberate departure: prose names like WebDriver/XPath would need backticks.
 doc_markdown = "allow"
 duration_suboptimal_units = "allow"
 items_after_statements = "allow"

@@ -13,53 +13,21 @@ pub struct AppState {
     pub exercise_repo: ExerciseRepository,
     pub workout_repo: WorkoutRepository,
     pub session_repo: SessionRepository,
-    /// Throttles `POST /auth/login`, keyed by client IP — the request is
-    /// anonymous, so the source address is the only identity available.
+    /// `POST /auth/login`, keyed by client IP.
     pub login_rate_limiter: Arc<RateLimiter<IpAddr>>,
-    /// Escalating delay applied to repeated failed logins against the *same
-    /// account*, keyed by the submitted username. The per-IP limiter above
-    /// bounds how fast one source can guess; this bounds how fast one account
-    /// can be guessed at regardless of how many sources are used, which is the
-    /// shape of a password spray. See `FailureBackoff` for why this is a delay
-    /// rather than the lockout OWASP names first.
-    ///
-    /// Configured in `main` with three free failures, so ordinary mistyping
-    /// costs nothing, then 1s, 2s, 4s … capped at 30s and forgotten after an
-    /// hour of quiet. The cap is what a sustained attack settles at: roughly
-    /// two guesses a minute against any one account, no matter how many
-    /// source addresses are thrown at it.
+    /// Per-account delay keyed by submitted username; see
+    /// `FailureBackoff::for_login`.
     pub login_backoff: Arc<FailureBackoff<String>>,
-    /// Throttles the authenticated routes that verify a password before
-    /// acting — the password change, and the admin promote/delete
-    /// confirmations. Keyed by user id: those requests are authenticated, so
-    /// the account under attack is known exactly, and an IP key would let one
-    /// stolen session buy a fresh budget from every source address.
-    ///
-    /// One shared budget across all of them on purpose. They are the same
-    /// question from an attacker's point of view — "what is this account's
-    /// password?" — so letting a guesser move to another route for a fresh
-    /// allowance would make the limit decorative.
-    ///
-    /// Configured in `main` with a far longer window than login's 60 seconds,
-    /// because the two defend against different things. Login has to stay
-    /// usable for a person who mistypes and retries immediately; changing a
-    /// password is a rare, deliberate act, so five attempts per 15 minutes is
-    /// generous for the legitimate case while leaving an attacker with a
-    /// stolen session only ~480 guesses a day against the current password.
+    /// Password re-checks (password change, admin promote/delete), keyed by
+    /// user id so a stolen session can't rotate IPs. One budget shared across
+    /// routes; 5 per 15 min in `main` (~480/day).
     pub sensitive_action_rate_limiter: Arc<RateLimiter<String>>,
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Arc<Vec<IpAddr>>,
     pub cookie_secure: bool,
-    /// Seconds for the `Strict-Transport-Security` header's `max-age`; `0`
-    /// disables the header. See `middleware::security_headers` for why this
-    /// defaults off.
+    /// HSTS `max-age`; `0` disables the header.
     pub hsts_max_age: u64,
-    /// Whether the `Strict-Transport-Security` header, when enabled, also
-    /// carries `includeSubDomains`.
     pub hsts_include_subdomains: bool,
-    /// Per-process random salt for `session_fp` in the audit log. Regenerated
-    /// on every restart: events correlate within one process lifetime, not
-    /// across restarts. OWASP only requires that the raw token never be
-    /// logged, which a per-process salt satisfies with zero configuration.
+    /// Per-process salt for audit `session_fp`; not persisted.
     pub log_salt: Arc<[u8; 32]>,
 }

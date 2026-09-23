@@ -11,9 +11,7 @@ use crate::models::UserRole;
 use crate::repositories::{SessionRepository, ValidateOutcome};
 use crate::session::{create_session_cookie, get_session_token};
 
-/// State bound to the sliding-session middleware layer. Carries the session
-/// repository plus the `Secure` flag so cookies re-issued mid-request
-/// (on touch) match what `login_submit` / `setup_submit` set at login.
+/// `cookie_secure` keeps re-issued cookies identical to the login-time ones.
 #[derive(Clone)]
 pub struct SessionLayerState {
     pub session_repo: SessionRepository,
@@ -63,9 +61,8 @@ where
     }
 }
 
-/// Produced by `sliding_session_middleware` for every request that arrives
-/// with a valid session cookie. Carries the full user identity so the
-/// `AuthUser` extractor doesn't need a second `users` lookup per request.
+/// Inserted by `sliding_session_middleware` for a valid session; carries the
+/// identity so extractors need no `users` lookup.
 #[derive(Clone, Debug)]
 pub struct ValidatedSession {
     pub user_id: String,
@@ -74,10 +71,8 @@ pub struct ValidatedSession {
     pub session_token: String,
 }
 
-/// Axum middleware that validates the session cookie, slides its expiry
-/// when the touch throttle has elapsed, and (on touch) re-issues the
-/// cookie with a fresh `Max-Age`. Applied globally; requests without a
-/// cookie pass through untouched.
+/// Validates the session cookie, slides its expiry when the touch throttle
+/// has elapsed, and then re-issues the cookie. Cookie-less requests pass through.
 pub async fn sliding_session_middleware(
     State(layer): State<SessionLayerState>,
     jar: CookieJar,
@@ -86,16 +81,10 @@ pub async fn sliding_session_middleware(
 ) -> axum::response::Response {
     let token = get_session_token(&jar, layer.cookie_secure);
     let mut should_refresh_cookie: Option<String> = None;
-    // Captured before `next.run` moves `request` — this is the only place
-    // that knows whether the request carried a valid session, since it's
-    // also the branch that inserts `ValidatedSession`. Drives the
-    // Cache-Control/Pragma injection below.
+    // Drives the Cache-Control injection below.
     let mut authenticated = false;
 
     if let Some(tok) = token.as_deref() {
-        // Only built when there's actually a token to validate — the audit
-        // events are the only consumer, so anonymous requests shouldn't pay
-        // for it.
         let ctx = AuditContext::from_request_pieces(
             request.extensions(),
             request.headers(),
@@ -133,18 +122,14 @@ pub async fn sliding_session_middleware(
             }
         }
 
-        // Handlers that emit their own audit events (logout, password change,
-        // "log out other devices", admin user delete) take an `AuditContext`
-        // extractor. Hand them the one already built here so a request has a
-        // single audit context rather than one per consumer.
+        // Reused by handlers' `AuditContext` extractor.
         request.extensions_mut().insert(ctx);
     }
 
     let mut response = next.run(request).await;
 
     if let Some(tok) = should_refresh_cookie {
-        // Skip the refresh if the handler explicitly opted out (e.g. logout,
-        // which emits a removal cookie that must not be overwritten).
+        // Logout's removal cookie must not be overwritten.
         let suppressed = response
             .extensions()
             .get::<SuppressSessionRefresh>()
@@ -161,17 +146,8 @@ pub async fn sliding_session_middleware(
         }
     }
 
-    // OWASP Session Management Cheat Sheet (Web Content Caching): prevent
-    // browsers/intermediate caches from persisting authenticated responses,
-    // so the back button (or a shared-device disk cache) can't resurrect
-    // private content after logout. Scoped to `authenticated` because this
-    // middleware also handles anonymous routes like /favicon.svg, which
-    // `favicon.rs` deliberately marks `public, max-age=86400` — the
-    // `contains_key` guard below is what keeps that intact even when the
-    // request is authenticated (a logged-in user's browser still fetches
-    // /favicon.svg through this same middleware), since an unconditional
-    // insert would silently overwrite the favicon handler's header and
-    // nothing in the anonymous favicon tests would catch it.
+    // Keep authenticated pages out of caches (OWASP session cheat sheet), but
+    // never override a handler's own Cache-Control (e.g. the public favicon).
     if authenticated {
         let headers = response.headers_mut();
         if !headers.contains_key(axum::http::header::CACHE_CONTROL) {
@@ -189,9 +165,7 @@ pub async fn sliding_session_middleware(
     response
 }
 
-/// Response-extension marker that handlers (e.g. `logout`) insert to tell
-/// `sliding_session_middleware` not to append a refreshed session cookie
-/// to this response.
+/// Response extension: don't append a refreshed session cookie.
 #[derive(Clone, Copy, Debug)]
 pub struct SuppressSessionRefresh;
 

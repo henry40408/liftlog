@@ -4,17 +4,13 @@ use serde::Serialize;
 
 use super::FromSqliteRow;
 
-/// Width of the "PR (1M)" window. A rolling 30 days, not a calendar month, so
-/// the number never resets just because a new month started.
+/// "PR (1M)" window: rolling 30 days, so it never resets on the 1st.
 pub const RECENT_PR_WINDOW_DAYS: i64 = 30;
 
-/// Start of the rolling window every "PR (1M)" surface is measured against —
-/// the PR tables, and the per-set badges on a workout.
 pub fn recent_pr_window_start() -> DateTime<Utc> {
     Utc::now() - Duration::days(RECENT_PR_WINDOW_DAYS)
 }
 
-/// Dynamically computed Personal Record
 #[derive(Debug, Clone, Serialize)]
 pub struct DynamicPR {
     pub exercise_id: String,
@@ -34,11 +30,8 @@ impl FromSqliteRow for DynamicPR {
     }
 }
 
-/// A single exercise's personal record over two windows: all-time, and a
-/// rolling recent window (see `WorkoutRepository::get_pr_summaries_by_user`).
-///
-/// The recent fields are `None` when the exercise has no logs inside the
-/// window — an exercise last trained a year ago still has an all-time PR.
+/// All-time and recent-window PR; recent fields are `None` when the exercise
+/// has no logs in the window.
 #[derive(Debug, Clone, Serialize)]
 pub struct PersonalRecordSummary {
     pub exercise_id: String,
@@ -50,9 +43,7 @@ pub struct PersonalRecordSummary {
 }
 
 impl PersonalRecordSummary {
-    /// True when the recent-window best *is* the all-time best — the all-time
-    /// PR was set inside the window. Templates use it to keep the highlight on
-    /// the recent column in that case.
+    /// The all-time PR was set inside the recent window.
     pub fn recent_is_all_time(&self) -> bool {
         self.recent_value.is_some_and(|v| v >= self.all_time_value)
     }

@@ -1,27 +1,19 @@
 # syntax=docker/dockerfile:1
 
-# ---- build: cross-compile a static musl binary with cargo-zigbuild ----------
-# The builder is pinned to the native build platform; zig cross-compiles to the
-# target arch's musl triple, so no qemu emulation is needed — an arm64 image
-# builds at the host's native speed. The only C dependencies are the bundled
-# SQLite and mimalloc, both compiled by zig cc; the favicon renderer (resvg) is
-# pure Rust, so no CMake or system libraries are required.
-# No Rust version here: rust-toolchain.toml is the single source of truth and
-# rustup installs it below. Do not "simplify" this to `rust:1.97` — the
-# un-suffixed tag resolves to trixie, which would be a silent Debian major bump.
+# ---- build: static musl binary, cross-compiled natively by cargo-zigbuild ----
+# No qemu: zig cross-compiles to the target's musl triple. No Rust version:
+# rust-toolchain.toml is the source of truth. Keep the `bookworm` suffix — a
+# bare `rust:<version>` tag resolves to trixie, a silent Debian major bump.
 FROM --platform=$BUILDPLATFORM rust:bookworm AS build
 
-# curl + xz fetch zig; that is the only build-time system dependency.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Zig 0.14.1 avoids the libc++-19 bindgen requirement that 0.15+ introduces.
+# 0.15+ needs libc++-19 for bindgen.
 ARG ZIG_VERSION=0.14.1
-# 0.23.0 is the floor: rustc 1.98 passes `-Wl,--fix-cortex-a53-843419` as a
-# pre-link arg for aarch64-unknown-linux-musl, which zig cc rejects outright.
-# cargo-zigbuild filters that arg out as of rust-cross/cargo-zigbuild#452,
-# first released in 0.23.0 — anything older fails the arm64 build.
+# Floor: older releases pass rustc 1.98's `-Wl,--fix-cortex-a53-843419` to
+# zig cc, which rejects it (rust-cross/cargo-zigbuild#452).
 ARG ZIGBUILD_VERSION=0.23.0
 RUN cargo install cargo-zigbuild --version "${ZIGBUILD_VERSION}" --locked
 RUN set -eux; \
@@ -36,19 +28,14 @@ RUN set -eux; \
 
 WORKDIR /app
 
-# Install the pinned toolchain in a layer keyed on rust-toolchain.toml alone, so
-# editing source does not re-download the compiler. Any rustup proxy invocation
-# triggers the install.
+# Install the pinned toolchain in its own layer so source edits don't
+# re-download it.
 COPY rust-toolchain.toml .
 RUN cargo --version
 
 COPY . .
 
-# Map Docker's TARGETARCH onto the Rust musl triple and build. `rustup target
-# add` runs after the source (and rust-toolchain.toml) is in place, so it
-# resolves against the pinned toolchain rather than the base image's default.
-# .git is excluded by .dockerignore, so build.rs reads the version from the
-# GIT_VERSION build arg the CI workflow passes.
+# .git is excluded by .dockerignore, so build.rs takes GIT_VERSION from CI.
 ARG TARGETARCH
 ARG GIT_VERSION=dev
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -63,10 +50,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     GIT_VERSION="${GIT_VERSION}" cargo zigbuild --release --target "$target"; \
     install -Dm755 "target/${target}/release/liftlog" /out/liftlog
 
-# ---- runtime: minimal static image (CA certs + tzdata, no shell) ------------
-# distroless/static (not :nonroot) keeps the root runtime user the previous
-# distroless/cc image defaulted to, so the bind-mounted /data SQLite file stays
-# writable without a permissions change.
+# ---- runtime: distroless static (CA certs + tzdata, no shell) ---------------
+# Root user (not :nonroot) so existing bind-mounted /data stays writable.
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/liftlog /liftlog
 

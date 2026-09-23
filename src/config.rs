@@ -23,17 +23,13 @@ pub struct Config {
     pub hsts_include_subdomains: bool,
 }
 
-/// Env vars that were renamed under the `LIFTLOG_` prefix, paired with their
-/// current name. Old deployments that upgrade without renaming would otherwise
-/// have their value silently ignored; [`reject_legacy_env_vars`] fails startup
-/// so the misconfiguration is visible.
+/// Renamed env vars `(old, new)`; a leftover old name fails startup rather
+/// than being silently ignored.
 const RENAMED_ENV_VARS: &[(&str, &str)] = &[
     ("BIND", "LIFTLOG_BIND"),
     ("LOG_FORMAT", "LIFTLOG_LOG_FORMAT"),
 ];
 
-/// Refuse to start when any pre-prefix env var name is still present, pointing
-/// the operator at its replacement.
 pub fn reject_legacy_env_vars() -> anyhow::Result<()> {
     let stale: Vec<String> = RENAMED_ENV_VARS
         .iter()
@@ -54,9 +50,9 @@ impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         reject_legacy_env_vars()?;
         Ok(Self {
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite:liftlog.sqlite3?mode=rwc".to_string()),
-            bind: parse_bind(env::var("LIFTLOG_BIND").ok().as_deref())
+            database_url: read_env_var("DATABASE_URL")?
+                .unwrap_or_else(|| "sqlite:liftlog.sqlite3?mode=rwc".to_string()),
+            bind: parse_bind(read_env_var("LIFTLOG_BIND")?.as_deref())
                 .map_err(anyhow::Error::msg)?,
             trusted_proxy_header: parse_trusted_proxy_header(
                 read_env_var("LIFTLOG_TRUSTED_PROXY_HEADER")?.as_deref(),
@@ -84,21 +80,8 @@ impl Config {
     }
 }
 
-/// Reads an environment variable, distinguishing "unset" from "set but not
-/// valid UTF-8" instead of collapsing both into `None` the way
-/// `env::var(name).ok()` does. Collapsing them is dangerous for a strict
-/// boolean flag like `LIFTLOG_COOKIE_SECURE`: `env::var` returns
-/// `Err(VarError::NotUnicode(..))` for a non-UTF-8 value, and `.ok()` maps
-/// that to `None`, which every caller here treats as "unset" and falls back
-/// to its default. For `LIFTLOG_COOKIE_SECURE` the default is `false`, so a
-/// non-UTF-8 value (a stray control character from a misconfigured secrets
-/// manager, say) would silently deploy without the `Secure` cookie
-/// attribute — exactly the misconfiguration `parse_bool_env`'s strictness
-/// exists to catch. This surfaces `NotUnicode` as a hard error instead.
-///
-/// `LIFTLOG_BIND` and `DATABASE_URL` intentionally still use `env::var(..).ok()`
-/// directly and are not routed through this helper: that is pre-existing
-/// behaviour and out of scope for this change.
+/// Like `env::var(..).ok()`, but a non-UTF-8 value is an error instead of
+/// silently reading as unset (and falling back to e.g. `Secure` off).
 fn read_env_var(name: &str) -> anyhow::Result<Option<String>> {
     match env::var(name) {
         Ok(v) => Ok(Some(v)),
@@ -109,11 +92,8 @@ fn read_env_var(name: &str) -> anyhow::Result<Option<String>> {
     }
 }
 
-/// Resolve the `LIFTLOG_BIND` value into a [`SocketAddr`]. An unset or empty value
-/// yields the default `127.0.0.1:8080` (loopback only, so a bare-metal run is
-/// not exposed on all interfaces without opting in); any non-empty value must
-/// be a valid `host:port` socket address. The container image sets
-/// `LIFTLOG_BIND=0.0.0.0:8080` so a reverse proxy in a separate container can reach it.
+/// Unset or empty defaults to loopback `127.0.0.1:8080`; the container image
+/// sets `0.0.0.0:8080`.
 pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
     match raw {
         Some(v) if !v.is_empty() => v
@@ -123,21 +103,8 @@ pub fn parse_bind(raw: Option<&str>) -> Result<SocketAddr, String> {
     }
 }
 
-/// Resolve the `LIFTLOG_TRUSTED_PROXIES` value into a list of bare IPs whose
-/// forwarding header may be trusted for client-IP resolution (see
-/// [`crate::net::client_ip`]). Unset, empty, or whitespace-only input yields
-/// an empty `Vec` (no proxy trusted beyond loopback). Otherwise the value is
-/// a comma-separated list; each segment is trimmed and empty segments are
-/// skipped, so a trailing comma is tolerated. Any non-empty segment that
-/// does not parse as a bare IP is a hard error. No CIDR support: that would
-/// need a new dependency.
-///
-/// Each parsed IP is passed through [`IpAddr::to_canonical`] so
-/// `Config::trusted_proxies` is canonical by construction — e.g.
-/// `::ffff:10.0.0.5` becomes `10.0.0.5`, matching a plain-IPv4 peer address.
-/// Without this, comparing against a peer canonicalized by
-/// [`crate::net::client_ip`] would silently fail for entries written in
-/// IPv4-mapped-IPv6 form.
+/// Comma-separated bare IPs (no CIDR), empty segments skipped. Canonicalized
+/// so `::ffff:10.0.0.5` matches a plain-IPv4 peer in [`crate::net::client_ip`].
 pub fn parse_trusted_proxies(raw: Option<&str>) -> Result<Vec<IpAddr>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -155,20 +122,9 @@ pub fn parse_trusted_proxies(raw: Option<&str>) -> Result<Vec<IpAddr>, String> {
         .collect()
 }
 
-/// Resolve the `LIFTLOG_TRUSTED_PROXY_HEADER` value into a [`TrustedProxyHeader`].
-/// Unset, empty, or whitespace-only input yields [`TrustedProxyHeader::None`]
-/// — liftlog cannot tell whether a forwarding header was written by a
-/// trusted proxy or passed through verbatim from the client, so honouring
-/// one has to be an explicit operator statement that their proxy overwrites
-/// (or strips) that header. Defaulting to trusting `X-Forwarded-For` would
-/// make the login rate limit bypassable on the extremely common minimal
-/// nginx config that only sets `X-Real-IP` and forwards a client-supplied
-/// `X-Forwarded-For` through untouched. With `None`, clients behind a proxy
-/// all share the proxy's single rate-limit bucket — a real limitation, but a
-/// safe one, and still strictly better than no throttle at all.
-///
-/// Accepts `none`, `x-forwarded-for`, `x-real-ip`, case-insensitively and
-/// trimmed. Any other non-empty value is a hard error.
+/// `none` / `x-forwarded-for` / `x-real-ip`, case-insensitive; unset means
+/// `None`. Trusting a header must be opt-in: liftlog can't tell whether the
+/// proxy overwrote it or passed a client's forgery through.
 pub fn parse_trusted_proxy_header(raw: Option<&str>) -> Result<TrustedProxyHeader, String> {
     let Some(raw) = raw else {
         return Ok(TrustedProxyHeader::None);
@@ -187,14 +143,9 @@ pub fn parse_trusted_proxy_header(raw: Option<&str>) -> Result<TrustedProxyHeade
     }
 }
 
-/// Strict boolean env-var parser. Accepts `true` / `false` / `1` / `0`,
-/// case-insensitively, after trimming; unset or empty means unset.
-/// An unrecognised value is a hard error rather than a silent `false`.
-///
-/// Strictness is the point: the default is `false`, so if a typo like
-/// `LIFTLOG_COOKIE_SECURE=yes` were treated as "off", a correctly-configured HTTPS
-/// deployment would silently lose `Secure` — exactly what this setting
-/// exists to prevent.
+/// Accepts `true`/`false`/`1`/`0`, case-insensitive; unset or empty yields
+/// `default`. Anything else errors, so `COOKIE_SECURE=yes` can't silently
+/// mean off.
 pub fn parse_bool_env(name: &str, raw: Option<&str>, default: bool) -> Result<bool, String> {
     let Some(v) = raw else {
         return Ok(default);
@@ -212,19 +163,8 @@ pub fn parse_bool_env(name: &str, raw: Option<&str>, default: bool) -> Result<bo
     }
 }
 
-/// Resolve `LIFTLOG_HSTS_MAX_AGE` (seconds). Unset, empty, or `0` means no
-/// `Strict-Transport-Security` header is sent.
-///
-/// Default-off is deliberate: liftlog never terminates TLS (see the README),
-/// so it cannot tell whether a request actually arrived over HTTPS — it can
-/// only trust that the operator's proxy is doing the right thing. HSTS is a
-/// browser-enforced promise that this domain is HTTPS-only for `max_age`
-/// seconds, and a wrong promise cannot be withdrawn from the server side —
-/// there is no "un-send" a `Strict-Transport-Security` header already cached
-/// by a browser; the only fix is waiting out the `max-age`. The layer that
-/// actually terminates TLS (the reverse proxy) is the layer that can vouch
-/// for HTTPS and the layer operators should prefer for sending this header;
-/// see the README for the fuller rationale.
+/// Seconds; unset, empty or `0` sends no HSTS. Off by default: liftlog never
+/// terminates TLS, and a cached wrong HSTS promise can't be withdrawn.
 pub fn parse_hsts_max_age(raw: Option<&str>) -> Result<u64, String> {
     let Some(raw) = raw else {
         return Ok(0);
@@ -269,8 +209,6 @@ mod tests {
 
     #[test]
     fn parse_bind_rejects_invalid() {
-        // Invalid input fails with a descriptive error; a bare host with no
-        // port is not a SocketAddr.
         let err = parse_bind(Some("not-an-addr")).unwrap_err();
         assert!(err.contains("invalid LIFTLOG_BIND"), "got: {err}");
         assert!(parse_bind(Some("127.0.0.1")).is_err());
@@ -278,9 +216,7 @@ mod tests {
 
     #[test]
     fn from_env_reads_bind() {
-        // nextest runs each test in its own process, so mutating the
-        // environment here does not leak into other tests. `set_var` is
-        // `unsafe` under edition 2024.
+        // nextest isolates each test in its own process, so set_var is safe.
         #[allow(unsafe_code)]
         unsafe {
             std::env::set_var("LIFTLOG_BIND", "127.0.0.1:9137");
@@ -291,8 +227,6 @@ mod tests {
 
     #[test]
     fn from_env_rejects_legacy_bind() {
-        // A pre-prefix name still set means the deployment wasn't migrated;
-        // startup must fail with a message naming both the old and new var.
         #[allow(unsafe_code)]
         unsafe {
             std::env::set_var("BIND", "0.0.0.0:8080");
@@ -323,8 +257,6 @@ mod tests {
 
     #[test]
     fn reject_legacy_env_vars_passes_when_clean() {
-        // A process with no legacy names set (nextest isolates each test) is
-        // accepted.
         reject_legacy_env_vars().expect("no legacy vars should pass");
     }
 
@@ -445,8 +377,6 @@ mod tests {
 
     #[test]
     fn read_env_var_returns_none_when_unset() {
-        // nextest runs each test in its own process, so this name is safe to
-        // assume absent.
         assert!(
             read_env_var("LIFTLOG_TEST_DEFINITELY_UNSET_VAR")
                 .unwrap()
@@ -466,9 +396,7 @@ mod tests {
         );
     }
 
-    // Only unix lets a test construct a non-UTF-8 `OsString` to exercise the
-    // `VarError::NotUnicode` branch; there is no portable, safe way to do
-    // this, so the test is unix-only rather than skipped entirely.
+    // Building a non-UTF-8 `OsString` is only portable on unix.
     #[cfg(unix)]
     #[test]
     fn read_env_var_errors_on_non_utf8() {
@@ -508,8 +436,6 @@ mod tests {
         let err = parse_hsts_max_age(Some("not-a-number")).unwrap_err();
         assert!(err.contains("invalid LIFTLOG_HSTS_MAX_AGE"), "got: {err}");
 
-        // Must not silently wrap to a huge u64 — a negative value is a hard
-        // error, not "unsigned integer parsing accepts it somehow".
         let err = parse_hsts_max_age(Some("-1")).unwrap_err();
         assert!(err.contains("invalid LIFTLOG_HSTS_MAX_AGE"), "got: {err}");
     }

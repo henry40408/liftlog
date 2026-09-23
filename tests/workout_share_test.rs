@@ -82,7 +82,7 @@ async fn test_view_shared_workout_public() {
         .await
         .unwrap();
 
-    // View shared workout without auth (new app instance to avoid cookies)
+    // As a guest.
     let app = common::create_test_app(pool.clone());
     let response = app
         .oneshot(
@@ -466,12 +466,10 @@ async fn test_show_workout_displays_share_link_and_revoke() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // A link to the confirmation page, not a POST button: the old
-    // confirm() guard did nothing with JavaScript off.
+    // A link to the confirmation page, so it works without JS.
     assert!(body_str.contains("Revoke Share</a>"));
     assert!(body_str.contains("Share link:"));
     assert!(body_str.contains(&format!("/shared/{share_token}")));
-    // Should not show share button (only the revoke form, not the share form)
     assert!(!body_str.contains(">Share</button>"));
 }
 
@@ -492,7 +490,7 @@ async fn test_share_without_expiry_never_expires() {
     )
     .await;
 
-    // expires_in_days absent entirely — the "never expires" default.
+    // No expires_in_days: never expires.
     let response = test_app
         .router
         .oneshot(
@@ -518,7 +516,7 @@ async fn test_share_without_expiry_never_expires() {
     assert!(updated.share_token.is_some());
     assert!(updated.share_expires_at.is_none());
 
-    // Backward-compatibility guard: a NULL expiry must still resolve.
+    // A NULL expiry still resolves.
     let share_token = updated.share_token.unwrap();
     let app = common::create_test_app(pool.clone());
     let response = app
@@ -577,15 +575,9 @@ async fn test_share_with_expiry_sets_share_expires_at() {
         .share_expires_at
         .expect("share_expires_at should be set");
     let expected = chrono::Utc::now() + chrono::Duration::days(7);
-    // A few seconds of drift, same tolerance neighbouring time-based tests allow.
     assert!((expires_at - expected).num_seconds().abs() < 5);
 
-    // A future (not-yet-elapsed) expiry must still resolve. Every other test
-    // in this file covers NULL expiry or a past expiry; nothing previously
-    // proved a live, unexpired share link actually works — a regression
-    // narrowing find_session_by_share_token's predicate to just
-    // `share_expires_at IS NULL` would make every expiring link dead on
-    // creation while leaving the rest of the suite green.
+    // A not-yet-expired link resolves; the only test covering a live expiry.
     let share_token = updated.share_token.unwrap();
     let app = common::create_test_app(pool.clone());
     let response = app
@@ -624,8 +616,7 @@ async fn test_expired_share_token_returns_404() {
         .await
         .unwrap();
 
-    // Age the row past expiry, following `expire_session`'s technique in
-    // tests/common/mod.rs.
+    // Age the row past expiry.
     {
         let conn = pool.get().unwrap();
         conn.execute(
@@ -650,8 +641,7 @@ async fn test_expired_share_token_returns_404() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
-    // An expired token and a never-issued one must be indistinguishable —
-    // nothing about the workout itself should leak into the response.
+    // Indistinguishable from a never-issued token.
     assert!(!body_str.contains("Secret expired workout"));
     assert!(!body_str.contains("Shared by"));
 }
@@ -835,10 +825,8 @@ async fn test_cleanup_expired_share_tokens_nulls_them() {
     assert!(future_row.share_expires_at.is_some());
 }
 
-/// Copying needs the clipboard API, so unlike the rest of the no-JS work
-/// there is no server-side equivalent to build. The button therefore ships
-/// `hidden` and is revealed by base.html — a dead button that looks alive is
-/// worse than an absent one. The link itself stays selectable either way.
+/// The copy button needs the clipboard API, so it ships `hidden` until JS
+/// reveals it; the link stays selectable either way.
 #[tokio::test]
 async fn test_copy_share_link_button_is_hidden_until_scripts_reveal_it() {
     let pool = common::setup_test_db();
@@ -886,16 +874,13 @@ async fn test_copy_share_link_button_is_hidden_until_scripts_reveal_it() {
         !body_str.contains("onclick=\"copyShareLink"),
         "the button should be wired by delegation, not an inline handler"
     );
-    // The link itself is always there, so the URL is reachable regardless.
     assert!(
         body_str.contains(&format!(r#"href="/shared/{share_token}""#)),
         "the share URL should still be a plain link"
     );
 }
 
-/// Revoking is irreversible for anyone holding the old link, which the old
-/// `confirm()` said and — with JavaScript off — never asked. The interstitial
-/// must say it, and must leave the token alone until the POST.
+/// The revoke page warns the old link dies, and the GET leaves the token alone.
 #[tokio::test]
 async fn test_revoke_share_confirmation_page_warns_without_revoking() {
     let pool = common::setup_test_db();

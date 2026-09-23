@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use thirtyfour::prelude::*;
 
-use super::{count, goto, optional, text, top_of};
+use super::{count, goto, optional, quote, text, top_of};
 
 pub struct DashboardPage<'a>(pub &'a WebDriver);
 
@@ -12,10 +12,7 @@ impl DashboardPage<'_> {
         goto(self.0, "/").await
     }
 
-    /// Is the `<h1>Dashboard</h1>` on screen?
-    ///
-    /// The marker every "I am logged in" step waits for: reaching `/` is not
-    /// enough on its own, since an unauthenticated visit redirects away from it.
+    /// Is the `<h1>Dashboard</h1>` on screen? The signed-in marker.
     pub async fn is_showing(&self) -> Result<bool> {
         Ok(
             optional(self.0, By::XPath("//h1[normalize-space(.)='Dashboard']"))
@@ -48,7 +45,8 @@ impl DashboardPage<'_> {
     pub async fn stat(&self, label: &str) -> Result<String> {
         let xpath = format!(
             "//div[contains(@class,'stat-card')][.//div[contains(@class,'stat-label')]\
-             [normalize-space(.)='{label}']]//div[contains(@class,'stat-value')]"
+             [normalize-space(.)={}]]//div[contains(@class,'stat-value')]",
+            quote(label)
         );
         text(self.0, By::XPath(xpath))
             .await?
@@ -56,9 +54,6 @@ impl DashboardPage<'_> {
     }
 
     /// Do the quick actions render above both the summary and the workout list?
-    ///
-    /// The scenario exists because the actions were once below the fold on a
-    /// phone, which put the app's primary verb behind a scroll.
     pub async fn actions_lead(&self) -> Result<bool> {
         let actions = top_of(self.0, ".actions-lead").await?;
         let stats = top_of(self.0, ".stats-grid").await?;

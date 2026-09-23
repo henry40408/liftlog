@@ -6,38 +6,17 @@ use axum_extra::extract::cookie::Cookie;
 const SESSION_COOKIE_NAME_PLAIN: &str = "session";
 const SESSION_COOKIE_NAME_HOST: &str = "__Host-session";
 
-/// How long a session survives without activity. A request within this
-/// window (and outside the touch throttle) slides the expiry forward.
 pub const SESSION_IDLE_TTL_SECS: i64 = 60 * 60 * 24 * 7; // 7 days
 
-/// Minimum gap between two consecutive `last_touched_at` writes for the
-/// same session. Keeps write load to at most one UPDATE per session per hour.
+/// At most one `last_touched_at` write per session per window.
 pub const SESSION_TOUCH_THROTTLE_SECS: i64 = 60 * 60; // 1 hour
 
-/// Absolute ceiling on a session's lifetime, measured from `created_at` and
-/// not extendable by activity — a session touched regularly can slide its
-/// idle expiry forever, but it can never live past `created_at + this`.
-///
-/// This is deliberately far larger than the 4-8 hours OWASP suggests for
-/// high-value applications. liftlog is a personal, self-hosted workout
-/// journal; an 8-hour ceiling would log users out several times a day at the
-/// gym, a cost far exceeding the benefit, and would push people toward
-/// working around it. The requirement being satisfied here is that an
-/// absolute ceiling exists at all — a session touched once a week can no
-/// longer live forever. 90 days matches the sibling project `rdrs`
-/// (`SESSION_ABSOLUTE_MAX_DAYS = 90`). It is a constant rather than an env
-/// var to keep the change minimal.
+/// Lifetime ceiling from `created_at`, not extendable by activity. Far above
+/// OWASP's 4–8h on purpose: a gym journal that logs out mid-workout gets
+/// worked around; what matters is that a ceiling exists.
 pub const SESSION_ABSOLUTE_TTL_SECS: i64 = 60 * 60 * 24 * 90; // 90 days
 
-/// The absolute expiry instant for a session created at `created_at`. Past
-/// this instant the session is dead regardless of activity.
-///
-/// Uses `checked_add_signed` rather than plain `+` because `created_at` is
-/// read straight out of `SQLite`: a corrupt or absurd row (e.g. a `created_at`
-/// near `DateTime::<Utc>::MAX_UTC`) must not panic every request that
-/// carries its session token. Saturates to `DateTime::<Utc>::MAX_UTC`
-/// instead, which is safe: it just makes an already-degenerate session's cap
-/// unreachably far away rather than crashing the request.
+/// Saturates rather than panicking on a corrupt `created_at` from the DB.
 pub fn absolute_cap(created_at: DateTime<Utc>) -> DateTime<Utc> {
     created_at
         .checked_add_signed(chrono::Duration::seconds(SESSION_ABSOLUTE_TTL_SECS))
@@ -57,24 +36,9 @@ pub enum TouchAction {
     Slide(DateTime<Utc>),
 }
 
-/// Decides what a touch on a session should do.
-///
-/// The throttle check runs first, unconditionally — including when the
-/// session is already pinned at the absolute cap. Without that ordering, a
-/// pinned session would run `UPDATE sessions SET last_touched_at = ?` on
-/// every single request instead of at most once per throttle window, which
-/// defeats the point of throttling.
-///
-/// Once outside the throttle window: a session already pinned to
-/// `absolute_cap(created_at)` cannot slide any further, but the request
-/// still happened, so [`TouchAction::TouchOnly`] records that activity
-/// (`last_touched_at`) without touching `expires_at`. `/settings`'s session
-/// list orders and displays by `last_touched_at`, so skipping this write
-/// entirely — as the old `compute_touched_expiry` did — froze "last active"
-/// at the moment a session hit the cap, for up to the final 7 days of its
-/// 90-day lifetime, even while the user kept using it.
-///
-/// Below the cap, [`TouchAction::Slide`] carries the new `expires_at`.
+/// The throttle is checked first, even for a session pinned at the cap, or
+/// pinned sessions would write on every request. A pinned session still gets
+/// [`TouchAction::TouchOnly`] so `/settings` shows its real "last active".
 pub fn compute_touch_action(
     created_at: DateTime<Utc>,
     last_touched_at: DateTime<Utc>,
@@ -95,13 +59,8 @@ pub fn compute_touch_action(
     TouchAction::Slide((now + idle_ttl).min(cap))
 }
 
-/// Name to use for the session cookie. Switching on `secure` here is
-/// **mandatory**, not cosmetic: applying the `__Host-` prefix unconditionally
-/// on a plain-HTTP deployment makes the browser discard the entire
-/// `Set-Cookie` line (the prefix requires `Secure`, and a `Secure` cookie
-/// cannot arrive over HTTP), so users cannot log in at all and get no error
-/// message. This is the easiest mistake to make here and the hardest to
-/// diagnose.
+/// `__Host-` only when `secure`: over plain HTTP the browser silently drops a
+/// `__Host-` cookie, and nobody can log in.
 pub fn session_cookie_name(secure: bool) -> &'static str {
     if secure {
         SESSION_COOKIE_NAME_HOST
@@ -120,24 +79,16 @@ pub fn create_session_cookie(token: &str, secure: bool) -> Cookie<'static> {
         .build()
 }
 
-/// Looks up the session token under exactly one cookie name:
-/// `session_cookie_name(secure)`. Deliberately no fallback to the other
-/// name — accepting a bare `session` while `secure = true` would forfeit
-/// the whole point of `__Host-`, since an attacker able to write cookies on
-/// a sibling subdomain could just inject the unprefixed name. The cost is
-/// that flipping `LIFTLOG_COOKIE_SECURE` logs everyone out once, which is a one-off
-/// and acceptable.
+/// No fallback to the other name: accepting a bare `session` under `secure`
+/// would let a sibling subdomain inject one. Flipping the setting logs
+/// everyone out once.
 pub fn get_session_token(jar: &CookieJar, secure: bool) -> Option<String> {
     jar.get(session_cookie_name(secure))
         .map(|cookie| cookie.value().to_string())
 }
 
-/// Salted-hash fingerprint of a session token, for log correlation.
-///
-/// OWASP requires that the session ID never be written to a log; a salted
-/// hash lets events for the same session be correlated without disclosing
-/// the token. 16 hex chars (64 bits) is ample to avoid collisions at a
-/// single deployment's session volume while keeping log lines readable.
+/// Salted SHA-256, truncated to 16 hex chars, so logs can correlate a
+/// session without containing its token.
 pub fn token_fingerprint(token: &str, salt: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write;
@@ -154,18 +105,9 @@ pub fn token_fingerprint(token: &str, salt: &[u8]) -> String {
     out
 }
 
-/// Builds the cookie used to clear a session on logout. Its attributes
-/// (`secure`, `http_only`, `same_site`, `path`) MUST match the create-side
-/// cookie exactly, and not because a non-`Secure` removal cookie fails to
-/// clear a `Secure` one — a browser's cookie identity key is
-/// `(name, domain, path)`, and `Secure` is not part of that key, so that
-/// intuition is a misconception. The real failure mode is that a mismatched
-/// `Set-Cookie` line gets rejected outright: over plain HTTP, a `Set-Cookie`
-/// carrying `Secure` is discarded entirely, and (once the `__Host-` prefix
-/// is in use) that prefix requires `Secure` + `Path=/` + no `Domain` on the
-/// same `Set-Cookie` — missing any one discards the whole line. Either way
-/// the cookie is never cleared: "I clicked log out but the cookie is still
-/// there."
+/// Attributes must match [`create_session_cookie`]: a `__Host-` removal
+/// lacking `Secure`/`Path=/`, or a `Secure` one over HTTP, is discarded and
+/// the cookie survives logout.
 pub fn remove_session_cookie(secure: bool) -> Cookie<'static> {
     Cookie::build((session_cookie_name(secure), ""))
         .path("/")
@@ -269,9 +211,7 @@ mod tests {
         let now = Utc::now();
         let created_at = now - chrono::Duration::days(89);
         let last_touched_at = now - chrono::Duration::hours(2);
-        // Strictly below the cap (created_at + 90d == now + 1d), so this
-        // exercises the clamp itself rather than the "already at cap"
-        // short-circuit.
+        // Below the cap (now + 1d), so this hits the clamp, not TouchOnly.
         let expires_at = now + chrono::Duration::hours(3);
 
         let action = compute_touch_action(created_at, last_touched_at, expires_at, now);
@@ -295,9 +235,6 @@ mod tests {
         );
     }
 
-    /// Proves the throttle check runs *before* the cap check: even a
-    /// session pinned at the absolute cap must not write on every request,
-    /// only once the throttle window has elapsed.
     #[test]
     fn compute_touch_action_nothing_inside_throttle_even_when_pinned_at_cap() {
         let now = Utc::now();
@@ -347,9 +284,6 @@ mod tests {
         assert_ne!(fp_a, fp_b);
     }
 
-    /// The most important assertion in this task: it turns "must not log the
-    /// raw token" into an executable constraint rather than a convention
-    /// that could silently rot.
     #[test]
     fn token_fingerprint_never_contains_the_raw_token() {
         let token = "b6b1c1f4-6e1a-4e2a-9c2d-7f1a6d2e3b4c";

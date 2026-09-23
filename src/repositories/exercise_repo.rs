@@ -116,23 +116,9 @@ impl ExerciseRepository {
             );
             match result {
                 Ok(rows) => Ok(rows > 0),
-                // workout_logs.exercise_id REFERENCES exercises(id) ON DELETE
-                // RESTRICT is now enforced (PRAGMA foreign_keys=ON, see
-                // src/db.rs). Deleting an exercise still referenced by a
-                // workout log fails here; surface it as a 400 the user can
-                // act on rather than the generic 500 AppError::Database
-                // would otherwise produce. Any other rusqlite error still
-                // falls through to that 500.
-                //
-                // The extended code is SQLITE_CONSTRAINT_TRIGGER, not the
-                // seemingly-obvious SQLITE_CONSTRAINT_FOREIGNKEY — verified
-                // empirically against this exact schema with the
-                // libsqlite3-sys version this crate pins.
-                // SQLITE_CONSTRAINT_FOREIGNKEY is reserved by SQLite for
-                // *deferred* FK violations caught at COMMIT; RESTRICT is an
-                // immediate check enforced through SQLite's internal FK
-                // action-trigger machinery, which reports
-                // SQLITE_CONSTRAINT_TRIGGER instead.
+                // A still-referenced exercise violates ON DELETE RESTRICT;
+                // make that a 400. SQLite reports immediate FK actions as
+                // SQLITE_CONSTRAINT_TRIGGER, not _FOREIGNKEY (deferred only).
                 Err(rusqlite::Error::SqliteFailure(e, _))
                     if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_TRIGGER =>
                 {

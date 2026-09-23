@@ -54,7 +54,6 @@ async fn test_stats_index_shows_workout_counts() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    // Create some workouts (using recent dates for week/month counts)
     let today = chrono::Local::now().date_naive();
     common::create_test_workout(&pool, &user.id, today, Some("Today's workout")).await;
     common::create_test_workout(
@@ -82,8 +81,8 @@ async fn test_stats_index_shows_workout_counts() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should show workout counts (at least 2 total)
-    assert!(body_str.contains('2') || body_str.contains("Stats"));
+    // Total only: the week/month counts depend on today's date.
+    assert!(body_str.contains(r#"<div class="stat-value">2</div>"#));
 }
 
 #[tokio::test]
@@ -99,7 +98,6 @@ async fn test_stats_index_calculates_volume() {
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let workout = common::create_test_workout(&pool, &user.id, today, None).await;
 
-    // 10 reps * 100kg = 1000kg volume
     common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
 
     let response = test_app
@@ -119,9 +117,7 @@ async fn test_stats_index_calculates_volume() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    assert!(
-        body_str.contains("1000") || body_str.contains("volume") || body_str.contains("Volume")
-    );
+    assert!(body_str.contains(r#"<div class="stat-value">1000</div>"#));
 }
 
 #[tokio::test]
@@ -299,7 +295,7 @@ async fn test_prs_list_separates_all_time_and_recent_windows() {
     )
     .await;
 
-    // Bench was trained just now; squat only outside the 1-month window.
+    // Squat only outside the 1-month window.
     common::create_test_log(&pool, &workout.id, &bench.id, 1, 5, 100.0, None).await;
     let old_squat = common::create_test_log(&pool, &workout.id, &squat.id, 1, 5, 150.0, None).await;
     {
@@ -342,12 +338,10 @@ async fn test_prs_list_separates_all_time_and_recent_windows() {
             .to_string()
     };
 
-    // Squat's all-time PR stands, but it has no record inside the window.
     let squat_row = row("Squat");
     assert!(squat_row.contains("150"), "squat_row=\n{squat_row}");
     assert!(squat_row.contains("&mdash;"), "squat_row=\n{squat_row}");
 
-    // Bench was logged inside the window, so both columns carry a number.
     let bench_row = row("Bench Press");
     assert!(bench_row.contains("100"), "bench_row=\n{bench_row}");
     assert!(!bench_row.contains("&mdash;"), "bench_row=\n{bench_row}");
@@ -390,7 +384,6 @@ async fn test_exercise_stats_chart_renders_with_two_or_more_sessions() {
     assert!(body_str.contains("<polyline"), "polyline missing");
     assert!(body_str.contains("id=\"chart-line\""));
 
-    // JSON-embedded dataset is present and parseable
     let start = body_str
         .find("id=\"exercise-chart-data\">")
         .expect("chart-data script tag missing");
@@ -490,8 +483,7 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
 
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
 
-    // Weights ASC: [100, 100, 110, 105, 120]
-    // Running max PRs at indices 0, 2, 4 (the first 100 also counts as the first running max).
+    // Running-max PRs at indices 0, 2, 4.
     let weights: [f64; 5] = [100.0, 100.0, 110.0, 105.0, 120.0];
     for (i, w) in weights.iter().enumerate() {
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32).unwrap();
@@ -516,7 +508,6 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // 5 dots total — running PRs are at index 0 (100), 2 (110), 4 (120).
     let pr_count = body_str.matches("class=\"ll-dot-pr\"").count();
     let plain_count = body_str.matches("class=\"ll-dot\"").count();
     assert_eq!(pr_count, 3, "expected 3 PR dots, body=\n{body_str}");
@@ -525,9 +516,8 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
 
 #[tokio::test]
 async fn test_exercise_stats_rejects_exercise_owned_by_another_user() {
-    // The history, PR and metrics queries are scoped by the caller, but the
-    // exercise record itself is rendered into the page — fetching it unscoped
-    // disclosed another user's exercise name and category.
+    // Regression: the exercise record itself was fetched unscoped, leaking
+    // another user's exercise name and category.
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
@@ -562,9 +552,8 @@ async fn test_exercise_stats_rejects_exercise_owned_by_another_user() {
     );
 }
 
-/// Three sessions whose top-set weights and volumes cannot be confused:
-/// weights land the y-axis in the 99–111 band, volumes in 495–555. Any
-/// assertion on a tick label therefore proves *which* series was plotted.
+/// Top-set axis lands in 99–111 and volume in 495–555, so a tick label proves
+/// which series was plotted.
 async fn seed_three_sessions(
     pool: &liftlog::db::DbPool,
     user_id: &str,
@@ -578,9 +567,7 @@ async fn seed_three_sessions(
     exercise
 }
 
-/// Volume and e1RM had no representation anywhere in the UI once scripts
-/// were off — only the client redraw could reach them. The tabs are links
-/// now, so the server has to honour `?metric=`.
+/// The metric tabs are links, so the server honours `?metric=` without JS.
 #[tokio::test]
 async fn test_exercise_stats_chart_plots_the_requested_metric() {
     let pool = common::setup_test_db();
@@ -622,7 +609,7 @@ async fn test_exercise_stats_chart_plots_the_requested_metric() {
         "the Volume tab should be the active one"
     );
 
-    // And the default is still the top-set axis.
+    // The default is still top set.
     let response = test_app
         .router
         .oneshot(
@@ -643,11 +630,8 @@ async fn test_exercise_stats_chart_plots_the_requested_metric() {
     );
 }
 
-/// e1RM is the other series that scripts-off users could not reach, and it
-/// is the only one that is *derived* (`weight * (1 + reps/30)`) rather than
-/// stored — so plotting the wrong column would still produce a plausible
-/// chart. Reps of 10 put the axis in a band that neither top set (98–122)
-/// nor volume (980–1220) can produce.
+/// e1RM is derived, so a wrong column would still plot plausibly. Reps of 10
+/// put its axis where neither top set (98–122) nor volume (980–1220) can.
 #[tokio::test]
 async fn test_exercise_stats_chart_plots_e1rm() {
     let pool = common::setup_test_db();
@@ -691,10 +675,7 @@ async fn test_exercise_stats_chart_plots_e1rm() {
     );
 }
 
-/// The HTML tooltip is built by script on pointer events, so the figures
-/// behind each point were unreadable without it. SVG `<title>` gets a native
-/// tooltip out of the browser for free — provided the bands are rendered
-/// server-side, which the client redraw otherwise replaces.
+/// Server-rendered hit areas carry SVG `<title>`s: native tooltips without JS.
 #[tokio::test]
 async fn test_exercise_stats_chart_has_native_hover_titles() {
     let pool = common::setup_test_db();
@@ -730,7 +711,7 @@ async fn test_exercise_stats_chart_has_native_hover_titles() {
         .expect("hit-area group close");
     let bands = &body_str[start..start + end];
 
-    // One band per session, each carrying the full figures for that session.
+    // One band per session.
     assert_eq!(
         bands.matches("<title>").count(),
         3,
@@ -761,7 +742,7 @@ async fn test_exercise_stats_chart_range_controls_the_window() {
         common::extract_cookie_header(&common::create_session_cookie(&pool, &user).await);
     let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "legs").await;
 
-    // 22 sessions, so the default 20-session window drops the first two.
+    // The default 20-session window drops the first two.
     for day in 1..=22u32 {
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, day).unwrap();
         let workout = common::create_test_workout(&pool, &user.id, date, None).await;
@@ -821,10 +802,8 @@ async fn test_exercise_stats_chart_range_controls_the_window() {
     );
 }
 
-/// The tabs are links, so the query string is user-editable and arrives from
-/// stale bookmarks. Nonsense falls back to the default view rather than
-/// erroring, and each tab's href carries the *other* axis's current value so
-/// switching metric does not silently reset the range.
+/// Unknown query values fall back to the defaults, and each tab keeps the
+/// other axis's value so switching metric keeps the range.
 #[tokio::test]
 async fn test_exercise_stats_chart_query_is_forgiving_and_links_compose() {
     let pool = common::setup_test_db();
@@ -859,8 +838,6 @@ async fn test_exercise_stats_chart_query_is_forgiving_and_links_compose() {
         "a bad metric should fall back to top set, got:\n{body_str}"
     );
 
-    // On the volume + all view, the range tabs must keep metric=volume and
-    // the metric tabs must keep range=all.
     let response = test_app
         .router
         .oneshot(

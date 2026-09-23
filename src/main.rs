@@ -29,9 +29,7 @@ use state::AppState;
 use std::sync::Arc;
 use std::time::Duration;
 
-// The release image links musl, whose default allocator is markedly slower than
-// glibc's under concurrent load. mimalloc restores throughput for the request
-// handlers and the r2d2 SQLite pool.
+// musl's default allocator is slow under concurrency.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -95,17 +93,13 @@ async fn main() -> anyhow::Result<()> {
     let workout_repo = WorkoutRepository::new(pool.clone());
     let session_repo = SessionRepository::new(pool.clone());
 
-    // Broadcasts the shutdown request to the background sweep so it can stop
-    // cleanly before we checkpoint the WAL.
+    // Stops the sweep before the WAL checkpoint.
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
-    // Periodic background sweep of expired session rows. validate_and_touch
-    // already lazily deletes stale rows it sees, but orphans (sessions never
-    // revisited) need this sweep to avoid unbounded table growth.
+    // Hourly sweep for sessions never revisited (validate_and_touch only
+    // deletes the stale rows it sees) and expired share tokens.
     let sweep_handle = {
         let session_repo = session_repo.clone();
-        // Cloned here (not moved) because `workout_repo` is also captured by
-        // value in `app_state` below.
         let workout_repo = workout_repo.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
@@ -114,24 +108,16 @@ async fn main() -> anyhow::Result<()> {
                 tokio::select! {
                     _ = ticker.tick() => {
                         match session_repo.cleanup_expired().await {
-                            // Only when something was actually retired: an
-                            // idle deployment would otherwise emit one empty
-                            // line an hour, forever.
                             Ok(0) => {}
                             Ok(n) => audit::sessions_expired_sweep(n),
                             Err(e) => {
                                 tracing::warn!(error = ?e, "session cleanup_expired failed");
                             }
                         }
-                        // A separate match, not `?` or an early return: a
-                        // failure clearing dead share tokens must not skip
-                        // (or be skipped by) the session sweep above — the
-                        // two are unrelated lifecycles sharing one ticker.
+                        // Independent of the session sweep: neither failure
+                        // may skip the other.
                         match workout_repo.cleanup_expired_share_tokens().await {
                             Ok(0) => {}
-                            // Not a session lifecycle event, so this stays
-                            // off the `liftlog::audit` target and is just a
-                            // plain info log.
                             Ok(n) => tracing::info!(count = n, "cleared expired workout share tokens"),
                             Err(e) => {
                                 tracing::warn!(error = ?e, "workout cleanup_expired_share_tokens failed");
@@ -165,9 +151,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Per-process salt for audit-log session fingerprints. Generated fresh
-    // on every startup — never logged, never persisted — so a leaked log
-    // line can never be used to recover or replay a session token.
     let mut log_salt = [0u8; 32];
     rand_core::OsRng.fill_bytes(&mut log_salt);
 
@@ -191,14 +174,8 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = config.bind;
     tracing::info!("Starting server at http://{}", addr);
-    // Not an `info!` like the rest of this block. liftlog never terminates
-    // TLS, so it cannot detect that it is being served over HTTPS with this
-    // left off — and that combination silently drops both the `Secure`
-    // attribute and the `__Host-` cookie prefix, which is precisely the
-    // misconfiguration nobody notices because everything still works. A
-    // deployment that really is plain HTTP (loopback, a private LAN) will see
-    // this warning too and can ignore it; the asymmetry is deliberate, since
-    // one case is a security hole and the other is a line of log noise.
+    // `warn`: liftlog can't detect HTTPS, and serving it with this off
+    // silently drops `Secure` and `__Host-`. Plain-HTTP installs can ignore it.
     if config.cookie_secure {
         tracing::info!("session cookie Secure attribute is enabled");
     } else {
@@ -222,17 +199,12 @@ async fn main() -> anyhow::Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
-    // Server has stopped accepting connections and drained in-flight requests.
-    // Stop the background sweep and wait for any current pass to finish before
-    // we touch the DB.
+    // Drained; stop the sweep (waiting out a running pass) before touching the DB.
     let _ = shutdown_tx.send(true);
     if let Err(e) = sweep_handle.await {
         tracing::warn!(error = ?e, "session sweep task did not stop cleanly");
     }
 
-    // Checkpoint the WAL so the main DB file is self-contained. The pool (and
-    // its connections) drops at the end of main, after which SQLite removes
-    // the now-empty -wal/-shm siblings.
     if let Err(e) = db::checkpoint(&pool) {
         tracing::warn!(error = ?e, "WAL checkpoint on shutdown failed");
     }
