@@ -15,9 +15,6 @@ pub enum AppError {
     #[error("Not found: {0}")]
     NotFound(String),
 
-    #[error("Forbidden: {0}")]
-    Forbidden(String),
-
     #[error("Bad request: {0}")]
     BadRequest(String),
 
@@ -58,7 +55,6 @@ impl IntoResponse for AppError {
                 )
             }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);

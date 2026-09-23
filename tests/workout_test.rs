@@ -659,7 +659,7 @@ async fn test_add_log_rejects_exercise_owned_by_another_user() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     // The write must not have happened at all, not merely been reported as denied.
     let workout_repo = WorkoutRepository::new(pool);

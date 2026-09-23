@@ -27,19 +27,13 @@ impl ExerciseRepository {
         .await?
     }
 
-    /// Fetch an exercise owned by `user_id`. Returns `NotFound` if no such row,
-    /// `Forbidden` if it exists but belongs to another user.
+    /// Fetch an exercise owned by `user_id`. Another user's exercise is
+    /// `NotFound`, like a missing one, so its existence isn't disclosed.
     pub async fn find_owned(&self, id: &str, user_id: &str) -> Result<Exercise> {
-        let exercise = self
-            .find_by_id(id)
+        self.find_by_id(id)
             .await?
-            .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
-        if exercise.user_id != user_id {
-            return Err(AppError::Forbidden(
-                "You can only modify your own exercises".to_string(),
-            ));
-        }
-        Ok(exercise)
+            .filter(|exercise| exercise.user_id == user_id)
+            .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))
     }
 
     pub async fn find_available_for_user(&self, user_id: &str) -> Result<Vec<Exercise>> {
