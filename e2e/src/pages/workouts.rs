@@ -17,8 +17,7 @@ impl WorkoutsPage<'_> {
         goto(self.0, "/workouts").await
     }
 
-    /// How many links on the page point at that workout — 0 or 1 in practice,
-    /// which is what both the "is listed" and "is not listed" steps ask.
+    /// How many links on the page point at that workout.
     pub async fn links_to(&self, id: &str) -> Result<usize> {
         count(self.0, By::Css(format!("a[href=\"/workouts/{id}\"]"))).await
     }
@@ -33,15 +32,12 @@ impl WorkoutsPage<'_> {
 pub struct NewWorkoutPage<'a>(pub &'a WebDriver);
 
 impl NewWorkoutPage<'_> {
-    /// Creates a workout dated today and returns the id it was given.
-    ///
-    /// The date field is pre-filled by the server, so this submits the form as
-    /// it stands — the same one click the old step made.
+    /// Creates a workout dated today (the server pre-fills the date) and
+    /// returns its id.
     pub async fn create_today(&self) -> Result<String> {
         goto(self.0, "/workouts/new").await?;
         click_button(self.0, "Create Workout").await?;
-        // The POST redirects to the new workout; the click returns before the
-        // browser has followed it.
+        // The click returns before the redirect is followed.
         eventually("the browser reaches the new workout", || async {
             Ok(workout_id(self.0).await.is_ok())
         })
@@ -68,21 +64,14 @@ impl<'a> WorkoutPage<'a> {
         goto(self.driver, &format!("/workouts/{}", self.id)).await
     }
 
-    /// Picks an exercise in the Add Set form.
-    ///
-    /// Also what drives the "last weight" hint: the page's script listens for
-    /// this `change` and fetches the previous set's figures.
+    /// Picks an exercise in the Add Set form; its `change` draws the "last
+    /// weight" hint from data embedded in the page.
     pub async fn select_exercise(&self, name: &str) -> Result<()> {
         select_by_label(self.driver, "exercise_id", name).await
     }
 
     /// The values an Add Set field's `<datalist>` offers, in document order.
-    ///
-    /// Read through the `list` attribute rather than a hardcoded list id, so
-    /// this fails if the field stops pointing at a list at all — which is the
-    /// half a browser can check and a markup assertion cannot. Filling the
-    /// field is unaffected either way: a datalist is a hint, and `fill` drives
-    /// these inputs exactly as it did before they had one.
+    /// Resolved through the field's `list` attribute, so a detached list fails.
     pub async fn suggestions(&self, field: &str) -> Result<Vec<String>> {
         let list = self
             .driver
@@ -104,12 +93,9 @@ impl<'a> WorkoutPage<'a> {
         Ok(values)
     }
 
-    /// Fills the Add Set form and submits it, then waits for the new row.
-    ///
-    /// Counted, not merely "a row exists": a second set of the same exercise
-    /// would find the first row and return before its own POST had landed,
-    /// leaving the next navigation to cancel it. The form posts and re-renders
-    /// the page, so the row count is the only thing that says the write is done.
+    /// Fills and submits the Add Set form, then waits for the row count to
+    /// grow — the POST redirects back to the same URL, and an existing row of
+    /// the same exercise would satisfy a mere presence check.
     pub async fn log_set(
         &self,
         exercise: &str,
@@ -157,9 +143,6 @@ impl<'a> WorkoutPage<'a> {
     }
 
     /// The `set-cell-set` value of every row for that exercise, sorted.
-    ///
-    /// Sorted because the assertion is about which numbers were handed out, not
-    /// about the order the list happens to render them in.
     pub async fn set_numbers(&self, exercise: &str) -> Result<Vec<String>> {
         let mut numbers = Vec::new();
         for row in self.rows(exercise).await? {
@@ -190,17 +173,9 @@ impl<'a> WorkoutPage<'a> {
         Ok(())
     }
 
-    /// Deletes the first set of that exercise.
-    ///
-    /// The trigger is a link to a confirmation page; with scripts on,
-    /// `base.html` intercepts it and asks in a `window.confirm()` that the
-    /// session accepts automatically. Addressed by `aria-label` because its
-    /// visible text is a bare `×`.
-    ///
-    /// Waits for the row to leave the list rather than for a URL: the POST
-    /// re-renders the page it was already on, so there is no navigation to
-    /// watch — and a caller that navigated away immediately would cancel the
-    /// request instead of completing it.
+    /// Deletes the first set of that exercise, via its `×` link (addressed by
+    /// `aria-label`). Waits for the row to go: the POST redirects back to the
+    /// same URL.
     pub async fn delete_set(&self, exercise: &str) -> Result<()> {
         self.row(exercise)
             .await?
@@ -215,16 +190,12 @@ impl<'a> WorkoutPage<'a> {
     }
 
     /// Clicks Clone on the first set of that exercise.
-    ///
-    /// A link to `?prefill=<log id>` that the page's script intercepts to fill
-    /// the form in place — both paths land on the same pre-filled form, which is
-    /// what the assertion checks.
     pub async fn clone_set(&self, exercise: &str) -> Result<()> {
         let row = self.row(exercise).await?;
         click_link_in(&row, "Clone").await
     }
 
-    /// Deletes the whole workout. Same intercepted-link shape as the set delete.
+    /// Deletes the whole workout.
     pub async fn delete(&self) -> Result<()> {
         click_link(self.driver, "Delete").await
     }
@@ -247,9 +218,6 @@ impl<'a> WorkoutPage<'a> {
     }
 
     /// The public share path, or `None` when the workout is not shared.
-    ///
-    /// Picked by `href` rather than by position: Revoke Share is a link inside
-    /// the same block now, so "the first anchor" is no longer the share URL.
     pub async fn share_url(&self) -> Result<Option<String>> {
         match optional(self.driver, By::Css(".share-info a[href^=\"/shared/\"]")).await? {
             Some(link) => Ok(link.attr("href").await?),
@@ -307,10 +275,7 @@ impl<'a> EditWorkoutPage<'a> {
         }
     }
 
-    /// Rewrites the date and notes, and submits.
-    ///
-    /// The date goes in by assignment rather than by typing — see
-    /// [`super::set_value`].
+    /// Rewrites the date (via [`super::set_value`]) and notes, and submits.
     pub async fn save(&self, date: &str, notes: &str) -> Result<()> {
         goto(self.driver, &format!("/workouts/{}/edit", self.id)).await?;
         set_value(self.driver, "date", date).await?;
@@ -335,13 +300,10 @@ impl EditLogPage<'_> {
 ///
 /// # Errors
 ///
-/// Fails when the browser is not on a workout detail page — which is the useful
-/// failure for "Create Workout did not land where it should have".
+/// Fails when the browser is not on a workout detail page.
 pub async fn workout_id(driver: &WebDriver) -> Result<String> {
     let path = path(driver).await?;
-    // The id has to look like one, not merely sit in that position: `/workouts/new`
-    // is also a single segment under `/workouts/`, and accepting it made "wait
-    // until the create redirect lands" pass before the click had gone anywhere.
+    // Must look like an id, or `/workouts/new` would pass.
     let id = path
         .strip_prefix("/workouts/")
         .filter(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
@@ -351,15 +313,11 @@ pub async fn workout_id(driver: &WebDriver) -> Result<String> {
     }
 }
 
-/// XPath for the set rows naming a given exercise.
-///
-/// Scoped to the exercise cell rather than the whole row: a row also carries
-/// the weight and reps, and a bare `contains(., name)` would match a different
-/// exercise whose name is a prefix of this one.
+/// XPath for the set rows naming exactly that exercise.
 fn row_xpath(exercise: &str) -> String {
     format!(
         "//div[contains(@class,'set-row')]\
-         [.//div[contains(@class,'set-cell-exercise')][contains(normalize-space(.), {})]]",
+         [.//div[contains(@class,'set-cell-exercise')][normalize-space(.)={}]]",
         quote(exercise)
     )
 }

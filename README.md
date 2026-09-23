@@ -15,18 +15,16 @@ Track your training sessions, monitor progress, and celebrate personal records.
 
 ## Features
 
-- **Workout Tracking** - Log training sessions with exercises, sets, reps, and weight
-- **Fewer Keystrokes** - The Add Set weight field suggests the weights the workout already uses and each exercise's last, and the reps field the common schemes; both stay free-typed
-- **RPE Support** - Record Rate of Perceived Exertion (1-10) for each set
-- **Personal Records** - Automatic PR detection and tracking, all-time and over a rolling 1-month window
-- **Exercise Library** - Manage your custom exercise database
-- **Statistics** - View workout history and progress per exercise
-- **Multi-User** - Support for multiple users with authentication
-- **Docker Ready** - Container image for easy deployment
+- **Workout tracking** — sessions, exercises, sets, reps, weight, and RPE (1–10)
+- **Fewer keystrokes** — Add Set suggests weights already used in the workout, each exercise's last weight, and common rep schemes
+- **Personal records** — detected automatically, all-time and over a rolling month
+- **Exercise library** and **per-exercise progress stats**
+- **Multi-user** with authentication
+- **Docker image**
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Docker (recommended)
 
 ```bash
 docker run -d \
@@ -38,133 +36,92 @@ docker run -d \
 
 Visit `http://localhost:8080` and create your account.
 
-### Building from Source
+### From source
 
 ```bash
-# Clone repository
 git clone https://github.com/henry40408/liftlog.git
 cd liftlog
-
-# Build release binary
 cargo build --release
-
-# Run server
 ./target/release/liftlog
 ```
 
 ## Configuration
 
-All configuration is done via environment variables:
+All configuration is via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite database connection string |
-| `LIFTLOG_BIND` | `127.0.0.1:8080` | HTTP server bind address (`host:port`). Defaults to loopback so a bare-metal run is not exposed on all interfaces without opting in; the container image sets `0.0.0.0:8080` so a reverse proxy can reach it. |
-| `LIFTLOG_TRUSTED_PROXY_HEADER` | (unset / `none`) | Which proxy-supplied header, if any, liftlog trusts to carry the real client IP for per-IP login rate limiting (`POST /auth/login` allows 5 attempts per 60 seconds): `x-forwarded-for` or `x-real-ip`. This is a deliberate operator choice, not inferred from which headers happen to be present — the mere presence of an `X-Forwarded-For` line is not proof a trusted proxy wrote it. **Whichever header you select, your reverse proxy MUST overwrite it (or strip any client-supplied copy)**, e.g. nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (appends the peer; liftlog reads the rightmost hop) or `proxy_set_header X-Real-IP $remote_addr;`. If the proxy merely passes a client-supplied header through untouched, an attacker can forge their source IP and the login rate limit is bypassable. Left unset, no header is ever read and all clients behind a proxy share one login rate-limit bucket — a real limitation, but a safe default. |
-| `LIFTLOG_TRUSTED_PROXIES` | (empty) | Comma-separated bare IPs of reverse proxies allowed to supply the header selected by `LIFTLOG_TRUSTED_PROXY_HEADER`; only consulted when that variable is set. The **rightmost** hop in `X-Forwarded-For` is used, since that's the one the trusted proxy itself appended. Loopback peers are always trusted regardless of this setting, so it's unnecessary when the proxy connects from loopback. If a reverse proxy runs in a separate container, its IP must be listed here, or every client will appear to share a single loopback peer address and thus one shared rate-limit bucket. |
-| `LIFTLOG_COOKIE_SECURE` | `false` | Whether the session cookie carries the `Secure` attribute. Set `true` for HTTPS deployments, including behind a TLS-terminating reverse proxy. Leave `false` for plain-HTTP LAN deployments — otherwise the browser silently drops the cookie and login becomes impossible, with no error message. Setting it `true` also renames the cookie to `__Host-session` (the browser then enforces `Secure` + `Path=/` + no `Domain` at the protocol level), so flipping this setting invalidates existing logins once. |
-| `LIFTLOG_HSTS_MAX_AGE` | `0` (disabled) | Seconds for the `Strict-Transport-Security` header's `max-age`. `0`, unset, or empty sends no header. |
-| `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS` | `false` | Whether the `Strict-Transport-Security` header, when `LIFTLOG_HSTS_MAX_AGE` is set, also carries `includeSubDomains`. |
-| `RUST_LOG` | `error,liftlog=info` | Log level filter |
-| `LIFTLOG_LOG_FORMAT` | `full` | Log output format: `full`, `compact`, `pretty`, `json` (also settable via `--log-format`) |
+| `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite connection string |
+| `LIFTLOG_BIND` | `127.0.0.1:8080` | Bind address. Loopback by default; the container image sets `0.0.0.0:8080`. |
+| `LIFTLOG_TRUSTED_PROXY_HEADER` | (unset) | Header trusted to carry the client IP for the per-IP login limit: `x-forwarded-for` or `x-real-ip`. **Your proxy MUST overwrite it** (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` or `proxy_set_header X-Real-IP $remote_addr;`), otherwise clients can forge their IP. Unset, no header is read and every client behind a proxy shares one bucket. |
+| `LIFTLOG_TRUSTED_PROXIES` | (empty) | Comma-separated IPs of proxies allowed to supply that header. Loopback is always trusted. The **rightmost** `X-Forwarded-For` hop is used. A proxy in a separate container must be listed here. |
+| `LIFTLOG_COOKIE_SECURE` | `false` | Set `true` for HTTPS (including behind a TLS-terminating proxy); leave `false` on plain HTTP or the browser silently drops the cookie. `true` also renames the cookie to `__Host-session`, so flipping it logs everyone out once. |
+| `LIFTLOG_HSTS_MAX_AGE` | `0` | `Strict-Transport-Security` `max-age` in seconds; `0`/unset/empty sends no header. |
+| `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS` | `false` | Add `includeSubDomains` to that header. |
+| `RUST_LOG` | `error,liftlog=info` | Log filter |
+| `LIFTLOG_LOG_FORMAT` | `full` | `full`, `compact`, `pretty`, or `json` (also `--log-format`) |
 
-On logout, liftlog sends `Clear-Site-Data: "cache", "cookies", "storage"` so the browser drops more than just the session cookie. The `"cookies"` directive's scope is the whole **registrable domain**, not just this origin — if liftlog shares a domain with other services (e.g. `liftlog.example.com` alongside `wiki.example.com`), logging out of liftlog will also log the user out of those. Browsers ignore the header entirely on non-secure (plain HTTP) origins.
+> **Migration note:** `BIND` and `LOG_FORMAT` were renamed to `LIFTLOG_BIND` and `LIFTLOG_LOG_FORMAT`. If an old name is still set, the server refuses to start and names the replacement.
 
-Promoting a user to admin logs that user out of every device. A privilege-level change requires reauthentication (OWASP Session Management Cheat Sheet, *Renew the Session ID After Any Privilege Level Change*), so a token stolen while the account was an ordinary user cannot silently inherit admin rights.
+### Reverse proxy
 
-Promoting or deleting a user also requires the acting admin to re-enter **their own** password, on a confirmation page that spells out what is about to happen (OWASP Authentication Cheat Sheet, *Require Re-authentication for Sensitive Features*). The CSRF origin guard already blocks a cross-site *trigger* of those routes; what it cannot stop is someone who holds the admin's session cookie outright, or who has walked up to an unlocked browser. This re-check turns "has the cookie" into "knows the password" for the two actions that can hand out admin rights or destroy an account. It shares the password change's per-user rate limit, so an attacker cannot move their guessing from one route to the other for a fresh allowance.
+- **Forward `Host` exactly as the browser sent it, port included** (nginx: `proxy_set_header Host $http_host;`, not `$host`). The CSRF guard compares `Origin` against host *and port*, and for requests without `Sec-Fetch-Site` (Safari < 16.4, any plain-HTTP origin) that is the only check. Getting it wrong yields `403`s logged as `csrf.rejected` / `reason=origin_fallback`. Caddy and Traefik forward `Host` unchanged by default.
+- **Prefer sending HSTS from the proxy** — liftlog doesn't terminate TLS. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch; before enabling it make sure the whole domain (and subdomains, with `includeSubDomains`) serves HTTPS, since HSTS can only be waited out. There is no `preload` option. Set HSTS in one place only.
 
-Changing your password rotates your own session token, not just everyone else's. Every other device was already signed out; what the rotation adds is that the token in your *own* browser is replaced too, so a token captured before the change stops working after it — which matters precisely because rotating a password you believe is compromised is the case this is for. The replacement cookie comes back on the same response, so you stay signed in.
+## Security
 
-A failed login costs the same whether or not the username exists. The response wording is already generic, and an unknown username now spends an Argon2 verification against a throwaway hash so the two paths cannot be told apart by response time either — otherwise a single request would reveal whether an account exists, letting an attacker aim the login rate limit at real accounts only.
+### Sessions
 
-Repeated failed logins against the *same account* are slowed down, keyed by the submitted username: three failures are free, then each further attempt is held 1s, 2s, 4s … up to 30s, and the penalty is forgotten after an hour of quiet. A correct password clears it immediately, so mistyping your own password a few times costs you nothing lasting.
+- Logout sends `Clear-Site-Data: "cache", "cookies", "storage"`. `"cookies"` covers the whole **registrable domain**, so sibling services (e.g. `wiki.example.com` next to `liftlog.example.com`) are logged out too. Ignored on plain HTTP.
+- Promoting a user to admin logs that user out everywhere, so a token stolen before the promotion can't inherit admin rights.
+- Changing your password signs out every other device **and** rotates your own token; you stay signed in with the new one.
+- Promoting or deleting a user requires the acting admin to re-enter their own password on a confirmation page. This defends against a stolen cookie or an unlocked browser, which the CSRF guard can't. It shares the password-change rate limit.
 
-This is deliberately a delay and **not** an account lockout, which is what OWASP names first. The cheat sheet also warns that lockout is a denial-of-service primitive — anyone can lock anyone out — and suggests letting a forgotten-password flow rescue a locked account. liftlog has no such flow, no email, and its first user is its only administrator, so a hard lockout would let an unauthenticated attacker permanently lock the owner out of their own data with no recovery short of editing the database by hand. The delay collapses an attacker's guess rate just as effectively while leaving every legitimate login eventually possible.
+### Login throttling
 
-It complements the per-IP limit rather than duplicating it: that one bounds how fast a single source can try, this one bounds how fast *one account* can be tried no matter how many sources are used — which is the shape of a password spray. The penalty accumulates for usernames that do not exist exactly as for real ones, so the wait cannot be used to ask whether an account exists.
+- **Per IP:** `POST /auth/login` allows 5 attempts per 60 seconds.
+- **Per account** (keyed by the submitted username): 3 free failures, then each attempt is delayed 1s, 2s, 4s … up to 30s; forgotten after an hour of quiet, cleared by a correct password. Deliberately a delay, **not a lockout** — with no email, no password reset, and a single admin, a lockout would let anyone permanently lock the owner out. Unknown usernames accumulate the same penalty, so the delay reveals nothing.
+- Failed logins cost the same for unknown and existing usernames (an Argon2 check against a dummy hash), so response time doesn't reveal which accounts exist.
+- **Password change** (`POST /settings/password`) allows 5 attempts per 15 minutes, keyed by **user id** so a stolen session can't get a fresh budget from new IPs. A successful change refunds its attempt.
 
-Changing a password is throttled too, at 5 attempts per 15 minutes. `POST /settings/password` verifies the current password, which makes it liftlog's second place a password can be guessed at — reachable by anyone holding a stolen session cookie, and costing two Argon2 operations per request. Unlike the login throttle this one is keyed by **user id**, not client IP: the request is authenticated, so the account under attack is known exactly, and an IP key would let the same stolen session buy a fresh budget from every source address. A successful change hands its attempt back, so rotating your password repeatedly never locks you out.
+### Passwords
 
-Passwords must be 12 to 128 characters **and** score at least 3 of 4 on [zxcvbn](https://github.com/dropbox/zxcvbn). The maximum is there so the hash comparison has a bounded input (OWASP *Compare Password Hashes Using Safe Functions*); over-long passwords are rejected, never silently truncated. Both bounds count **characters, not bytes**, so a non-ASCII passphrase is measured the same way the error message describes it.
+Passwords must be **12–128 characters** (counted as characters, not bytes; never truncated) **and score ≥ 3 of 4 on [zxcvbn](https://github.com/dropbox/zxcvbn)**, which runs offline and also rejects passwords built from the username. So `MyPassword12` is refused and `deadlift squats bench` accepted. Refusals show zxcvbn's feedback but not its crack-time estimate.
 
-The strength check covers the *common* half of OWASP's *Block common and previously breached passwords* requirement — the *previously breached* half is deliberately not covered, for reasons set out under [Out of scope](#out-of-scope). zxcvbn ships the common-password and English-word dictionaries plus pattern detection (keyboard walks, l33t substitution, dates, repeats), and runs entirely offline — nothing about your password leaves the process, unlike a Pwned Passwords API lookup. It also receives your username, so a password built out of it is rejected. The upshot is that `MyPassword12` is refused while `deadlift squats bench` is accepted: the policy measures guessability, not whether you remembered to add a digit. When a password is refused, zxcvbn's own explanation of *why* is shown; its guess-count and crack-time estimates deliberately are not, since the cheat sheet warns against advertising an entropy figure as a guarantee of strength.
+The 12-character floor is below NIST SP800-63B's 15 for non-MFA deployments on purpose: 12 plus zxcvbn rejects strictly more weak passwords than 15 alone (`123456789012345` is 15 characters). Both thresholds are constants in `src/models/user.rs`; changing them doesn't invalidate stored passwords. zxcvbn's dictionaries are English-centric, so passwords in other scripts rely mainly on the length floor.
 
-The 12-character floor is below NIST SP800-63B's 15 for deployments without MFA, and that is a deliberate pairing rather than an oversight: NIST's own advice is length *and* blocklist checks over composition rules, and 12-plus-zxcvbn rejects strictly more weak passwords than 15 alone would (`123456789012345` is 15 characters). Both the length floor and the score threshold are single constants in `src/models/user.rs` if you want a stricter bar. Changing either does not invalidate stored passwords — existing users keep working until they next set one.
+### Headers
 
-Note that zxcvbn's dictionaries are English-centric, so a password in another script gets little signal from the strength check and is protected mainly by the length floor.
-
-Every response carries `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`. These are unconditional — there is no setting to turn them off. The first two block clickjacking, which nothing else here covers: `SameSite=Lax` still sends the session cookie on a top-level iframe navigation, and the CSRF origin guard sees `Sec-Fetch-Site: same-origin` because the click really did come from the victim's browser. This means **liftlog cannot be embedded in an iframe**, including the public `/shared/{token}` page. The CSP carries only `frame-ancestors`; it is not a full content policy, so it does not restrict scripts or styles.
-
-**Have your reverse proxy forward `Host` exactly as the browser sent it, port included.** The CSRF guard rejects a state-changing request whose `Origin` does not match the request's own host *and port*, and that comparison is the only check running for a browser that sends no `Sec-Fetch-Site` — Safari before 16.4, and any plain-HTTP origin, since fetch metadata is only sent to potentially-trustworthy ones. nginx's widely-copied `proxy_set_header Host $host;` drops the port, so on a non-default port it gets those users' form submissions refused with a `403` and a `csrf.rejected` / `reason=origin_fallback` line in the log. Use `proxy_set_header Host $http_host;` instead; Caddy and Traefik forward `Host` unchanged by default, and a bare LAN install with no proxy in front is unaffected.
-
-Prefer sending HSTS from your reverse proxy. liftlog does not terminate TLS and cannot tell whether a request really arrived over HTTPS; the layer that terminates TLS does. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch for deployments that cannot set headers at the proxy. Before enabling it, make sure the whole domain — and, with `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS`, every subdomain — serves working HTTPS: this declaration cannot be withdrawn from the server side, only waited out until `max-age` expires. There is deliberately no `preload` option; configure that on your proxy if you want it. Browsers ignore the header on plain-HTTP origins, so setting it there achieves nothing. If your proxy also sends HSTS, set it in only one place.
+Every response carries `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin`, unconditionally. The first two block clickjacking, which `SameSite=Lax` and the CSRF guard don't; as a result **liftlog cannot be embedded in an iframe**, including `/shared/{token}`. The CSP only sets `frame-ancestors`; it doesn't restrict scripts or styles.
 
 ### Out of scope
 
-**Multi-factor authentication is not implemented, and is not planned.** The OWASP Authentication Cheat Sheet calls MFA the single most effective defence against password attacks, so this is a deliberate decision rather than a gap waiting to be filled — please read the reasoning before filing it as a bug.
-
-The blocker is account recovery, not the TOTP implementation. liftlog has no email, no password-reset flow, and no second channel of any kind to reach a user through. The first account created is the sole administrator. If that administrator enrolled in MFA and later lost both their authenticator and their recovery codes, nobody could restore their access — there is no support desk, and the only way back in would be editing the SQLite file by hand. For a personal, self-hosted workout journal, a realistic risk of permanently locking the owner out of their own data outweighs the attack it would prevent.
-
-What that leaves as residual risk is **credential stuffing**: a password reused from a site that was breached elsewhere. The strength policy above blocks *common* passwords, but a reused password can be strong and still be in someone's breach corpus — that is the case MFA would have covered and nothing here does. The mitigation is a unique password per site, which a password manager makes free. liftlog is deliberately friendly to them: standard form fields, correct `autocomplete` attributes, a 128-character ceiling, and every character allowed.
-
-**Checking passwords against a breach corpus such as [Pwned Passwords](https://haveibeenpwned.com/Passwords) is also out of scope**, and it is worth being precise about why the strength check above does not already cover it — it looks like it should.
-
-zxcvbn and a breach lookup answer different questions. zxcvbn asks *"is this password guessable?"* — would an attacker's model generate it early. A breach lookup asks *"has this exact string ever appeared in a dump?"* — a fact about history, not a property of the string. A password can be maximally unguessable and still be in the corpus, because its owner reused it and some other site was breached. No guessability model can know that.
-
-Put in terms of the attacks: zxcvbn is a direct hit against **password spraying**, which works through frequency-ordered guesses. It does nothing against **credential stuffing**, which replays exact `username:password` pairs lifted from a breach. Scale makes the point too — zxcvbn ships 30,000 passwords; Pwned Passwords holds several hundred million hashes. That is not a dictionary anything embeds.
-
-Closing it properly therefore needs an outbound API call at password-set time. The k-anonymity protocol means the password itself never leaves (only the first five characters of its SHA-1, matched against the returned suffixes locally), but it still turns an application that contacts nothing into one that contacts something, and it needs an answer for what to do when the service is unreachable. For a self-hosted personal journal that trade is not obviously worth making, so it is not made. The residual risk is the credential-stuffing paragraph above, and the mitigation is the same: a unique password per site.
-
-**Usernames are case-sensitive, and making them case-insensitive is out of scope.** A username is treated as an exact identifier: `henry` and `Henry` are different accounts and can both exist. Two consequences are worth knowing rather than discovering:
-
-- Typing your username in the wrong case fails with the same generic `Invalid username or password` as a wrong password would. That wording is deliberate — a more specific message would tell an attacker which usernames exist — but it does mean a case slip looks identical to a forgotten password.
-- An administrator can create `Admin` alongside `admin`. In a deployment with more than one person, decide your own convention; nothing enforces one.
-
-This is enforced by a test, so it cannot drift by accident. If it is ever revisited, note that the per-account login backoff is keyed by the **submitted** username: any change that makes lookup case-insensitive has to normalise that key — and anything else keyed by username — in the same change, or an attacker can vary the case to get a fresh backoff counter per spelling and bypass the throttle entirely.
+- **MFA is not planned.** liftlog has no email, no password reset, and its first user is the sole admin; an admin who lost their authenticator and recovery codes could only get back in by editing the database. For a personal journal that risk outweighs the benefit. The residual risk is credential stuffing with a reused password — use a password manager (standard fields, correct `autocomplete`, 128 characters of anything).
+- **No breach-corpus check (e.g. [Pwned Passwords](https://haveibeenpwned.com/Passwords)).** zxcvbn measures guessability, which stops password spraying; it can't know that a strong password was reused and leaked elsewhere. Checking that needs an outbound API call, which liftlog deliberately never makes. Same mitigation: a unique password per site.
+- **Usernames are case-sensitive.** `henry` and `Henry` are distinct accounts, and a wrong-case username fails with the same generic `Invalid username or password`. A test pins this. If it ever changes, the per-account login backoff (keyed by the submitted username) must be normalised in the same change, or varying the case would bypass it.
 
 ## Audit Log
 
-Session lifecycle events (OWASP Session Management Cheat Sheet, *Logging Sessions Life Cycle*) are logged as structured `tracing` events under the `liftlog::audit` target, so they can be filtered out of general application logs and shipped to a log collector:
+Security events are structured `tracing` events under the `liftlog::audit` target. Set `LIFTLOG_LOG_FORMAT=json` for one JSON event per line.
 
 | Event | Level | Meaning |
 |-------|-------|---------|
-| `session.created` | info | Login or first-user setup created a session (`reason`: `login` or `setup`) |
-| `session.renewed` | info | The sliding-expiry touch extended a session's lifetime |
-| `session.destroyed` | info | A session (or, for a bulk delete, a batch of sessions) was deleted — logout, password change, "log out other devices", an admin promoting the user to admin, or an admin deleting the user (`reason` says which) |
-| `session.expired` | info | A session was found dead on use and lazily deleted (`reason`: `idle` or `absolute`), or a batch of abandoned sessions was retired by the hourly background sweep (`reason`: `sweep`, which carries only a `count` and no request fields) |
-| `session.rejected` | debug | An unrecognised session token was presented |
+| `session.created` | info | Session created (`reason`: `login`, `setup`, `password_change_rotation`) |
+| `session.renewed` | info | Sliding expiry extended a session |
+| `session.destroyed` | info | One or more sessions deleted (`reason`: `logout`, `password_change`, `logout_others`, `role_change`, `admin_user_delete`) |
+| `session.expired` | info | Expired session found on use (`reason`: `idle`, `absolute`) or retired by the hourly sweep (`reason`: `sweep`, `count` only) |
+| `session.rejected` | debug | Unknown session token presented; `debug` so cookie-probing scanners don't drown other events |
+| `auth.login.failed` | warn | Login rejected; carries `username` (≤256 chars) and `backoff_ms`. Identical for unknown users and wrong passwords. A password typed into the username field ends up here. |
+| `auth.login.throttled` | warn | Login refused by the rate limiter |
+| `auth.reauth.failed` | warn | Wrong password on a re-auth check; carries `user_id`, `actor_session_fp`, `action` (`password_change`, `promote_user`, `delete_user`) |
+| `auth.reauth.throttled` | warn | Re-auth refused by the per-user limiter; same `action` |
+| `csrf.rejected` | warn | State-changing request refused as cross-site; carries `method`, `origin` (≤256 chars), and `reason`: `sec_fetch_site` (browser reported cross-site, `same-site` included) or `origin_fallback` (no `Sec-Fetch-Site`, `Origin` didn't match host and port) |
 
-Authentication failures are logged alongside them (OWASP Authentication Cheat Sheet, *Logging and Monitoring*: all password failures and all lockouts must be logged and reviewed). These are the events to alert on — a burst of them is what a brute-force or credential-stuffing run looks like:
+A steady trickle of `origin_fallback` usually means the proxy isn't forwarding `Host` correctly — see [Reverse proxy](#reverse-proxy).
 
-| Event | Level | Meaning |
-|-------|-------|---------|
-| `auth.login.failed` | warn | A login was rejected. Carries the attempted `username` (truncated to 256 chars) so you can see which account is being targeted, and `backoff_ms` — how long the per-account delay held that attempt, which climbs as an attack continues |
-| `auth.login.throttled` | warn | A login was refused by the rate limiter before any credential was checked |
-| `auth.reauth.failed` | warn | A route that re-checks the password before acting was given the wrong one. Carries `user_id`, `actor_session_fp` and `action` (`password_change`, `promote_user`, `delete_user`) |
-| `auth.reauth.throttled` | warn | Such a re-check was refused by the per-user rate limiter. Same `action` field |
+Request-scoped events carry `client_ip`, `user_agent` (≤256 chars), `path`, and `session_fp` — a salted SHA-256 of the token, never the token itself. The salt is per process, so `session_fp` only correlates within one run. Bulk deletes carry `actor_session_fp` and `count` instead.
 
-Requests refused by the CSRF guard are logged too:
-
-| Event | Level | Meaning |
-|-------|-------|---------|
-| `csrf.rejected` | warn | A state-changing request was refused as cross-site. Carries `method`, the claimed `origin` (truncated to 256 chars), and `reason` — `sec_fetch_site` (the browser declared it cross-site, `same-site` included) or `origin_fallback` (no `Sec-Fetch-Site` arrived and the `Origin` did not match the request's own host and port) |
-
-`reason` is worth reading before assuming an attack. `sec_fetch_site` is the browser itself reporting a cross-site request. `origin_fallback` is inferred from an `Origin`/`Host` pair a reverse proxy may have rewritten — a steady trickle of it means your proxy is not forwarding `Host` as the browser sent it, and the fix is at the proxy, not here (see below).
-
-`auth.login.failed` is emitted identically for an unknown username and a wrong password — same event, same wording, same fields. Distinguishing them would rebuild in the log the user-enumeration oracle that the constant-cost login path exists to remove. Note the trade-off inherent in recording the attempted username at all: a user who types their password into the username field puts it in the log, the same way `sshd` does.
-
-Every request-scoped event carries `client_ip`, `user_agent` (truncated to 256 chars), and `path`, plus a `session_fp` field — a salted SHA-256 fingerprint of the session token, never the raw token itself. The salt is generated fresh at process startup and is never logged, so `session_fp` values let you correlate events for the same session **within one process's lifetime**, but they do NOT correlate across restarts. Bulk-delete events carry `actor_session_fp` (the session that performed the action) and `count` instead of a single `session_fp`, since there's no one session to name. The sweep event is an exception: it has no request context and carries only `count`.
-
-`session.rejected` is logged at `debug`, not `info`, because liftlog is typically internet-facing and scanners probing random cookie values would otherwise drown the genuinely useful events; set `RUST_LOG` to include `debug` to see them.
-
-Set `LIFTLOG_LOG_FORMAT=json` to emit these (and all other logs) as JSON, one event per line, ready for ingestion by a log collector.
-
-> **Migration note:** `BIND` and `LOG_FORMAT` were renamed to `LIFTLOG_BIND` and `LIFTLOG_LOG_FORMAT`. If either old name is still set in the environment, the server **refuses to start** and names the replacement, so a stale value can't be silently ignored.
-
-## Docker
-
-### Docker Compose
+## Docker Compose
 
 ```yaml
 services:
@@ -180,64 +137,32 @@ volumes:
   liftlog_data:
 ```
 
-### Building Docker Image
-
-```bash
-docker build -t liftlog:latest .
-```
+Build locally with `docker build -t liftlog:latest .`
 
 ## Development
 
-### Prerequisites
-
-- Rust (stable)
-- SQLite (bundled via rusqlite)
-
-### Running Locally
+SQLite is bundled via rusqlite; only a Rust toolchain is needed.
 
 ```bash
 cargo run
-```
-
-### Running Tests
-
-```bash
 cargo nextest run
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
 ```
 
-### UI BDD Tests
+### E2E tests
 
-End-to-end tests live in `e2e/` ([cucumber](https://github.com/cucumber-rs/cucumber) + [thirtyfour](https://github.com/stevepryde/thirtyfour)). They lock in user-facing behavior so UI redesigns can't silently change it. Features are described in Gherkin (`e2e/features/`) and step bindings are Rust (`e2e/tests/e2e/steps.rs`).
-
-First-time setup — a local Chrome or Chromium, which the driver manager does *not* download:
+`e2e/` ([cucumber](https://github.com/cucumber-rs/cucumber) + [thirtyfour](https://github.com/stevepryde/thirtyfour)) is a separate Cargo workspace with Gherkin features in `e2e/features/`. It needs a local Chrome or Chromium (`brew install --cask ungoogled-chromium` on macOS):
 
 ```bash
-brew install --cask ungoogled-chromium   # macOS; most Linux distros ship a chromium package
-```
-
-Run the suite (boots a fresh sqlite + Rust server per run):
-
-```bash
+cargo build          # the suite runs target/debug/liftlog as-is, even if stale
 cd e2e
 cargo test --test e2e
 ```
 
-`e2e/` is its own Cargo workspace, so a `--workspace` build at the repository root never compiles the browser stack.
-
-### Code Quality
-
-```bash
-cargo fmt --check
-cargo clippy -- -D warnings
-```
-
 ## Tech Stack
 
-- **Web Framework**: Axum 0.8
-- **Async Runtime**: Tokio
-- **Database**: SQLite (rusqlite + r2d2)
-- **Templates**: Askama
-- **Password Hashing**: Argon2
+Axum 0.8 · Tokio · SQLite (rusqlite + r2d2) · Askama · Argon2
 
 ## License
 

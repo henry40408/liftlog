@@ -1,16 +1,7 @@
-//! The Cucumber world: one browser session per scenario, plus the handful of
-//! ids a scenario builds up as it goes.
-//!
-//! The session is opened by a `before` hook rather than in `new`, so a failure
-//! to start a browser is reported as a hook error against the scenario instead
-//! of a panic inside the world constructor.
-//!
-//! `suffix` is the direct port of the old `scenarioState.unique(...)`. Every
-//! scenario shares one server and one database — Playwright gave each worker
-//! its own — so a fixture named `Squat` would collide with the same fixture in
-//! a scenario running alongside it. Names carry a per-scenario suffix and each
-//! scenario asserts only on what it built; "the lifter has no other workouts"
-//! was never a safe assumption here and still is not.
+//! The Cucumber world: one browser session per scenario (opened in a `before`
+//! hook so a failure is a hook error, not a constructor panic) plus the ids
+//! the scenario builds up. Every scenario shares one database, so fixture
+//! names carry a per-scenario suffix via [`LiftLogWorld::unique`].
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -198,10 +189,7 @@ impl LiftLogWorld {
         Ok(StatsPage(self.driver()?))
     }
 
-    /// Requests a path as the signed-in user and reports the status.
-    ///
-    /// The browser's own session cookie rides along, so a 404 here is the one
-    /// *this* user gets rather than the redirect a stranger would.
+    /// Requests a path with the browser's session cookie and reports the status.
     pub async fn status_of(&self, path: &str) -> Result<u16> {
         let session = self.browser()?.session_cookie().await?;
         crate::http::status(path, session.as_deref()).await

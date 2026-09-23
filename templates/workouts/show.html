@@ -17,11 +17,6 @@
 
     <div class="actions mb-6">
         <a href="/workouts/{{ workout.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
-        {# A link to the confirmation page, not a POST form with confirm():
-           that handler never runs with JavaScript off, so the workout — and
-           every set in it, by cascade — used to go on the first click.
-           `data-confirm` restores the one-click feel where scripts do run;
-           see the delegated handler in base.html. #}
         <a href="/workouts/{{ workout.id }}/delete" class="btn btn-danger btn-sm"
            data-confirm="Delete this workout? Every set recorded in it is deleted too, and this cannot be undone.">Delete</a>
         {% match share_url %}
@@ -43,10 +38,7 @@
     {% when Some with (url) %}
     <div class="share-info">
         <p style="margin: 0 0 var(--sp-3) 0;">Share link: <a href="{{ url }}" target="_blank">{{ url }}</a>
-        {# Copying needs the clipboard API, so there is no scripts-off
-           version of this button — it is hidden until the handler in
-           base.html reveals it, rather than sitting there doing nothing.
-           The link itself is above, selectable either way. #}
+        {# Needs the clipboard API: hidden until base.html reveals it. #}
         <button type="button" class="btn btn-sm btn-inline" hidden data-requires-js
                 data-copy-url="{{ url }}"
                 style="background:var(--accent);color:var(--text-inverse);border-color:var(--accent);">Copy</button></p>
@@ -83,11 +75,7 @@
             </div>
             <div class="form-group">
                 <label for="weight">Weight</label>
-                {# A datalist, not a <select>: any weight the field took before
-                   it still goes in, typed. What it saves is the typing itself,
-                   which on a phone number pad is most of the cost of logging a
-                   set. Suggestions are the weights this workout already uses
-                   plus each exercise's last — see `weight_suggestions`. #}
+                {# Datalist, not <select>: suggestions, any weight still typeable. #}
                 <input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" list="weight-list" autocomplete="off" required{% if let Some(p) = prefill %} value="{{ p.weight }}"{% endif %}>
                 {% if !weight_suggestions.is_empty() %}
                 <datalist id="weight-list">
@@ -97,10 +85,7 @@
             </div>
             <div class="form-group">
                 <label for="reps">Reps</label>
-                {# Fixed, unlike the weights: rep schemes are a vocabulary the
-                   application asserts rather than one read back from history,
-                   so it is the same list on a first workout as on a thousandth.
-                   See `models::workout_log::REP_SCHEMES`. #}
+                {# Fixed list: `models::workout_log::REP_SCHEMES`. #}
                 <input type="number" inputmode="numeric" id="reps" name="reps" min="1" list="reps-list" autocomplete="off" required{% if let Some(p) = prefill %} value="{{ p.reps }}"{% endif %}>
                 <datalist id="reps-list">
                     {% for r in rep_suggestions %}<option value="{{ r }}">{% endfor %}
@@ -113,10 +98,8 @@
             <button type="submit">Add Set</button>
         </form>
 
-        {# The inline hint above reacts to the <select>, which nothing can do
-           without scripts. Listing every exercise's last set covers the same
-           question — "what did I do last time?" — in a form that needs no
-           interaction. Hidden when scripts run, where the hint is better. #}
+        {# No-JS stand-in for the last-weight hint, which needs the <select>
+           change event. #}
         <noscript>
             {% if !last_weight_rows.is_empty() %}
             <h4 style="margin: var(--sp-5) 0 var(--sp-2) 0;">Last time</h4>
@@ -172,9 +155,7 @@
             <div class="set-cell set-cell-pr">{% if log.is_pr %}<span class="pr-badge" title="All-time best for this exercise">PR</span>{% else if log.is_recent_pr %}<span class="pr-badge pr-badge-recent" title="Best for this exercise in the last month">PR 1M</span>{% endif %}</div>
             <div class="set-row-actions">
                 <a href="/workouts/{{ workout.id }}/logs/{{ log.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
-                {# A link that reloads the page with the form prefilled, so
-                   Clone still works with scripts off; the handler below
-                   intercepts it and fills the form in place instead. #}
+                {# href works without scripts; the handler below fills in place. #}
                 <a href="?prefill={{ log.id }}#add-set" class="btn btn-ghost btn-sm"
                    data-clone-exercise="{{ log.exercise_id }}"
                    data-clone-weight="{{ log.weight }}"
@@ -242,10 +223,8 @@ function cloneSet(exerciseId, weight, reps, rpe) {
     exerciseSelect.scrollIntoView({ behavior: 'smooth' });
 }
 
-/* Clone is a link to `?prefill=<log id>`, which the server honours. Filling
-   the form in place is quicker, so intercept the click — but leave
-   ctrl/cmd-click alone, where the href opens the prefilled page in a new
-   tab. Delegated, so it covers rows the page did not render itself. */
+/* Fill the form in place instead of following the `?prefill=` link;
+   modified clicks still open it. */
 document.addEventListener('click', function (e) {
     if (e.defaultPrevented || e.button !== 0 ||
         e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
@@ -270,8 +249,7 @@ document.addEventListener('click', function (e) {
     );
 });
 
-/* Arriving at ?prefill=… the server has already filled the form; show the
-   matching hint too, so the scripted view matches what a reload gives. */
+/* Server-prefilled form (?prefill=…): show its hint too. */
 if (exerciseSelect.value) {
     showLastWeightInfo(exerciseSelect.value);
 }

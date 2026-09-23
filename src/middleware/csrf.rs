@@ -1,43 +1,7 @@
-//! First-line — and only — CSRF defence: reject state-changing requests that a
-//! browser reports, or reveals, to be cross-site. Header-only; no token, no
-//! state. Combined with the session cookie's `SameSite=Lax`, this is liftlog's
-//! CSRF defence; there is no synchronizer token.
-//!
-//! The check itself is [`tower_http::csrf::CsrfLayer`], which implements the
-//! scheme Go 1.25 shipped as `http.CrossOriginProtection`:
-//!
-//! - **`Sec-Fetch-Site`** (sent by every current browser) is authoritative when
-//!   present. Only `same-origin` and `none` — a direct navigation or a
-//!   user-typed URL — are allowed; `cross-site`, `same-site`, and any value the
-//!   layer does not know are rejected. `same-site` covers a sibling subdomain or
-//!   another port on the same host, which `SameSite=Lax` still hands the session
-//!   cookie, so allowing it would leave exactly the caller this guard exists to
-//!   stop.
-//! - **`Origin`** is the fallback for the rare browser that omits
-//!   `Sec-Fetch-Site` (Safari before 16.4) and for a plain-HTTP LAN install,
-//!   where fetch metadata never arrives because the origin is not
-//!   potentially-trustworthy. Its authority — host *and* port — is compared
-//!   byte-for-byte against the request's own (the request-target authority if
-//!   present, else `Host`); a mismatch, an opaque `Origin: null`, a malformed
-//!   `Origin`, or a missing `Host` is rejected. Scheme is ignored, so a
-//!   TLS-terminating proxy whose forwarded `Host` carries no scheme still
-//!   passes.
-//! - **Neither header** means a non-browser client (`curl`, the integration-test
-//!   harness). Those are not exposed to an ambient-cookie CSRF and pass through.
-//!
-//! Matching the port is what this module used to give up (issue #187) to
-//! tolerate `proxy_set_header Host $host;` on a non-default port. That tolerance
-//! was worth less than it cost: cookies ignore ports, so another service on the
-//! same host — a second container, a dev server, anything an attacker can get a
-//! page onto — passed as same-origin while carrying the victim's session, and
-//! with no synchronizer token behind it nothing else would have caught it. The
-//! operator-facing price is one line in the README: forward `Host` with the port
-//! the browser sent (nginx's `$http_host`, not `$host`).
-//!
-//! What this module still owns is [`log_csrf_rejection`]: the layer answers with
-//! a bare `403` and its rejection builder never sees the request, so without an
-//! enclosing layer an operator whose proxy trips the guard has nothing to work
-//! from.
+//! CSRF audit logging around [`tower_http::csrf::CsrfLayer`], which (with the
+//! session cookie's `SameSite=Lax`) is the whole CSRF defence. The layer's
+//! rejection builder never sees the request, so this module pairs the captured
+//! request with the [`ProtectionError`] on the 403 and logs `csrf.rejected`.
 
 use axum::{
     extract::{Request, State},
@@ -49,18 +13,15 @@ use tower_http::csrf::{ProtectionError, ProtectionErrorKind};
 
 use crate::audit::AuditContext;
 
-/// What the guard needs to attribute a rejection to a client IP. Deliberately
-/// not `SessionLayerState`: this layer runs outside session validation and has
-/// no business holding a session repository.
+/// Client-IP attribution inputs; not `SessionLayerState`, as this runs outside
+/// session validation.
 #[derive(Clone)]
 pub struct CsrfLayerState {
     pub trusted_proxy_header: crate::config::TrustedProxyHeader,
     pub trusted_proxies: std::sync::Arc<Vec<std::net::IpAddr>>,
 }
 
-/// The pieces of a request a rejection needs to log, captured on the way in
-/// because [`tower_http::csrf::CsrfLayer`] consumes the request it rejects and
-/// hands its rejection builder only a [`ProtectionError`].
+/// Captured on the way in: `CsrfLayer` consumes the request it rejects.
 struct PendingAudit {
     method: Method,
     path: String,
@@ -68,24 +29,15 @@ struct PendingAudit {
     extensions: axum::http::Extensions,
 }
 
-/// Log every rejection by the first-line CSRF guard, `tower_http`'s
-/// `CsrfLayer`, which must be layered directly *inside* this one so its 403 —
-/// and the [`ProtectionError`] it attaches to the response — passes through
-/// here.
-///
-/// The guard's only other symptom is an unexplained `403`, and the deployment
-/// shapes that produce one legitimately (a proxy rewriting `Host`) are
-/// indistinguishable in an access log from an attack. The *response* stays
-/// bodyless on purpose: an attacker's page cannot read it anyway, and naming the
-/// failed check only helps someone probing the guard.
+/// Logs every `CsrfLayer` rejection; `CsrfLayer` must be layered directly
+/// inside this. The 403 stays bodyless: naming the failed check only helps
+/// someone probing the guard.
 pub async fn log_csrf_rejection(
     State(layer): State<CsrfLayerState>,
     req: Request,
     next: Next,
 ) -> Response {
-    // Only built for methods the guard can reject, so the overwhelming majority
-    // of requests — page loads — don't pay for a `HeaderMap` clone they never
-    // log. The `AuditContext` itself is still deferred to the reject path.
+    // Only capture for methods the layer can reject, sparing page loads the clone.
     let pending = (!is_safe(req.method())).then(|| PendingAudit {
         method: req.method().clone(),
         path: req.uri().path().to_owned(),
@@ -115,10 +67,8 @@ pub async fn log_csrf_rejection(
     res
 }
 
-/// Which of the guard's two checks fired. The `Origin` fallback is the one only
-/// an old browser — or a proxy that rewrites `Host` — can trip, so it is worth
-/// telling apart in the log from the browser declaring the request cross-site
-/// itself.
+/// Which check fired; `origin_fallback` usually means an old browser or a proxy
+/// rewriting `Host`.
 fn rejected_by(kind: ProtectionErrorKind) -> &'static str {
     match kind {
         ProtectionErrorKind::CrossOriginRequest => "sec_fetch_site",
@@ -133,9 +83,8 @@ fn header_str(value: Option<&HeaderValue>) -> Option<&str> {
     value.and_then(|v| v.to_str().ok())
 }
 
-/// Whether `method` cannot change server state and so is one `CsrfLayer` never
-/// rejects. Deliberately not [`Method::is_safe`], which also counts `TRACE`:
-/// this must mirror the layer's own set or a rejection would go unlogged.
+/// Methods `CsrfLayer` never rejects. Not [`Method::is_safe`], which includes
+/// `TRACE` — the layer checks it, so it must be captured.
 fn is_safe(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
@@ -147,10 +96,7 @@ mod tests {
     use tower::{Layer, ServiceExt, service_fn};
     use tower_http::csrf::CsrfLayer;
 
-    /// Pins the assumption `log_csrf_rejection` makes when it skips capturing:
-    /// a method this returns `true` for is never rejected by the layer, so
-    /// nothing is lost by not capturing it. `TRACE` is "safe" per RFC 7231 but
-    /// *is* checked by the layer, hence the explicit set.
+    /// `is_safe` must match the layer's exempt set exactly.
     #[tokio::test]
     async fn the_skipped_methods_are_exactly_the_ones_the_layer_never_rejects() {
         for (method, safe) in [

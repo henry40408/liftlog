@@ -3,13 +3,9 @@ use std::hash::Hash;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Maximum number of distinct keys tracked at once. Bounds memory under a
-/// distributed spray of attempts from many source addresses (or, for the
-/// user-keyed limiter, many accounts).
+/// Bounds memory under a spray from many keys.
 const MAX_ENTRIES: usize = 10_000;
 
-/// A single fixed-window attempt counter, shared by both the per-IP entries
-/// and the overflow bucket.
 struct Window {
     count: u32,
     started: Instant,
@@ -24,17 +20,13 @@ impl Window {
     }
 }
 
-/// The mutex payload: per-key windows, plus one shared window for keys
-/// admitted while `entries` is at capacity. See the capacity branch of
-/// `try_acquire` for why the overflow bucket exists.
+/// Per-key windows, plus one shared window for new keys while at capacity.
 struct Buckets<K> {
     entries: HashMap<K, Window>,
     overflow: Window,
 }
 
-/// Applies one attempt against `w`, resetting it if its window has already
-/// elapsed. Shared by the per-IP and overflow paths so they cannot drift
-/// out of sync with each other.
+/// Charges one attempt, resetting an elapsed window.
 fn charge(w: &mut Window, max_attempts: u32, window: Duration) -> bool {
     if w.started.elapsed() >= window {
         *w = Window {
@@ -50,22 +42,12 @@ fn charge(w: &mut Window, max_attempts: u32, window: Duration) -> bool {
     true
 }
 
-/// A per-key fixed-window rate limiter, used to throttle password guesses.
+/// Per-key fixed-window limiter for password guesses. Login is keyed by
+/// `IpAddr`; password change by user id, so a stolen session can't buy more
+/// guesses by rotating addresses.
 ///
-/// Generic over the key so the same logic serves both throttles: login is
-/// keyed by `IpAddr` (the request is anonymous, so the source address is the
-/// only identity available), while the password-change throttle is keyed by
-/// user id — that request is authenticated, so the account it targets is
-/// known exactly, and keying on it means an attacker holding a stolen session
-/// cannot buy more guesses by rotating source addresses.
-///
-/// State lives in memory only, for the lifetime of the process. A short
-/// window has no persistence value: liftlog is a single-process,
-/// single-SQLite-file self-hosted service, and writing a database row per
-/// login attempt would turn an attacker's brute-force traffic into
-/// write-amplification denial-of-service against the same database that
-/// serves real users. A restart clearing every counter (letting anyone who
-/// was throttled start over) is an accepted trade-off for that simplicity.
+/// In-memory only: persisting would turn brute-force traffic into SQLite
+/// write amplification. A restart resetting counters is accepted.
 pub struct RateLimiter<K = std::net::IpAddr> {
     buckets: Mutex<Buckets<K>>,
     max_attempts: u32,
@@ -86,48 +68,28 @@ impl<K: Eq + Hash> RateLimiter<K> {
         }
     }
 
-    /// Locks the bucket state, handling poisoning by recovering the
-    /// (possibly inconsistent but still usable) inner guard rather than
-    /// panicking. A panic inside one request while holding this lock must
-    /// not take down every future login attempt on the service.
+    /// Recovers from poisoning so one panicked request can't disable login.
     fn lock(&self) -> std::sync::MutexGuard<'_, Buckets<K>> {
         self.buckets
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Attempts to reserve one attempt for `key`. Returns `true` if the
-    /// attempt is allowed (and counts against the budget), `false` if `key`
-    /// has exceeded `max_attempts` within the current window.
-    ///
-    /// The lock is taken exactly once for the whole check-and-record
-    /// operation. Splitting this into a separate "check" then "record" call
-    /// would let concurrent requests all observe the same pre-attack count
-    /// and all be admitted, defeating the limit.
+    /// Reserves one attempt; `false` if `key` is over budget. Check and
+    /// record share one lock so concurrent requests can't all pass.
     pub fn try_acquire(&self, key: K) -> bool {
         let mut buckets = self.lock();
 
         if buckets.entries.len() >= self.max_entries && !buckets.entries.contains_key(&key) {
-            // At capacity and this is a new key. First try to make room by
-            // dropping entries whose window has already expired.
+            // New key at capacity: drop expired entries first.
             buckets
                 .entries
                 .retain(|_, w| w.started.elapsed() < self.window);
 
             if buckets.entries.len() >= self.max_entries {
-                // Still full after pruning expired entries. This source is
-                // untracked and cannot get its own entry. Two tempting
-                // alternatives are both wrong:
-                //   - Admitting it unconditionally would give it *unlimited*
-                //     attempts, each costing a full Argon2 verification —
-                //     turning the throttle off for exactly the attacker who
-                //     filled the table, plus CPU exhaustion on top.
-                //   - Clearing the map to make room would hand every
-                //     already-throttled source a free reset of its own
-                //     budget, just because an attacker sprayed enough fresh
-                //     keys to fill the table.
-                // Instead, every untracked key while at capacity shares
-                // one finite overflow budget: bounded, but not a bypass.
+                // Still full. Admitting freely means unlimited Argon2
+                // guesses; clearing the map resets throttled keys. So
+                // untracked keys share one finite overflow budget.
                 return charge(&mut buckets.overflow, self.max_attempts, self.window);
             }
         }
@@ -136,18 +98,9 @@ impl<K: Eq + Hash> RateLimiter<K> {
         charge(entry, self.max_attempts, self.window)
     }
 
-    /// Hands back a previously reserved attempt, called after a successful
-    /// login so a legitimate user signing in repeatedly (new device, cleared
-    /// cookies, a test suite) is never locked out. An attacker's attempts
-    /// are all failures, so their budget is never released by this path.
-    ///
-    /// Only ever touches the per-key entry, never the overflow bucket: a
-    /// legitimate user who happened to land in the shared overflow bucket
-    /// during an active spray (because the table was full at the time) is
-    /// collateral damage of being under attack, not a tracked identity this
-    /// call can single out. Refunding the overflow bucket on any successful
-    /// login would let anyone holding one valid credential keep it
-    /// permanently topped up, defeating the whole point of bounding it.
+    /// Refunds an attempt after a successful login so repeat sign-ins never
+    /// lock out. Never refunds the overflow bucket: one valid credential
+    /// could otherwise keep it topped up.
     pub fn release(&self, key: K) {
         let mut buckets = self.lock();
         if let std::collections::hash_map::Entry::Occupied(mut occupied) =
@@ -194,8 +147,7 @@ mod tests {
 
     #[test]
     fn window_expiry_resets_the_budget() {
-        // A zero-length window is already elapsed by the time it's checked,
-        // so this needs no sleep to exercise the reset path.
+        // A zero window is already elapsed, so no sleep is needed.
         let limiter = RateLimiter::new(1, Duration::ZERO);
         let addr = ip(1);
         assert!(limiter.try_acquire(addr));
@@ -215,12 +167,6 @@ mod tests {
         assert!(buckets.entries.is_empty());
     }
 
-    /// Replaces the old (vacuous) `map_is_pruned_at_capacity`: that test
-    /// only asserted `map.len() <= max_entries`, which the early `return` in
-    /// the capacity branch guarantees regardless of whether pruning actually
-    /// runs — deleting the `retain` call entirely still passed it. This
-    /// asserts the actual effect of pruning: an expired entry is evicted and
-    /// the freed slot is used by a fresh IP.
     #[test]
     fn prune_makes_room_when_windows_have_expired() {
         let mut limiter = RateLimiter::new(5, Duration::ZERO);
@@ -239,10 +185,6 @@ mod tests {
         );
     }
 
-    /// Companion to `prune_makes_room_when_windows_have_expired`: when the
-    /// existing entries' windows are still live, pruning frees nothing, so a
-    /// fresh IP at capacity must be diverted to the overflow bucket instead
-    /// of getting its own `entries` slot.
     #[test]
     fn live_window_at_capacity_diverts_to_overflow() {
         let mut limiter = RateLimiter::new(5, Duration::from_secs(60));
@@ -261,11 +203,6 @@ mod tests {
         );
     }
 
-    /// Regression test for the confirmed bypass: previously, once `entries`
-    /// was at capacity, every untracked IP was admitted unconditionally —
-    /// unlimited attempts for whichever attacker filled the table. Now
-    /// untracked sources share one finite overflow bucket: the first is
-    /// admitted, the second is refused.
     #[test]
     fn overflow_bucket_is_finite() {
         let mut limiter = RateLimiter::new(1, Duration::from_secs(60));
@@ -303,9 +240,6 @@ mod tests {
         );
     }
 
-    /// The password-change throttle keys by user id (a `String`), not an
-    /// `IpAddr`, so pin that the generic parameter actually works for an
-    /// owned, non-`Copy` key — including `release`, which moves the key in.
     #[test]
     fn string_keyed_limiter_tracks_budgets_per_key() {
         let limiter: RateLimiter<String> = RateLimiter::new(2, Duration::from_secs(60));
@@ -357,29 +291,16 @@ mod tests {
     }
 }
 
-/// Consecutive-failure counter that turns repeated failed logins against one
-/// account into an escalating delay.
+/// Escalating delay after repeated failed logins against one account.
 ///
-/// This is deliberately **not** an account lockout, which is what the OWASP
-/// Authentication Cheat Sheet reaches for first. The cheat sheet also warns
-/// that lockout is a denial-of-service primitive — anyone can lock anyone out
-/// — and suggests letting the forgotten-password flow rescue a locked
-/// account. liftlog has no such flow, no email, and its first user is its only
-/// administrator, so a hard lockout here would be an unauthenticated attacker
-/// permanently locking the owner out of their own data with no recovery path
-/// short of editing the database by hand. An escalating delay collapses an
-/// attacker's guess rate just as effectively while leaving every legitimate
-/// login eventually possible.
+/// Deliberately not a lockout: with no password-reset flow, a lockout would
+/// let anyone lock the sole admin out for good.
 ///
-/// The counter is keyed by the *submitted* username, and is incremented for
-/// unknown usernames exactly as for real ones. That symmetry is load-bearing:
-/// a delay applied only to accounts that exist would be a user-enumeration
-/// oracle measurable with a stopwatch, undoing the constant-cost work in
-/// `UserRepository::verify_password`.
+/// Keyed by the *submitted* username, unknown ones included; delaying only
+/// real accounts would be a timing enumeration oracle.
 ///
-/// Complements, rather than replaces, the per-IP [`RateLimiter`] on the same
-/// route: that one bounds how fast a single source can try, this one bounds
-/// how fast *one account* can be tried no matter how many sources are used.
+/// Complements the per-IP [`RateLimiter`]: that bounds one source, this
+/// bounds one account across all sources.
 pub struct FailureBackoff<K = String> {
     entries: Mutex<HashMap<K, Failures>>,
     free_attempts: u32,
@@ -395,15 +316,8 @@ struct Failures {
 }
 
 impl FailureBackoff<String> {
-    /// The configuration liftlog actually runs, as a named constructor rather
-    /// than four literals at the call site in `main` — where nothing can test
-    /// them and a typo in the cap would be invisible.
-    ///
-    /// Three free failures so ordinary mistyping costs nothing, then 1s, 2s,
-    /// 4s … capped at 30s, and forgotten after an hour of quiet. The cap is
-    /// what a sustained attack settles at: roughly two guesses a minute
-    /// against any one account, no matter how many source addresses are
-    /// thrown at it.
+    /// Three free failures, then 1s, 2s, 4s … capped at 30s (≈2 guesses/min
+    /// per account); forgotten after an hour of quiet.
     pub fn for_login() -> Self {
         Self::new(
             3,
@@ -415,9 +329,8 @@ impl FailureBackoff<String> {
 }
 
 impl<K: Eq + Hash + Clone> FailureBackoff<K> {
-    /// `free_attempts` failures cost nothing — a person mistyping their own
-    /// password should not be punished. Past that the delay doubles from
-    /// `base`, capped at `max`. An entry untouched for `window` is forgotten.
+    /// `free_attempts` failures cost nothing; then the delay doubles from
+    /// `base`, capped at `max`. Entries idle for `window` are forgotten.
     pub fn new(free_attempts: u32, base: Duration, max: Duration, window: Duration) -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
@@ -435,11 +348,8 @@ impl<K: Eq + Hash + Clone> FailureBackoff<K> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// How long this attempt should be held before it is even evaluated.
-    ///
-    /// Reads without mutating, so a caller that never reaches
-    /// [`Self::record_failure`] (because the request failed earlier for an
-    /// unrelated reason) does not leave the account penalised.
+    /// Delay before evaluating the next attempt. Read-only, so a request
+    /// that never reaches [`Self::record_failure`] penalises nothing.
     pub fn delay_for(&self, key: &K) -> Duration {
         let entries = self.lock();
         let Some(entry) = entries.get(key) else {
@@ -451,20 +361,12 @@ impl<K: Eq + Hash + Clone> FailureBackoff<K> {
         self.delay_for_count(entry.count)
     }
 
-    /// The schedule itself, split out so it can be tested without touching the
-    /// map or the clock.
     fn delay_for_count(&self, count: u32) -> Duration {
-        // `count` failures have already happened; this is what the *next*
-        // attempt waits. With `free_attempts = 3` that means three failures
-        // cost nothing and the fourth attempt is the first to wait — so the
-        // comparison is `<`, not `<=`. Getting this boundary wrong by one
-        // silently hands an attacker a free guess per account.
+        // `<`, not `<=`: with 3 free, the fourth attempt is the first to wait.
         if count < self.free_attempts {
             return Duration::ZERO;
         }
-        // Saturating rather than wrapping: a long-running attack pushes
-        // `count` arbitrarily high, and `base << 40` would overflow into a
-        // nonsense duration (or panic in debug).
+        // Checked, so huge counts clamp to `max` instead of overflowing.
         let doublings = count - self.free_attempts;
         let scaled = self
             .base
@@ -477,25 +379,12 @@ impl<K: Eq + Hash + Clone> FailureBackoff<K> {
         let mut entries = self.lock();
 
         if entries.len() >= self.max_entries && !entries.contains_key(&key) {
-            // Drop everything already past its window first; a spray of
-            // one-shot usernames ages out on its own.
             let window = self.window;
             entries.retain(|_, f| f.last.elapsed() < window);
 
             if entries.len() >= self.max_entries {
-                // Still full of *live* entries. Evict the least recently
-                // touched one rather than declining to track this key:
-                // declining would mean an attacker who first sprayed enough
-                // distinct usernames to fill the table could then hammer their
-                // real target with no delay at all, which is precisely the
-                // attack this exists to stop. Evicting the stalest entry keeps
-                // the newest activity tracked.
-                //
-                // The residual is that a sustained spray can still churn a
-                // specific victim's entry out. Reaching that requires keeping
-                // 10_000 entries alive inside the window, every one of them
-                // paid for with a failed login that also cost the attacker an
-                // Argon2 verification and a slot in the per-IP limiter.
+                // Evict the stalest rather than skip tracking: skipping
+                // would let a username spray exempt the real target.
                 if let Some(stalest) = entries
                     .iter()
                     .min_by_key(|(_, f)| f.last)
@@ -510,9 +399,7 @@ impl<K: Eq + Hash + Clone> FailureBackoff<K> {
             count: 0,
             last: Instant::now(),
         });
-        // An entry whose window lapsed starts over rather than resuming from
-        // an old count — otherwise a single failure months later would inherit
-        // the full penalty of a long-forgotten attack.
+        // A lapsed entry restarts rather than inheriting an old penalty.
         if entry.last.elapsed() >= self.window {
             entry.count = 0;
         }
@@ -557,7 +444,6 @@ mod backoff_tests {
     #[test]
     fn delay_doubles_then_saturates_at_the_cap() {
         let b = backoff();
-        // Below the free allowance nothing is charged at all.
         for count in 0..3 {
             assert_eq!(b.delay_for_count(count), Duration::ZERO);
         }
@@ -572,8 +458,6 @@ mod backoff_tests {
         }
     }
 
-    /// A long-running attack pushes the count arbitrarily high; the shift used
-    /// to double the delay must not overflow into a nonsense duration.
     #[test]
     fn absurd_failure_counts_stay_at_the_cap() {
         let b = backoff();
@@ -609,9 +493,6 @@ mod backoff_tests {
         assert_eq!(b.delay_for(&"bob".to_string()), Duration::ZERO);
     }
 
-    /// An entry whose window has lapsed must not be read as a live penalty —
-    /// otherwise one failure and a long silence would leave the account
-    /// permanently slowed.
     #[test]
     fn a_lapsed_entry_stops_delaying() {
         let b = FailureBackoff::<String>::new(
@@ -629,8 +510,6 @@ mod backoff_tests {
         );
     }
 
-    /// The count restarts rather than resuming, so a failure long after an old
-    /// attack does not inherit its penalty.
     #[test]
     fn a_lapsed_entry_restarts_its_count() {
         let b = FailureBackoff::<String>::new(
@@ -650,10 +529,6 @@ mod backoff_tests {
         );
     }
 
-    /// At capacity the stalest entry is evicted so the newest activity stays
-    /// tracked. Declining to track instead would let an attacker fill the
-    /// table with throwaway usernames and then hammer their real target with
-    /// no delay at all.
     #[test]
     fn at_capacity_the_stalest_entry_is_evicted_for_a_new_one() {
         let mut b = FailureBackoff::<String>::new(
@@ -684,9 +559,6 @@ mod backoff_tests {
         assert!(entries.len() <= 2);
     }
 
-    /// `delay_for` must not mutate: a request that reads the delay and then
-    /// never records a failure (because it succeeded, or failed for an
-    /// unrelated reason) must leave the count where it was.
     #[test]
     fn reading_the_delay_does_not_penalise() {
         let b = backoff();
@@ -703,10 +575,7 @@ mod backoff_tests {
 mod production_backoff_tests {
     use super::*;
 
-    /// Pins the schedule liftlog ships with. `backoff_tests` above proves the
-    /// mechanism; this proves the numbers the deployment actually runs, which
-    /// otherwise lived as four bare literals in `main` where nothing could
-    /// check them.
+    /// Pins the shipped schedule, not just the mechanism.
     #[test]
     fn for_login_matches_the_documented_schedule() {
         let b = FailureBackoff::for_login();

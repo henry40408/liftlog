@@ -16,10 +16,7 @@ impl ExercisesPage<'_> {
         goto(self.0, "/exercises").await
     }
 
-    /// Creates an exercise and returns the id the server gave it.
-    ///
-    /// The id is read back off the list, where each exercise links to its own
-    /// stats page — the only place the server hands it to the client.
+    /// Creates an exercise and returns its id, read off the list.
     pub async fn create(&self, name: &str, category: &str) -> Result<String> {
         goto(self.0, "/exercises/new").await?;
         fill(self.0, "name", name).await?;
@@ -29,7 +26,7 @@ impl ExercisesPage<'_> {
         self.id_of(name).await
     }
 
-    /// Renames the exercise, returning nothing — the caller holds the new name.
+    /// Renames the exercise; the caller waits for the redirect.
     pub async fn rename(&self, from: &str, to: &str) -> Result<()> {
         self.goto().await?;
         let row = self.row(from).await?;
@@ -38,15 +35,9 @@ impl ExercisesPage<'_> {
         click_button(self.0, "Save Changes").await
     }
 
-    /// Deletes the exercise.
-    ///
-    /// The trigger is a link to a confirmation page that `base.html` intercepts
-    /// with a `window.confirm()`, which this session accepts automatically.
-    ///
-    /// Waits for the entry to leave the list rather than for a URL: the POST
-    /// re-renders the page it was already on, so there is no navigation to
-    /// watch — and a caller that navigated away immediately would cancel the
-    /// request instead of completing it.
+    /// Deletes the exercise (the `window.confirm()` is auto-accepted). Waits for
+    /// the entry to leave the list: the POST redirects back to `/exercises`,
+    /// so the URL never changes.
     pub async fn delete(&self, name: &str) -> Result<()> {
         self.goto().await?;
         let row = self.row(name).await?;
@@ -57,11 +48,8 @@ impl ExercisesPage<'_> {
         .await
     }
 
-    /// Waits for a form post to land back on the list.
-    ///
-    /// WebDriver's click does not reliably block until a form's redirect has
-    /// been followed, and the next navigation would cancel the request that is
-    /// still in flight — which showed up as an exercise that was never created.
+    /// Waits for a form post to land back on the list, so the next navigation
+    /// does not cancel it.
     async fn settle(&self) -> Result<()> {
         eventually_eq("the URL after the form post", "/exercises", || async {
             path(self.0).await

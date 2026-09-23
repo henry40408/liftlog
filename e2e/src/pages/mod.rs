@@ -1,17 +1,6 @@
-//! Page objects, one module per surface, ported from `tests/e2e/steps/*.js`.
-//!
-//! The old steps leaned on Playwright's role and label selectors — `getByLabel`,
-//! `getByRole('button', { name })`, `.filter({ hasText })`. WebDriver has none
-//! of those, so this module rebuilds the handful that were actually used:
-//!
-//! * `getByLabel('Weight')` becomes [`fill`] on the input's `id`. Every form in
-//!   LiftLog wires its `<label for>` to an `id`, so the two address the same
-//!   element; the id is simply the one WebDriver can see.
-//! * `getByRole('button', { name })` becomes [`click_button`], an XPath on the
-//!   button's own text. Exact, not substring — a reworded button should fail
-//!   loudly rather than quietly match a different one.
-//! * `.filter({ hasText })` becomes an XPath predicate on the row's contents,
-//!   which is how the set and user rows are picked out.
+//! Page objects, one module per surface. Fields are addressed by `id` (every
+//! `<label for>` points at one); buttons and links by exact text, so a reworded
+//! control fails loudly instead of matching another.
 
 pub mod auth;
 pub mod dashboard;
@@ -49,11 +38,7 @@ pub async fn displayed(driver: &WebDriver, by: By) -> Result<WebElement> {
         .await?)
 }
 
-/// Finds an element, mapping "not there" onto `None` rather than an error.
-///
-/// `nowait`, because every caller is asking about a page that has already
-/// rendered — waiting the full timeout to confirm an absence is the default
-/// poller's behaviour, not ours.
+/// Finds an element without waiting; callers ask about an already-rendered page.
 pub async fn optional(driver: &WebDriver, by: By) -> Result<Option<WebElement>> {
     Ok(driver.query(by).nowait().first_opt().await?)
 }
@@ -84,13 +69,8 @@ pub async fn fill(driver: &WebDriver, id: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Sets a field's value directly, for the inputs typing cannot reach.
-///
-/// `<input type="date">` is the reason: Chrome parses keystrokes into it
-/// through the browser's own locale, so sending "2024-03-14" produces whatever
-/// that locale makes of those digits. Assigning `value` is what Playwright's
-/// `fill()` did underneath, and the `input`/`change` events are dispatched
-/// after it so any listener sees the same sequence a real edit produces.
+/// Sets a field's value directly and fires `input`/`change`. Needed for
+/// `<input type="date">`, where Chrome parses keystrokes through the locale.
 pub async fn set_value(driver: &WebDriver, id: &str, value: &str) -> Result<()> {
     driver
         .execute(
@@ -107,12 +87,8 @@ pub async fn set_value(driver: &WebDriver, id: &str, value: &str) -> Result<()> 
     Ok(())
 }
 
-/// The DOM text of the first match, ignoring how CSS renders it.
-///
-/// WebDriver's "Get Element Text" returns *rendered* text, so an element under
-/// `text-transform: uppercase` reports characters the document does not
-/// contain. Playwright's accessible-name matching read through that transform;
-/// `textContent` is the equivalent here.
+/// The `textContent` of the first match. Unlike WebDriver's rendered text, it
+/// ignores `text-transform`.
 pub async fn dom_text(driver: &WebDriver, css: &str) -> Result<Option<String>> {
     let value = driver
         .execute(
@@ -138,11 +114,8 @@ pub async fn value_of(driver: &WebDriver, id: &str) -> Result<String> {
         .unwrap_or_default())
 }
 
-/// Picks a `<select>` option by its visible text.
-///
-/// Goes through `SelectElement`, which clicks the option rather than assigning
-/// `value` — so the `change` listener that draws the "last weight" hint on the
-/// workout page fires exactly as it would for a real pick.
+/// Picks a `<select>` option by its visible text, by clicking it so `change`
+/// listeners fire.
 pub async fn select_by_label(driver: &WebDriver, id: &str, label: &str) -> Result<()> {
     let element = displayed(driver, By::Id(id)).await?;
     SelectElement::new(&element)
@@ -152,11 +125,7 @@ pub async fn select_by_label(driver: &WebDriver, id: &str, label: &str) -> Resul
     Ok(())
 }
 
-/// Picks a `<select>` option by its `value`.
-///
-/// The exercise categories need this: the option's value is the stored key
-/// (`chest`) while its text is the display name (`Chest`), and the feature files
-/// name the key.
+/// Picks a `<select>` option by its `value` (e.g. category key `chest`).
 pub async fn select_by_value(driver: &WebDriver, id: &str, value: &str) -> Result<()> {
     let element = displayed(driver, By::Id(id)).await?;
     SelectElement::new(&element)
@@ -206,12 +175,8 @@ pub async fn click_link_in(scope: &WebElement, label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Turns off a form's client-side validation.
-///
-/// Every password field carries `minlength`/`maxlength`, so a scenario
-/// submitting a deliberately-invalid password would be blocked by the browser
-/// and never reach the server-side check that is the actual control. The old
-/// suite set `noValidate` for the same reason.
+/// Turns off a form's client-side validation, so a deliberately-invalid
+/// password reaches the server-side check.
 pub async fn disable_validation(driver: &WebDriver, form_css: &str) -> Result<()> {
     driver
         .execute(
@@ -226,11 +191,8 @@ pub async fn disable_validation(driver: &WebDriver, form_css: &str) -> Result<()
     Ok(())
 }
 
-/// The element's distance from the top of the document.
-///
-/// Rebuilds the `boundingBox().y` comparison the dashboard-ordering scenario
-/// makes: it asserts that the quick actions render above the summary, which is
-/// a fact about layout that no selector can express.
+/// The element's distance from the top of the document, for layout-order
+/// assertions.
 pub async fn top_of(driver: &WebDriver, css: &str) -> Result<f64> {
     let top = driver
         .execute(
@@ -258,12 +220,8 @@ async fn clickable(driver: &WebDriver, by: By) -> Result<WebElement> {
         .await?)
 }
 
-/// Quotes a string for use inside an XPath expression.
-///
-/// XPath 1.0 has no escape character, so a value containing both kinds of quote
-/// has to be assembled with `concat()`. None of the fixture names do, but they
-/// carry a random suffix and the failure mode — a silently malformed expression
-/// that matches nothing — is not one worth leaving open.
+/// Quotes a string for XPath 1.0, which has no escape character: a value
+/// with both quote kinds is built with `concat()`.
 pub(crate) fn quote(value: &str) -> String {
     if !value.contains('\'') {
         return format!("'{value}'");

@@ -51,8 +51,7 @@ impl UserRepository {
         .await?
     }
 
-    /// Columns are listed explicitly rather than `SELECT *` so `password_hash`
-    /// never leaves the DB for a read that only feeds the users list.
+    /// Explicit columns so `password_hash` stays in the DB.
     pub async fn find_all(&self) -> Result<Vec<UserListItem>> {
         let pool = self.pool.clone();
         tokio::task::spawn_blocking(move || {
@@ -118,9 +117,7 @@ impl UserRepository {
         .await?
     }
 
-    /// Looks the user up and verifies the password inside a single blocking
-    /// task, rather than composing `find_by_username` with a verify on the
-    /// caller's thread.
+    /// Lookup and verify in one blocking task.
     pub async fn verify_password(&self, username: &str, password: &str) -> Result<Option<User>> {
         let pool = self.pool.clone();
         let username = username.to_string();
@@ -132,19 +129,9 @@ impl UserRepository {
             let user = stmt.query_row([&username], User::from_row).optional()?;
 
             let Some(user) = user else {
-                // Spend the same Argon2 verification an existing username would
-                // have cost. Without it the two paths differ by the whole cost
-                // of a hash — tens of milliseconds against a bare SQLite lookup
-                // — which is measurable from a browser without any statistical
-                // work, and turns "is this a real account?" into a single
-                // request. The generic "Invalid username or password" message
-                // alone does not close that: the timing says what the wording
-                // refuses to.
-                //
-                // The result is deliberately discarded; it can only be
-                // `Ok(false)` (the supplied password will not match a hash of
-                // DUMMY_PASSWORD) or a parse error that must not distinguish
-                // this path from the other one either.
+                // Burn an equal Argon2 verify so timing doesn't reveal whether
+                // the account exists. Result discarded: it can't distinguish
+                // the paths either.
                 let _ = verify_password(&password, dummy_password_hash());
                 return Ok(None);
             };
@@ -184,29 +171,21 @@ impl UserRepository {
     }
 }
 
-/// Arbitrary; it is never a real credential. Only the hash derived from it is
-/// used, and only to burn Argon2 time on the unknown-username login path.
+/// Never a real credential; its hash only burns time for unknown usernames.
 const DUMMY_PASSWORD: &str = "liftlog-unknown-user-placeholder";
 
 /// A valid Argon2 hash of [`DUMMY_PASSWORD`], for `verify_password`'s
 /// unknown-username branch.
 ///
-/// Computed once at first use rather than embedded as a literal, so it always
-/// carries whatever parameters `Argon2::default()` currently produces. A
-/// hardcoded PHC string would silently stop matching the real work — and
-/// reopen the timing gap — the day that default changes.
+/// Computed at first use so it tracks `Argon2::default()`'s parameters; a
+/// literal would reopen the timing gap if those change.
 fn dummy_password_hash() -> &'static str {
     static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     HASH.get_or_init(|| hash_password(DUMMY_PASSWORD).expect("hashing a fixed literal cannot fail"))
 }
 
-/// Both of these run `Argon2::default()` — m=19 MiB, t=2, p=1, the parameters
-/// OWASP recommends — which is tens of milliseconds of CPU per call, not a
-/// negligible cost. Every caller in this module therefore invokes them from
-/// inside `spawn_blocking`: on a tokio worker thread they would each pin a
-/// core for that long, and `POST /settings/password` (two Argon2 operations
-/// per request, and no rate limit, unlike login) is reachable by any
-/// authenticated user in a loop.
+/// `Argon2::default()` (m=19 MiB, t=2, p=1) costs tens of ms per call, so
+/// every caller runs these inside `spawn_blocking`.
 fn hash_password(password: &str) -> Result<String> {
     let argon2 = Argon2::default();
     let password_hash = argon2
@@ -314,13 +293,9 @@ mod tests {
         assert_eq!(found.unwrap().username, "findme");
     }
 
-    /// Usernames are exact identifiers, and that is a decision rather than an
-    /// accident of `SQLite`'s default collation — see *Out of scope* in the
-    /// README. Pinned here so it cannot drift silently: a lookup that quietly
-    /// became case-insensitive would also need the per-account login backoff
-    /// (keyed by the submitted username) to normalise with it, or varying the
-    /// case would buy a fresh backoff counter per spelling and bypass the
-    /// throttle.
+    /// Usernames are case-sensitive by design (README *Out of scope*). If this
+    /// changed, the per-username login backoff would need the same
+    /// normalisation, or each casing would get a fresh counter.
     #[tokio::test]
     async fn usernames_are_case_sensitive() {
         let pool = setup_test_db();
@@ -348,8 +323,7 @@ mod tests {
             );
         }
 
-        // Nothing stops a second account differing only in case; the README
-        // says so rather than leaving it to be discovered.
+        // Case-only duplicates are allowed; the README documents it.
         assert!(
             repo.create("Henry", "purple-monkey-dishwasher", UserRole::User)
                 .await
@@ -433,11 +407,8 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// The timing defence only holds while the dummy hash costs the same as a
-    /// real one, so pin the algorithm and cost parameters against a hash this
-    /// codebase actually stores. Asserting on elapsed time instead would be
-    /// flaky under a loaded CI runner; this catches the failure that matters —
-    /// the dummy drifting away from `Argon2::default()`.
+    /// The timing defence needs the dummy hash to cost the same as a real one;
+    /// pin its parameters rather than asserting on flaky elapsed time.
     #[tokio::test]
     async fn dummy_password_hash_matches_a_real_hash_parameter_for_parameter() {
         let pool = setup_test_db();
@@ -456,8 +427,7 @@ mod tests {
         assert_eq!(dummy.params, real.params);
     }
 
-    /// The salt must be per-hash, so the dummy is not a fixed string that
-    /// could be recognised in a database dump or compared across deployments.
+    /// Per-hash salt, so the dummy isn't recognisable across deployments.
     #[test]
     fn dummy_password_hash_carries_its_own_salt() {
         let dummy = PasswordHash::new(dummy_password_hash()).unwrap();

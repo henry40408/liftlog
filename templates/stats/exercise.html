@@ -29,11 +29,8 @@
         {% if session_count == 0 %}
         <p class="muted">No progress data yet — log this exercise to see your trend.</p>
         {% else %}
-        {# Links, not buttons: without them e1RM and Volume had no
-           representation anywhere in the UI once scripts were off, since
-           only the client redraw could reach those series. The server
-           renders whichever combination the query string names; the script
-           below intercepts the clicks so switching stays instant. #}
+        {# Links so every series is reachable without scripts; the script
+           below redraws in place instead. #}
         <div id="exercise-chart-controls" style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);">
             <div role="group" aria-label="Metric" style="display: flex; gap: var(--sp-2);">
                 <a href="?metric=top_set&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "top_set" %} is-active{% endif %}" data-metric="top_set">Top Set</a>
@@ -81,10 +78,7 @@
                 <circle cx="300" cy="110" r="5" fill="var(--accent)" stroke="var(--bg-root)" stroke-width="1.5" />
                 {% endif %}
                 {% endmatch %}
-                {# Server-rendered hover bands carrying an SVG <title>, which
-                   browsers show as a native tooltip without any scripting.
-                   The client redraw replaces this group with its own bands
-                   and uses the richer HTML tooltip instead. #}
+                {# No-JS tooltips via SVG <title>; the client redraw replaces them. #}
                 <g id="chart-hit-areas">
                     {% match chart %}
                     {% when Some with (c) %}
@@ -170,9 +164,7 @@
     var W = 600, H = 220, PL = 44, PR_ = 12, PT = 14, PB = 28;
     var plotW = W - PL - PR_, plotH = H - PT - PB;
 
-    /* Start from what the server drew, not from a hardcoded default:
-       arriving at ?metric=volume must not have the script silently redraw
-       Top Set over it. */
+    /* Start from the server's selection, not a hardcoded default. */
     var activeMetric = '{{ metric }}';
     var activeRange = '{{ range }}';
     var lastYMin = 0, lastYMax = 1;
@@ -279,7 +271,7 @@
             '<div>e1RM: ' + p.e1rm.toFixed(1) + ' kg</div>' +
             '<div>Volume: ' + p.volume.toFixed(0) + ' kg</div>';
         tooltip.style.display = 'block';
-        // Clamp horizontally to wrap; vertically place 8px above dot, fall back below if it'd go off-top.
+        // Clamp to wrap; 8px above the dot, or below if that overflows the top.
         var wrapW = wrap.getBoundingClientRect().width;
         var tipW = tooltip.offsetWidth;
         var tipH = tooltip.offsetHeight;
@@ -290,17 +282,12 @@
         tooltip.style.top = top + 'px';
     }
 
-    /* Tab wiring. The tabs are real links to the same page with a different
-       query string, so doing nothing here would still work — it would just
-       cost a page load. Intercept and redraw in place instead, then put the
-       matching URL in the address bar so reloading, bookmarking or sharing
-       lands on the same view the server would render. */
+    /* Redraw in place instead of following the tab links. */
     var controls = document.getElementById('exercise-chart-controls');
     controls.addEventListener('click', function(e) {
         if (e.defaultPrevented || e.button !== 0 ||
             e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-            /* Leave ctrl/cmd-click to the browser: it opens the tab's own
-               URL in a new tab, which the server renders correctly. */
+            /* Modified clicks open the link normally. */
             return;
         }
         var t = e.target.closest ? e.target.closest('[data-metric],[data-range]') : null;
@@ -320,9 +307,7 @@
         syncLinks();
     });
 
-    /* Keep every tab's href, and the address bar, pointing at the state now
-       on screen — otherwise a redraw leaves the links describing the state
-       the page was loaded in. */
+    /* Point the address bar and every tab href at the state on screen. */
     function syncLinks() {
         var qs = '?metric=' + activeMetric + '&range=' + activeRange;
         if (window.history && window.history.replaceState) {

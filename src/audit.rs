@@ -1,23 +1,9 @@
-//! Session lifecycle audit logging (OWASP Session Management Cheat Sheet,
-//! *Logging Sessions Life Cycle*).
+//! Structured audit events (session lifecycle, auth failures, CSRF
+//! rejections) under the `liftlog::audit` tracing target.
 //!
-//! Session creation, renewal, destruction, expiry and rejection are emitted
-//! as structured `tracing` events under the `liftlog::audit` target; request-scoped
-//! events carry `client_ip`, `user_agent` and `path`, while the hourly background
-//! sweep's expiry event is not request-scoped and reports only a `count`, so an
-//! operator piping `LOG_FORMAT=json` into a log collector can reconstruct a
-//! session's life cycle and correlate it with the requests that drove it.
-//!
-//! OWASP is explicit that the session identifier itself must never be
-//! written to a log — a leaked log line must not be equivalent to a leaked
-//! cookie. Every event therefore carries `session_fp`, a salted SHA-256
-//! fingerprint of the token (see [`crate::session::token_fingerprint`])
-//! rather than the token itself. The salt (`AppState::log_salt`) is
-//! generated fresh at process startup, so fingerprints let events be
-//! correlated *within* one process's lifetime but deliberately do NOT
-//! correlate across restarts — that would require persisting the salt,
-//! which is unnecessary complexity for what OWASP actually requires (no
-//! raw-token disclosure, not cross-restart correlation).
+//! Raw session tokens are never logged; events carry `session_fp`, a salted
+//! fingerprint ([`crate::session::token_fingerprint`]). The salt is per
+//! process, so fingerprints correlate within one run but not across restarts.
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -26,8 +12,6 @@ use std::net::IpAddr;
 use crate::config::TrustedProxyHeader;
 use crate::state::AppState;
 
-/// Everything the audit log needs about the request that triggered a
-/// session lifecycle event.
 #[derive(Clone, Debug)]
 pub struct AuditContext {
     pub client_ip: IpAddr,
@@ -35,24 +19,15 @@ pub struct AuditContext {
     pub path: String,
 }
 
-/// A hostile client can send a multi-kilobyte `User-Agent`; without a cap a
-/// single request could bloat every log line derived from it.
+// Caps on attacker-controlled, unvalidated fields so one request can't bloat
+// log lines.
 const MAX_USER_AGENT_LEN: usize = 256;
-
-/// Same reasoning as [`MAX_USER_AGENT_LEN`], for the attempted username on a
-/// failed login: it is attacker-controlled and unbounded (nothing validates
-/// the length of a username that does not exist).
 const MAX_USERNAME_LEN: usize = 256;
-
-/// Same reasoning again, for the `Origin` of a rejected cross-site request:
-/// nothing has validated it by the time the guard logs it — that it failed
-/// to parse as an origin is often exactly why it was rejected.
 const MAX_ORIGIN_LEN: usize = 256;
 
 impl AuditContext {
-    /// Builds the context from raw request pieces. Used directly by
-    /// `sliding_session_middleware` (which holds a `Request`, not
-    /// `AppState`); the `FromRequestParts` impl below delegates here.
+    /// For callers holding a `Request` rather than `AppState`
+    /// (`sliding_session_middleware`).
     pub fn from_request_pieces(
         extensions: &axum::http::Extensions,
         headers: &axum::http::HeaderMap,
@@ -78,21 +53,13 @@ impl AuditContext {
     }
 }
 
-/// Truncates to at most `max_chars` chars on a char boundary — `s` may be a
-/// hostile, non-ASCII `User-Agent`, so a byte-index truncation could split a
-/// multi-byte UTF-8 sequence and panic.
+/// Char-based, so non-ASCII input can't panic on a byte boundary.
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
-// A note on the `let` bindings in the `auth.*` emitters below: field values
-// that are *calls* (`truncate_chars(..)`, `.as_deref()`) get expanded by
-// `tracing` into a closure that `llvm-cov` never marks as executed, so those
-// lines report as uncovered even when a test demonstrably drives them — see
-// the same lines in the older `session.*` emitters, which are exercised by
-// `tests/audit_log_test.rs` and still show up missing. Binding the value
-// first and passing the plain identifier keeps the emitted event identical
-// while letting coverage see the work. Don't inline them back.
+// The `let` bindings in the `auth.*`/`csrf.*` emitters are for `llvm-cov`:
+// calls inlined into `tracing!` fields report as uncovered. Don't inline them.
 
 impl FromRequestParts<AppState> for AuditContext {
     type Rejection = std::convert::Infallible;
@@ -101,11 +68,8 @@ impl FromRequestParts<AppState> for AuditContext {
         parts: &mut Parts,
         state: &AppState,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> {
-        // `sliding_session_middleware` already built one for every request that
-        // carried a session token, so reuse it rather than recomputing the same
-        // client-IP resolution and `User-Agent` truncation. The fallback is not
-        // dead: the anonymous routes that take this extractor (login and first-user
-        // setup) have no session token, so the middleware never built one for them.
+        // Reuse the middleware's context; token-less requests (login, setup)
+        // have none, so fall back to building one.
         let ctx = match parts.extensions.get::<Self>() {
             Some(ctx) => ctx.clone(),
             None => Self::from_request_pieces(
@@ -121,26 +85,10 @@ impl FromRequestParts<AppState> for AuditContext {
     }
 }
 
-/// A rejected credential pair (OWASP Authentication Cheat Sheet, *Logging and
-/// Monitoring*: "Ensure that all password failures are logged and reviewed").
-/// Until this existed, a brute-force run against liftlog left no trace at all
-/// — the only login events emitted were the *successful* ones.
-///
-/// `warn`, not `debug` like [`session_rejected`]: a failed login is the
-/// primary brute-force signal and must be visible at the default log level,
-/// whereas a scanner replaying random cookies is pure noise.
-///
-/// The attempted `username` is recorded because a spray is only recognisable
-/// as one when the targeted account is known. The residual risk is the
-/// familiar one for any system that does this (sshd included): a user who
-/// types their password into the username field puts it in the log. That is
-/// accepted rather than mitigated — dropping the username would leave the
-/// event unable to answer "which account is being attacked?", which is the
-/// question the log exists to answer.
-/// `backoff_ms` is how long the per-account delay held this attempt before it
-/// was evaluated. Zero until an account has spent its free failures; watching
-/// it climb is how an operator sees the backoff engaging, without a second
-/// event whose only job is to announce that.
+/// `warn`: the primary brute-force signal. The attempted `username` is logged
+/// to identify the targeted account, accepting that a password typed into the
+/// username field lands in the log. `backoff_ms` is the per-account delay
+/// applied to this attempt.
 pub fn login_failed(ctx: &AuditContext, username: &str, backoff_ms: u64) {
     let username = truncate_chars(username, MAX_USERNAME_LEN);
     let user_agent = ctx.user_agent.as_deref();
@@ -156,11 +104,7 @@ pub fn login_failed(ctx: &AuditContext, username: &str, backoff_ms: u64) {
     );
 }
 
-/// A login attempt refused by the rate limiter before any credential was
-/// checked — the cheat sheet's "all account lockouts are logged" requirement.
-/// Distinct from [`login_failed`] on purpose: one says a credential was
-/// wrong, the other says the throttle engaged, and an operator alerting on
-/// brute force wants to tell those apart.
+/// Refused by the per-IP limiter before any credential was checked.
 pub fn login_throttled(ctx: &AuditContext, username: &str) {
     let username = truncate_chars(username, MAX_USERNAME_LEN);
     let user_agent = ctx.user_agent.as_deref();
@@ -175,21 +119,9 @@ pub fn login_throttled(ctx: &AuditContext, username: &str) {
     );
 }
 
-/// A wrong password on one of the authenticated routes that re-check it
-/// before acting — the password change, and the admin promote/delete
-/// confirmations. These are the places a password can be guessed at *from an
-/// authenticated session*, which is exactly the position an attacker holding
-/// a stolen cookie is in.
-///
-/// `action` names which one, so a single event family covers every such route
-/// and an operator can still tell them apart. One family rather than one
-/// event per route because they are the same question from an attacker's
-/// point of view — "what is this account's password?" — and alerting should
-/// see them as one signal.
-///
-/// Carries `user_id` rather than a username: the request is authenticated, so
-/// the account is known for certain and no attacker-supplied string is
-/// involved.
+/// Wrong password on an authenticated re-check (password change, admin
+/// promote/delete) — where a stolen-cookie holder would guess. `action` names
+/// the route; one event family so alerting sees one signal.
 pub fn reauth_failed(ctx: &AuditContext, actor_session_fp: &str, user_id: &str, action: &str) {
     let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
@@ -205,9 +137,7 @@ pub fn reauth_failed(ctx: &AuditContext, actor_session_fp: &str, user_id: &str, 
     );
 }
 
-/// A re-authentication attempt refused by the per-user throttle. See
-/// [`reauth_failed`] for why these routes are throttled at all; the budget is
-/// shared across them so moving to another route buys no fresh allowance.
+/// Refused by the per-user throttle, whose budget is shared across routes.
 pub fn reauth_throttled(ctx: &AuditContext, actor_session_fp: &str, user_id: &str, action: &str) {
     let user_agent = ctx.user_agent.as_deref();
     tracing::warn!(
@@ -272,12 +202,8 @@ pub fn session_destroyed(ctx: &AuditContext, session_fp: &str, user_id: &str, re
     );
 }
 
-/// Emitted for a bulk delete (password change, "log out other devices",
-/// admin user delete). Deliberately has no `session_fp`: a bulk delete has
-/// no single session to name, and conflating the surviving actor session
-/// (the one that issued the request) with the sessions actually destroyed
-/// would make the log lie about which session died. `actor_session_fp`
-/// identifies who performed the action, `count` says how many rows died.
+/// Bulk delete. No `session_fp`: `actor_session_fp` is who acted, not a
+/// session that died.
 pub fn sessions_destroyed_bulk(
     ctx: &AuditContext,
     actor_session_fp: &str,
@@ -312,12 +238,7 @@ pub fn session_expired(ctx: &AuditContext, session_fp: &str, reason: &str) {
     );
 }
 
-/// Emitted by the hourly background sweep, not by a request, so it has no
-/// `client_ip` / `user_agent` / `path` and no per-session fingerprint: the
-/// sweep deletes in bulk without reading the tokens back, and fetching them
-/// purely to fingerprint them would add a query per pass for no security
-/// benefit. `count` is what an operator actually needs — a sudden spike is
-/// the signal worth alerting on.
+/// From the background sweep: no request context, no per-session fingerprint.
 pub fn sessions_expired_sweep(count: usize) {
     tracing::info!(
         target: "liftlog::audit",
@@ -328,11 +249,7 @@ pub fn sessions_expired_sweep(count: usize) {
     );
 }
 
-/// `debug`, not `info`: liftlog is internet-facing, and scanners hammering
-/// it with random cookie values would otherwise drown the genuinely useful
-/// lifecycle events (created/renewed/destroyed/expired) in noise. An
-/// operator who wants to see rejected tokens sets `RUST_LOG` to include
-/// `debug`.
+/// `debug`: scanners replaying random cookies would drown the useful events.
 pub fn session_rejected(ctx: &AuditContext, session_fp: &str) {
     tracing::debug!(
         target: "liftlog::audit",
@@ -346,27 +263,10 @@ pub fn session_rejected(ctx: &AuditContext, session_fp: &str) {
     );
 }
 
-/// A state-changing request refused by the first-line CSRF guard (see
-/// [`crate::middleware::csrf`]) before it reached a handler. Until this existed the guard returned a bare
-/// `403` and left no trace, so an operator whose deployment shape made the
-/// guard reject legitimate traffic had nothing to debug from — the symptom is
-/// a login form that silently fails, and the log was silent too.
-///
-/// `warn`, not `debug` like [`session_rejected`]: unlike a scanner replaying
-/// random cookies, a CSRF rejection is either a genuine attack against a
-/// logged-in user or a misconfigured reverse proxy locking the operator out.
-/// Both need to be visible at the default log level.
-///
-/// `reason` names which branch rejected, because the branches differ in what
-/// they prove: `sec_fetch_site` is the browser itself declaring the request
-/// cross-site, while `origin_fallback` is inferred from an `Origin`/`Host`
-/// pair a reverse proxy may have rewritten. An operator seeing the latter
-/// should suspect their proxy before suspecting an attacker.
-///
-/// `origin` is recorded because it is the one field that says *where* the
-/// request claimed to come from, which is what distinguishes an attack from a
-/// misconfiguration. It is attacker-controlled and unbounded, hence the same
-/// truncation the `User-Agent` gets.
+/// A request refused by the CSRF guard ([`crate::middleware::csrf`]). `warn`:
+/// either an attack or a misconfigured proxy. `reason` is `sec_fetch_site`
+/// (browser-declared) or `origin_fallback` (`Origin`/`Host` mismatch — suspect
+/// the proxy first).
 pub fn csrf_rejected(ctx: &AuditContext, reason: &str, method: &str, origin: Option<&str>) {
     let origin = origin.map(|o| truncate_chars(o, MAX_ORIGIN_LEN));
     let user_agent = ctx.user_agent.as_deref();
@@ -406,10 +306,7 @@ mod tests {
         assert!(got.chars().count() <= MAX_USER_AGENT_LEN);
     }
 
-    /// The extractor must reuse the context `sliding_session_middleware`
-    /// already put in the request extensions, not rebuild its own. Proven by
-    /// making the two disagree: the stored context carries values the request's
-    /// own headers and URI would never produce, so a rebuild is detectable.
+    /// The stored context disagrees with the request, so a rebuild shows.
     #[tokio::test]
     async fn audit_context_extractor_prefers_the_one_the_middleware_built() {
         let pool = crate::db::create_memory_pool().expect("memory pool");
@@ -486,9 +383,6 @@ mod tests {
         assert!(ctx.user_agent.is_none());
     }
 
-    /// Documents that `client_ip`'s "no peer" fallback (loopback) is what
-    /// audit logs will record under `oneshot`-style calls that never attach
-    /// `ConnectInfo`, and pins the delegation to `crate::net::client_ip`.
     #[test]
     fn audit_context_falls_back_to_loopback_without_connect_info() {
         let headers = axum::http::HeaderMap::new();
@@ -523,13 +417,6 @@ mod tests {
         assert_eq!(ctx.client_ip, "203.0.113.9".parse::<IpAddr>().unwrap());
     }
 
-    /// `HeaderValue::to_str` itself rejects non-ASCII bytes (it only yields
-    /// visible-ASCII values), so a hostile multi-byte UA never reaches
-    /// `AuditContext::user_agent` through the real header-parsing path —
-    /// that path is exercised by the tests above. This test instead pins
-    /// the truncation helper itself: it must slice on a char boundary, not
-    /// a byte index, or a long non-ASCII string would panic by splitting a
-    /// multi-byte UTF-8 sequence.
     #[test]
     fn truncate_chars_handles_non_ascii_multi_byte_input_without_panicking() {
         let ua: String = std::iter::repeat_n('台', 5000).collect();

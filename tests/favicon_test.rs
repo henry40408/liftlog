@@ -64,12 +64,8 @@ async fn test_apple_touch_icon_returns_ok() {
     assert_eq!(&body[0..8], b"\x89PNG\r\n\x1a\n");
 }
 
-/// Regression guard for the OWASP no-store hardening in
-/// `sliding_session_middleware`: an authenticated request still passes
-/// through this handler (a logged-in user's browser fetches /favicon.svg
-/// like any other asset), and the middleware's `contains_key` guard must
-/// leave the handler's own `public, max-age=86400` header untouched rather
-/// than overwriting it with `no-cache, no-store, must-revalidate`.
+/// The session middleware's no-store must not overwrite the favicon's own
+/// `Cache-Control` on authenticated requests.
 #[tokio::test]
 async fn test_favicon_keeps_public_cache_control_for_authenticated_user() {
     let pool = common::setup_test_db();
