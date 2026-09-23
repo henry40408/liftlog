@@ -8,8 +8,6 @@ use liftlog::models::UserRole;
 use liftlog::repositories::WorkoutRepository;
 use tower::ServiceExt;
 
-/// A cross-site POST carrying a valid session cookie is rejected before it can
-/// mutate state.
 #[tokio::test]
 async fn cross_site_post_is_blocked() {
     let pool = common::setup_test_db();
@@ -35,15 +33,14 @@ async fn cross_site_post_is_blocked() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // The request never reached the handler, so no workout row was created.
+    // Nothing was created.
     let workout_repo = WorkoutRepository::new(pool);
     let count = workout_repo.count_sessions_by_user(&user.id).await.unwrap();
     assert_eq!(count, 0);
 }
 
-/// `Sec-Fetch-Site: same-site` is a *different* origin that `SameSite=Lax`
-/// still hands the session cookie — a sibling subdomain, or another port on the
-/// same host. The guard used to allow it; it must not.
+/// `same-site` (sibling subdomain, other port) still gets the `SameSite=Lax`
+/// cookie, so it is rejected.
 #[tokio::test]
 async fn same_site_post_is_blocked() {
     let pool = common::setup_test_db();
@@ -76,8 +73,6 @@ async fn same_site_post_is_blocked() {
     assert_eq!(count, 0);
 }
 
-/// A POST whose `Origin` host does not match the request `Host` is rejected via
-/// the fallback path (no `Sec-Fetch-Site`).
 #[tokio::test]
 async fn mismatched_origin_is_blocked() {
     let pool = common::setup_test_db();
@@ -105,12 +100,8 @@ async fn mismatched_origin_is_blocked() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-/// Without `Sec-Fetch-Site` — an old browser, or a plain-HTTP LAN origin, which
-/// is not potentially-trustworthy and so never receives fetch metadata — the
-/// `Origin`/`Host` comparison is the *only* check running, and it compares the
-/// full authority. The port is the point: cookies ignore ports, so a page on
-/// another port of the same host would otherwise post with the victim's own
-/// session attached.
+/// The `Origin` fallback compares the port too: cookies ignore ports, so
+/// another port on the same host would otherwise carry the victim's session.
 #[tokio::test]
 async fn origin_fallback_rejects_an_authority_that_differs_from_host() {
     for (origin, host, why) in [
@@ -178,9 +169,8 @@ async fn origin_fallback_rejects_an_authority_that_differs_from_host() {
     }
 }
 
-/// The two shapes the fallback must keep working: a bare LAN install on a
-/// non-default port, and a TLS-terminating proxy whose forwarded `Host` carries
-/// no scheme and no port because the browser used the default one.
+/// The fallback accepts a LAN install on a non-default port, and a TLS proxy
+/// forwarding a scheme- and port-less `Host`.
 #[tokio::test]
 async fn origin_fallback_passes_an_authority_that_matches_host() {
     for (origin, host) in [
@@ -221,8 +211,6 @@ async fn origin_fallback_passes_an_authority_that_matches_host() {
     }
 }
 
-/// A same-origin POST (as a real browser marks it) passes the guard and mutates
-/// state normally.
 #[tokio::test]
 async fn same_origin_post_succeeds() {
     let pool = common::setup_test_db();
@@ -253,8 +241,7 @@ async fn same_origin_post_succeeds() {
     assert_eq!(count, 1);
 }
 
-/// The existing header-less harness POST (curl-shaped, no `Origin`/
-/// `Sec-Fetch-Site`) still works — the guard treats it as a non-browser client.
+/// A header-less (curl-shaped) POST passes as a non-browser client.
 #[tokio::test]
 async fn header_less_post_still_works() {
     let pool = common::setup_test_db();
@@ -284,8 +271,7 @@ async fn header_less_post_still_works() {
     assert_eq!(count, 1);
 }
 
-/// Login-CSRF is covered statelessly: the pre-auth `POST /auth/login` is
-/// rejected when reported cross-site.
+/// Login CSRF: a cross-site `POST /auth/login` is rejected too.
 #[tokio::test]
 async fn login_csrf_is_blocked() {
     let pool = common::setup_test_db();

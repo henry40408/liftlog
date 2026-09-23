@@ -8,87 +8,83 @@ LiftLog is a self-hosted workout journal: an Axum + Askama server-rendered app b
 
 ```bash
 cargo run                                 # dev server on $LIFTLOG_BIND (default 127.0.0.1:8080)
-cargo fmt --all -- --check                # formatting gate
-cargo clippy --all-targets -- -D warnings # lint gate
-cargo deny check                          # supply-chain gate (advisories/licenses/bans/sources)
-cargo nextest run                         # Rust integration + unit tests
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo deny check
+cargo nextest run
 cargo nextest run --test workout_test     # single integration file
 cargo nextest run -p liftlog session_repo # filter by name
 ```
 
-UI BDD suite (cucumber + thirtyfour, lives in `e2e/` — its own workspace):
+E2E suite (cucumber + thirtyfour, in `e2e/`, its own workspace):
 
 ```bash
-cargo build                               # first — see the stale-binary note below
+cargo build                               # first — the suite never rebuilds a stale binary
 cd e2e
-cargo test --test e2e                     # headless; boots target/debug/liftlog itself
-cargo test --test e2e -- -n "Add Set"     # one scenario; -n/--name takes a regex
-cargo fmt --all -- --check                # e2e inherits nothing from the root workspace
+cargo test --test e2e
+cargo test --test e2e -- -n "Add Set"     # one scenario (regex)
+cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-A local Chrome or Chromium is a prerequisite (`brew install --cask ungoogled-chromium`);
-thirtyfour's driver manager downloads a matching chromedriver itself but never the
-browser. There is no Node anywhere in this repository.
+Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); the driver manager fetches chromedriver but never the browser. No Node anywhere.
 
 ## Architecture
 
-**Single shared state.** `AppState` (`src/state.rs`) wires 4 repositories — `UserRepository`, `ExerciseRepository`, `WorkoutRepository`, `SessionRepository` — over an `r2d2` SQLite pool. Handlers take it via `State<AppState>`; there's no per-handler state.
+**State.** `AppState` (`src/state.rs`) holds the four repositories (user, exercise, workout, session) over an `r2d2` SQLite pool, plus rate limiters and config. Handlers take `State<AppState>`.
 
-**Sliding session middleware.** `sliding_session_middleware` runs globally on every route (`src/middleware/auth.rs`). It reads the session cookie, calls `SessionRepository::validate_and_touch`, and on success injects a `ValidatedSession` request extension carrying the full user identity. The `AuthUser` and `AdminUser` extractors read from that extension — they never hit the DB themselves. Routes that should never refresh the cookie (e.g. logout) insert `SuppressSessionRefresh`. Expiry is also swept periodically by a background tokio task spawned in `main.rs`.
+**Sessions.** `sliding_session_middleware` (`src/middleware/auth.rs`) runs on every route: it calls `SessionRepository::validate_and_touch` and injects a `ValidatedSession` extension. `AuthUser`/`AdminUser` extractors read that extension, never the DB. Routes that must not refresh the cookie (logout) insert `SuppressSessionRefresh`. A tokio task in `main.rs` sweeps expired sessions hourly.
 
-**CSRF origin guard.** `tower_http::csrf::CsrfLayer` (the scheme Go 1.25 shipped as `http.CrossOriginProtection`) is layered outermost — registered after the session layer so it runs *first* — and rejects any state-changing request a browser reports, or reveals, to be cross-site with `403`. `Sec-Fetch-Site` decides when present and only `same-origin`/`none` pass (`same-site` does **not** — a sibling subdomain or another port on the same host still gets the `SameSite=Lax` cookie); otherwise the `Origin`'s full authority, **port included**, must byte-match the request's own. It is header-only; safe methods (GET/HEAD/OPTIONS, not TRACE) and header-less non-browser clients (curl, the test harness) pass through. Together with the session cookie's `SameSite=Lax` this is the full CSRF defence — there is no synchronizer token.
+**CSRF.** `tower_http::csrf::CsrfLayer` is outermost (registered after the session layer, so it runs first) and 403s cross-site state-changing requests. `Sec-Fetch-Site` decides when present — only `same-origin`/`none` pass, **not** `same-site`. Otherwise `Origin`'s authority, **port included**, must match the request's. Safe methods and header-less clients (curl, tests) pass. With `SameSite=Lax` cookies this is the entire CSRF defence; there is no token.
 
-The comparison ignores scheme (a TLS-terminating proxy forwards a scheme-less `Host`) but **not** port. Issue #187 kept a hand-rolled, port-blind version for exactly one deployment shape — `proxy_set_header Host $host;` on a non-default port — and that reversed in favour of the upstream layer: cookies ignore ports, so any other service on the same host passed as same-origin while carrying the victim's session, and with no synchronizer token behind it nothing else would have caught it. Fetch metadata only reaches potentially-trustworthy origins, so on a plain-HTTP LAN install — a shape the README supports first-class — that comparison is the *only* check running, which is what makes the strictness matter rather than a detail. The operator-facing cost is one README line: forward `Host` with the browser's port (nginx `$http_host`).
+Keep the port check. Cookies ignore ports, so a port-blind check (#187, reverted) would treat any other service on the same host as same-origin. On plain HTTP there is no fetch metadata, so the `Origin` check is the only one running. Operators forward `Host` with its port (nginx `$http_host`), as the README says.
 
-What `src/middleware/csrf.rs` still owns is `log_csrf_rejection`, layered directly *outside* `CsrfLayer` — the layer's rejection builder never sees the request, so the enclosing middleware pairs the captured method/path/headers with the `ProtectionError` the layer attaches to its 403 and emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or `origin_fallback`). Without it the guard's only symptom is an unexplained 403.
+`src/middleware/csrf.rs` holds `log_csrf_rejection`, layered just outside `CsrfLayer`, which emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or `origin_fallback`) from the `ProtectionError` on the 403.
 
-**First-user bootstrap.** When the `users` table is empty, `/auth/login` 302s to `/auth/setup`, and `/auth/setup` POST creates the first user as `UserRole::Admin` and signs them in. Subsequent users are admin-created via `/users/new`. `e2e/src/seeding.rs` mirrors this flow over HTTP rather than driving the browser through it, and does so idempotently — a scenario asks for an account without knowing whether it is the first one.
+**First-user bootstrap.** With no users, `/auth/login` redirects to `/auth/setup`, whose POST creates an admin and signs in. Later users are created by an admin at `/users/new`. `e2e/src/seeding.rs` does the same over HTTP, idempotently.
 
-**Server-rendered, classic POST→Redirect.** Templates are Askama (`templates/`), one struct per template. Success paths `Redirect::to(...)`, error paths re-render the template with an `error: Option<String>` field. There's no JSON API.
+**Server-rendered POST→Redirect.** One Askama struct per template (`templates/`). Success redirects; errors re-render with `error: Option<String>`. No JSON API.
 
-**Destructive actions confirm on the server; `window.confirm()` is only an enhancement on top.** An `onsubmit="return confirm(…)"` guard does nothing with JavaScript off — the form just posts, and the deed is done unannounced. So every destructive route is registered as `get(confirm_page).post(action)` on one path: the trigger is an `<a href>`, the GET renders an interstitial via `handlers::confirm::page` (`templates/confirm.html`), and only its POST acts. The GET must be inert and must apply the *same* ownership check as the POST — each has a test asserting both.
+**Destructive actions confirm on the server.** Each is `get(confirm_page).post(action)` on one path: the trigger is an `<a href>`, the GET renders `handlers::confirm::page` (`templates/confirm.html`), and only the POST acts. The GET must be inert and apply the **same ownership check** as the POST; each has a test for both. With JS, a delegated handler in `base.html` intercepts `a[data-confirm]`, shows `confirm()`, and POSTs directly. So a trigger needs **both** `href` and `data-confirm`. The dialog asks the short question; the page gives detail only the server knows (cascade counts etc.). Promote/delete-user use the same route shape plus an admin password re-check with their own template, and are deliberately not JS-enhanced.
 
-Where scripts do run, a delegated handler in `base.html` intercepts clicks on `a[data-confirm]`, asks in a dialog, and POSTs to the same URL — so JS users keep the one-click feel and never see the interstitial. A destructive trigger therefore needs **both** the `href` and the `data-confirm`; dropping either silently costs one audience its confirmation or its speed. The dialog text is the short question, the page keeps the detail (how many sets cascade, how many devices sign out) because only the server knows those counts. `handlers::auth`'s promote/delete-user pages are the same route shape plus an admin password re-check, keep their own template, and are deliberately *not* enhanced — re-authentication needs a real form.
+**Migrations** are `include_str!`'d in `src/migrations.rs` and applied at startup (tracked in `_migrations`). Add `NNN_description.sql` (gaps are fine) and append it to `MIGRATIONS`. Tests use `run_migrations_for_tests`.
 
-**Migrations are baked in.** `src/migrations.rs` `include_str!`'s every file in `migrations/` and applies them at startup, tracking applied versions in a `_migrations` table. Tests use `run_migrations_for_tests` against an in-memory pool. Filenames are gap-tolerant (numbers aren't contiguous) — append `NNN_description.sql` and add it to the `MIGRATIONS` slice in order.
+**Exercise categories are code.** `CATEGORIES` in `src/models/exercise.rs`; changing them is a code change, not a migration.
 
-**Exercise categories are code, not data.** `CATEGORIES` in `src/models/exercise.rs` is a `&'static` slice; exercises store the category as a string column constrained to those values. Adding/renaming a category is a code change, not a migration.
+**Timestamps render in the browser's timezone.** Emit every `DateTime<Utc>` as `<time datetime="{{ x.to_rfc3339() }}" data-fmt="datetime|date">{{ x.format("…UTC") }}</time>`; the text is the no-JS fallback. `base.html` rewrites these to a fixed `YYYY-MM-DD HH:MM GMT±H` (or `YYYY-MM-DD`) via `window.LiftLog.formatLocalDate/formatLocalDateTime` — not `toLocaleString()`, to keep column widths constant. `NaiveDate`s (`workout.date`, chart x-axes) are calendar dates and must **not** be converted.
 
-**Timestamps render in the browser's timezone, not the server's.** Every `DateTime<Utc>` shown in the UI is emitted as `<time datetime="{{ x.to_rfc3339() }}" data-fmt="datetime|date">{{ x.format("…UTC") }}</time>`; the server-rendered text is only the no-JS fallback. An inline script in `templates/base.html` exposes `window.LiftLog.formatLocalDate/formatLocalDateTime` and rewrites those nodes on `DOMContentLoaded` into a fixed `YYYY-MM-DD HH:MM GMT±H` (dates: `YYYY-MM-DD`) — deliberately not `toLocaleString()`, so column widths stay constant. `NaiveDate` columns (`workout.date`, chart x-axes) are user-entered calendar dates and must **not** be converted.
+**The progress chart is drawn twice; keep both in sync.** `/stats/exercise/{id}?metric=top_set|e1rm|volume&range=20|all` is rendered as SVG by `handlers::stats::render_chart`; tabs are plain links. The script in `templates/stats/exercise.html` intercepts them, redraws from the embedded `ChartPoint` JSON, and `history.replaceState`s the URL. `ChartMetric::value` mirrors `metricValue`; PR dots are the running best of the plotted series on both sides; the server's `<g id="chart-hit-areas">` bands (with SVG `<title>` tooltips) mirror the client's. Unknown query values fall back to defaults.
 
-**The progress chart is drawn twice, and the two must agree.** `/stats/exercise/{id}` takes `?metric=top_set|e1rm|volume` and `?range=20|all`; `handlers::stats::render_chart` draws that combination as server-rendered SVG, and the tabs are links to the same page with a different query string, so every series is reachable with scripts off. The inline script in `templates/stats/exercise.html` then intercepts those clicks and redraws from the embedded `ChartPoint` JSON, calling `history.replaceState` so the URL still describes what is on screen. Because both sides compute the geometry independently, changing one means changing the other: `ChartMetric::value` mirrors `metricValue`, the gold "PR" dots are a running best *of the plotted series* in both, and the server's `<g id="chart-hit-areas">` bands mirror the client's — each carrying an SVG `<title>` the browser shows as a native tooltip, which is how the figures stay readable on hover with no scripting. Unknown query values fall back to the defaults rather than erroring — the query string is user-editable and arrives from stale bookmarks.
+**Add Set is server-prefillable.** Clone links to `/workouts/{id}?prefill=<log_id>`; `show` resolves it only against the workout's own logs. The script fills the form in place instead, so the trigger has both `href` and `data-clone-*`. The "last weight" hint is also rendered in `<noscript>`.
 
-**The Add Set form is prefillable from the server.** Clone is a link to `/workouts/{id}?prefill=<log_id>`; `show` resolves that id against the session's *own* logs (so an id from another workout simply fails to match) and seeds the exercise `<select>` and the weight/reps/RPE inputs. The page's script intercepts the click and fills the form in place instead, which is why the trigger carries both an `href` and `data-clone-*`. The inline "last weight" hint needs the `<select>` to change, which nothing can drive with scripts off, so the same figures are also rendered as a `<noscript>` table.
+**JS-only controls ship `hidden`.** The share page's clipboard button has `hidden data-requires-js`; `base.html` reveals it on `DOMContentLoaded`. `[hidden] { display: none !important }` exists because `.btn`'s `display: inline-flex` would otherwise win.
 
-**A control that cannot work without scripts ships `hidden`.** The clipboard button on a shared workout is the only one — copying needs `navigator.clipboard`, so there is no server-side version to build. It carries `hidden data-requires-js` and the handler in `base.html` reveals it on `DOMContentLoaded`; a dead button that looks alive is worse than an absent one, and `<noscript>` cannot express "only when scripts run". `[hidden] { display: none !important }` is in the stylesheet because `.btn`'s `display: inline-flex` would otherwise outrank the UA rule.
+**`build.rs`** renders `apple-touch-icon.png` from `assets/favicon.svg` (resvg) and sets `GIT_VERSION` from `git describe` or the `GIT_VERSION` env var (Docker/CI).
 
-**Build script side-effects.** `build.rs` renders `apple-touch-icon.png` from `assets/favicon.svg` via `resvg` and stamps `GIT_VERSION` (from `git describe` or the `GIT_VERSION` env override used by Docker/CI) into the binary as a `rustc-env`.
+## Integration tests
 
-## Integration test harness
+Use `tests/common/mod.rs`: `setup_test_db()` (in-memory, migrated) and `create_test_app_with_session()` (router + seeded session). Don't build a fresh server.
 
-`tests/common/mod.rs` exposes `setup_test_db()` (in-memory sqlite, fully migrated) and `create_test_app_with_session()` (router + a pre-seeded session). Every `tests/*_test.rs` file uses these — match that pattern for new tests rather than building a fresh server.
+## E2E tests
 
-## E2E test harness
+`e2e/tests/e2e/main.rs` starts one `target/debug/liftlog` on a throwaway SQLite file and OS-assigned port, opens one browser per scenario, and kills the server afterwards.
 
-`cargo test --test e2e` from `e2e/` runs the whole suite. `e2e/tests/e2e/main.rs` starts one `target/debug/liftlog` against a throwaway SQLite file on an OS-assigned port (building it first if it is missing), opens one browser per scenario, and kills the server on the way out. The `.feature` files are the Playwright suite's, reused verbatim apart from one tag.
+- **Stale binary.** `ensure_binary` (`e2e/src/server.rs`) builds only if the binary is missing. Askama compiles templates in, so run `cargo build` at the root after any `src/` or `templates/` change, or the suite tests the old build. CI builds first.
+- **Separate workspace.** Nothing is inherited: the lint set is copied into `e2e/Cargo.toml` (keep in sync). It's excluded from `cargo deny` and `.dockerignore`d.
+- **One server, one DB for the run.** Isolate fixtures with a per-scenario suffix (`world.unique("Squat")`); never assume a user has no other data.
+- **`@bootstrap` runs first**, as a separate pass on the empty DB. The tag is on the feature, and `gherkin` doesn't propagate feature tags, so the filter checks both.
+- **Concurrency** is `available_parallelism` capped at 4; `WAIT_TIMEOUT` is 30s — sized for a two-core CI runner.
+- **Wait for every submit's effect** (new URL, row appears/disappears). `click` may return before the redirect, and the next navigation cancels the in-flight POST, silently losing the fixture.
+- **Confirm dialogs** are auto-accepted via `unhandledPromptBehavior: accept`. Promote/delete-user steps fill the password page instead.
+- **No-JS paths are tested in Rust**, not here. When changing a destructive trigger, keep the Rust assertions on both `href` and `data-confirm`.
+- **Status codes and guest access go over HTTP** (`e2e/src/http.rs`), since WebDriver can't see responses — with the browser's cookie for 403/404, without for share links.
+- **`WebElement::text()` is rendered text** (affected by `text-transform`); compare user-chosen names with `pages::dom_text` (`textContent`).
+- **Set `noValidate` before submitting invalid passwords** (`SetupPage::submit`, `SettingsPage::change_password`), or `minlength`/`maxlength` blocks the request client-side.
+- **`Browser::prepare`** runs one session first so parallel sessions don't race to download the driver.
 
-- **A stale `target/debug/liftlog` is used as-is.** `ensure_binary` (`e2e/src/server.rs`) builds only when the file is *absent*, never when it is out of date, so an e2e run after a change to `src/` or `templates/` silently exercises the previous build — and because Askama compiles templates into the binary, a template change is invisible until you rebuild. The failure then reads as a bug in the change rather than as a stale artefact, so run `cargo build` at the root first. CI is unaffected: it builds in an earlier step.
-- **`e2e/` is deliberately its own workspace.** Nothing is inherited across that boundary — the lint set is copied into `e2e/Cargo.toml` and drifts if you edit only the root. It is also outside `cargo deny` (the browser stack carries licences the server's allow-list does not, and none of it is shipped) and inside `.dockerignore`.
-- **One server and one database for the whole run**, not one per worker. Scenarios are cucumber tasks on a single runtime, so they share the server and stay isolated the way they always did — by scoping fixtures to a per-scenario suffix (`world.unique("Squat")`). Never assume "lifter has no other workouts".
-- **`@bootstrap` runs first, on the empty database.** The first-run scenarios assert on an install with no users, which stops being true the moment anything seeds its admin, so `main.rs` runs them as a separate pass before everything else. The tag is on the *feature*, and `gherkin` does not propagate feature tags onto scenarios — the filter checks both.
-- **Concurrency is `available_parallelism` capped at 4**, and `WAIT_TIMEOUT` is 30s. Both are set for the slowest machine that runs this: four browsers on a two-core runner contend until pages settle slower than the steps wait for.
-- **A form post is not finished when `click` returns.** WebDriver does not reliably block until a redirect has been followed, and the *next* navigation cancels the request still in flight — which shows up as a fixture that was silently never created. Every submit therefore waits for its own effect: the new URL, the row appearing, the entry leaving. When adding a step that posts, wait for something that only the completed write produces.
-- **Confirm dialogs are handled by the session, not per click.** `unhandledPromptBehavior: accept` is set on the capabilities, so the `window.confirm()` that `base.html` raises for `<a data-confirm>` triggers is accepted automatically — there is no per-click handler to forget. Promote-user and delete-user are not enhanced: they open a page that re-checks the admin's password, so those steps click a link, fill the password, and submit.
-- **The no-JS path is covered in Rust, not here.** The confirmation pages are asserted by the integration tests (right consequence, inert on GET, ownership enforced); a scripts-off scenario was tried in the Playwright suite and hung in CI, and a real browser adds little over those beyond proving an `<a href>` navigates. When changing a destructive trigger, keep the Rust assertions on both the `href` and the `data-confirm`.
-- **Status codes and guests go over HTTP, not through the browser.** WebDriver reports the rendered document and nothing about the exchange, so `e2e/src/http.rs` re-issues the request — with the browser's session cookie for the 403/404 assertions, without one for the share-link guest.
-- **`WebElement::text()` is *rendered* text.** An `<h1>` under `text-transform: uppercase` reports uppercase characters the document does not contain; use `pages::dom_text` (which reads `textContent`) when comparing against a name the scenario chose. XPath `normalize-space()` is unaffected — it reads the DOM.
-- **HTML form validation can swallow the request.** Every password field carries `minlength`/`maxlength`, so any scenario submitting a deliberately-invalid password sets `noValidate` first (`SetupPage::submit`, `SettingsPage::change_password`); otherwise the browser blocks it client-side and the server-side defense — which is the actual control — goes untested.
-- **The driver manager downloads the driver, never the browser.** A local Chrome or Chromium has to exist (`brew install --cask ungoogled-chromium` on macOS; GitHub's `ubuntu-latest` already ships Chrome), which is the one regression against Playwright, and why `Browser::open` names the prerequisite in its error. `Browser::prepare` runs one session up front so a cold driver cache is not downloaded by several sessions at once.
+## Conventions
 
-## Project conventions
-
-- Commits follow conventional-commits with an area scope: `feat(stats):`, `fix(workouts):`, `chore(deps):`, `test(e2e):`, `refactor(auth):`. PR titles mirror the commit subject.
-- GitHub Actions are pinned by SHA with the human tag as a trailing comment.
-- `MSRV` (`rust-version` in `Cargo.toml`) is managed independently of the toolchain — don't bump it when bumping the toolchain.
-- Release artifacts are cut via `gh release create --generate-notes`; `Cargo.toml` version and `CHANGELOG.md` are not edited by hand.
+- Conventional commits with an area scope (`feat(stats):`, `fix(workouts):`, `chore(deps):`, `test(e2e):`); PR titles match.
+- GitHub Actions pinned by SHA with the tag as a trailing comment.
+- Don't bump `rust-version` (MSRV) along with the toolchain.
+- Releases: `gh release create --generate-notes`; never edit `Cargo.toml` version or add `CHANGELOG.md`.

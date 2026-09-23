@@ -1,21 +1,7 @@
-//! Creating accounts over HTTP, ported from `tests/e2e/support/seeding.js`.
-//!
-//! Fixtures go through the real endpoints rather than straight into SQLite, so
-//! a scenario's account is created exactly the way a real one is — password
-//! policy, hashing, roles and all. The first account comes from `/auth/setup`
-//! (which makes it the admin); everyone else is created by that admin through
-//! `/users/new`.
-//!
-//! The whole sequence is serialised behind a mutex. Playwright gave each worker
-//! its own server and database, so two workers could never race to create the
-//! first user; cucumber runs its scenarios against one server, and without the
-//! lock two of them arriving at `/auth/setup` together would have one of the
-//! two see a half-created install.
-//!
-//! The CSRF guard lets these through: it is header-only, and rejects a
-//! request only when the browser *reports*, or reveals, it to be cross-site.
-//! A `reqwest` call sends no `Sec-Fetch-Site` and no `Origin`, so it is
-//! treated as the non-browser client it is.
+//! Creating accounts over the real HTTP endpoints, so policy, hashing and roles
+//! apply. Serialised behind a mutex: concurrent scenarios hitting
+//! `/auth/setup` together would race on the first user. The CSRF guard lets
+//! these through because `reqwest` sends no `Sec-Fetch-Site` or `Origin`.
 
 use anyhow::{Context, Result, bail};
 use tokio::sync::Mutex;
@@ -25,13 +11,9 @@ use crate::server::{ADMIN, PASSWORD, url};
 /// Serialises account creation across concurrently running scenarios.
 static SEEDING: Mutex<()> = Mutex::const_new(());
 
-/// Makes sure `username` exists with `password`, creating it if it does not.
-///
-/// Idempotent, like the step it replaces: a repeat `/auth/setup` redirects to
-/// the login page because a user already exists, and a repeat `/users/new`
-/// re-renders its form with a "taken" error. Both are ignored — the
-/// post-condition is that the account is there, not that this call is what made
-/// it.
+/// Makes sure `username` exists, creating it if not. Idempotent: a repeat
+/// `/auth/setup` redirects and a repeat `/users/new` re-renders "taken"; both
+/// are ignored.
 ///
 /// # Errors
 ///
@@ -40,8 +22,7 @@ static SEEDING: Mutex<()> = Mutex::const_new(());
 pub async fn ensure_user(username: &str, password: &str) -> Result<()> {
     let _guard = SEEDING.lock().await;
 
-    // Everyone needs the admin: it is either the account being asked for, or
-    // the one that has to create it.
+    // The admin is either the account asked for or the one that creates it.
     call_setup().await?;
     if username == ADMIN {
         return Ok(());
@@ -59,11 +40,7 @@ pub async fn ensure_user(username: &str, password: &str) -> Result<()> {
 }
 
 /// Signs in as `username` on a throwaway client, leaving a second live session
-/// behind.
-///
-/// What `steps/settings.steps.js`'s `playwright.request.newContext()` did: the
-/// session has to exist without becoming the browser's, so the active-sessions
-/// table has two rows to show.
+/// that is not the browser's.
 ///
 /// # Errors
 ///
@@ -115,11 +92,8 @@ async fn admin_login(client: &reqwest::Client) -> Result<()> {
     Ok(())
 }
 
-/// A client that keeps its cookies and does not chase redirects.
-///
-/// Both matter: the admin's session has to survive from the login to the
-/// `/users/new` post, and a followed redirect would turn the 302 that says
-/// "signed in" into the 200 of the page it points at, hiding a refused login.
+/// Keeps cookies (the admin session spans login → `/users/new`) and does not
+/// follow redirects (the login's 302 is how success is detected).
 fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .cookie_store(true)

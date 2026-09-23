@@ -32,11 +32,7 @@ impl UsersPage<'_> {
             .with_context(|| format!("no row for `{username}` on the users page"))
     }
 
-    /// Opens a row action's confirmation page.
-    ///
-    /// Promote and delete are deliberately *not* enhanced with a
-    /// `window.confirm()`: each opens a page that re-checks the admin's own
-    /// password before acting, and re-authentication needs a real form.
+    /// Opens a row action's password re-check page (never a `window.confirm()`).
     pub async fn open_action(&self, username: &str, action: &str) -> Result<()> {
         self.goto().await?;
         let row = optional(self.0, By::XPath(row_xpath(username)))
@@ -70,11 +66,7 @@ impl UsersPage<'_> {
         .is_some())
     }
 
-    /// How many links with that text the page offers at all.
-    ///
-    /// Used by the negative path: a non-admin should not be offered
-    /// "+ Add New User" in the first place, quite apart from the endpoint
-    /// refusing them.
+    /// How many links with that text the page offers.
     pub async fn links_labelled(&self, label: &str) -> Result<usize> {
         count(
             self.0,
@@ -88,11 +80,7 @@ impl UsersPage<'_> {
 pub struct ConfirmActionPage<'a>(pub &'a WebDriver);
 
 impl ConfirmActionPage<'_> {
-    /// Confirms with a password.
-    ///
-    /// `button` is the page's submit label, spelled out in full ("Delete user",
-    /// not "Delete") — the point of the interstitial is that the admin reads
-    /// what is about to happen.
+    /// Confirms with a password; `button` is the full submit label ("Delete user").
     pub async fn confirm(&self, password: &str, button: &str) -> Result<()> {
         fill(self.0, "current_password", password).await?;
         click_button(self.0, button).await

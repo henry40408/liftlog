@@ -22,7 +22,7 @@ impl LoginPage<'_> {
         click_button(self.0, "Login").await
     }
 
-    /// Is the login form on screen? Both halves of "I see the login page".
+    /// Is the login form on screen?
     pub async fn is_showing(&self) -> Result<bool> {
         Ok(
             optional(self.0, By::XPath("//button[normalize-space(.)='Login']"))
@@ -45,11 +45,8 @@ impl SetupPage<'_> {
         goto(self.0, "/auth/setup").await
     }
 
-    /// Fills the form and submits it, with the browser's own validation off.
-    ///
-    /// The password field carries `minlength`, so the scenarios that submit a
-    /// deliberately-short password would otherwise never reach the server —
-    /// and the server-side policy check is the control under test.
+    /// Fills and submits the form with client-side validation off, so short
+    /// passwords reach the server-side check.
     pub async fn submit(&self, username: &str, password: &str) -> Result<()> {
         self.goto().await?;
         disable_validation(self.0, "form").await?;
@@ -78,15 +75,8 @@ impl SetupPage<'_> {
 pub struct NavBar<'a>(pub &'a WebDriver);
 
 impl NavBar<'_> {
-    /// Submits the Sign Out form and waits to land on the login page.
-    ///
-    /// A real `<button>` in a POST form, not a link: signing out is a
-    /// state-changing action and works with scripts off.
-    ///
-    /// The wait is what makes a following sign-in honest. Without it the next
-    /// navigation cancels the logout, the old session survives, and
-    /// `/auth/login` bounces straight back to the dashboard — which surfaces as
-    /// a login form that has no username field rather than as a failed logout.
+    /// Submits the Sign Out form and waits for the login page; otherwise the
+    /// next navigation cancels the logout and the old session survives.
     pub async fn sign_out(&self) -> Result<()> {
         displayed(self.0, By::Css("button.sign-out-btn"))
             .await?

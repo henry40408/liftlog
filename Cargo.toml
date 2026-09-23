@@ -7,10 +7,8 @@ edition = "2024"
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
 askama = "0.16"
-# Pinned: time 0.3.52 changed a sealed-trait internal API and broke cookie 0.18.1
-# (build failure in #118). 0.3.53 restores compilation via a deprecated shim that
-# time says it will remove — so 0.3.54+ is expected to break cookie again until it
-# ships a fix. Hold at 0.3.53 until cookie 0.18.x adapts.
+# Capped: 0.3.52 broke cookie 0.18.1 (#118); later releases keep a deprecated
+# shim time plans to drop. Raise the cap only after checking cookie still builds.
 time = ">=0.3.53, <0.3.56"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
@@ -18,8 +16,6 @@ r2d2_sqlite = "0.25"
 axum-extra = { version = "0.12", features = ["cookie"] }
 argon2 = "0.6"
 rand_core = { version = "0.6", features = ["getrandom"] }
-# Pinned at 0.10, not 0.11: argon2 0.5's password-hash pins digest 0.10, and
-# sha2 0.11 would pull in a second copy of digest into the dependency tree.
 sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -49,16 +45,12 @@ lto = true
 strip = true
 codegen-units = 1
 
-# Self-maintained lint set (originally seeded from Embark Studios' rust-ecosystem
-# list). The bulk of the old itemised pedantic lints are now covered by the
-# `pedantic` group; only the noisy/low-signal ones are opted back out, plus the
-# restriction and nursery lints that have no safe umbrella group.
 [lints.rust]
 unexpected_cfgs = "deny"
 unsafe_code = "deny"
 
 [lints.clippy]
-# Groups (priority -1 so the individual entries below win).
+# Priority -1 so the entries below win.
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
@@ -80,7 +72,7 @@ struct_excessive_bools = "allow"
 struct_field_names = "allow"
 too_many_lines = "allow"
 
-# Restriction lints (no safe umbrella group — kept itemised).
+# Restriction lints.
 dbg_macro = "warn"
 exit = "warn"
 float_cmp_const = "warn"
@@ -93,7 +85,7 @@ todo = "warn"
 unimplemented = "warn"
 verbose_file_reads = "warn"
 
-# Nursery picks (the nursery group as a whole is too unstable to enable).
+# Nursery picks (the group is too unstable to enable whole).
 debug_assert_with_mut_call = "warn"
 fallible_impl_from = "warn"
 trait_duplication_in_bounds = "warn"

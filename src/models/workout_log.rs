@@ -17,14 +17,8 @@ where
     }
 }
 
-/// The rep counts worth offering as suggestions on the Add Set form, in the
-/// order a browser renders them: singles and triples for strength work, 5 and
-/// 6 for the 5x5 family, 8-12 for hypertrophy, 15 and 20 for endurance.
-///
-/// Code, not data, for the same reason `CATEGORIES` is: this is a vocabulary
-/// the application asserts, not something a user configures. And a suggestion
-/// only — the field still accepts any positive integer, exactly as it did
-/// before, because programmes exist that do none of these.
+/// Rep-count suggestions for the Add Set form, in display order. Suggestions
+/// only; the field accepts any positive integer.
 pub const REP_SCHEMES: &[i32] = &[1, 3, 5, 6, 8, 10, 12, 15, 20];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,9 +77,7 @@ pub struct WorkoutLogWithExercise {
     pub rpe: Option<i32>,
     /// The set matches the all-time best weight for its exercise.
     pub is_pr: bool,
-    /// The set is inside the rolling 1-month window *and* matches the best
-    /// weight logged for its exercise within it. An all-time PR logged today
-    /// sets both flags; one from two years ago sets only `is_pr`.
+    /// Matches the best weight for its exercise within the rolling window.
     pub is_recent_pr: bool,
 }
 

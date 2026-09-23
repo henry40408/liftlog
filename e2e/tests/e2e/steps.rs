@@ -1,12 +1,7 @@
-//! Step definitions, ported from `tests/e2e/steps/*.js`.
-//!
-//! They live in the test binary rather than the library because the `#[given]`
-//! / `#[when]` / `#[then]` macros register through `inventory`, and a step that
-//! is only reachable through an rlib can be dropped by the linker.
-//!
-//! Where the old steps wrote `await expect(...)`, these call [`eventually`] or
-//! [`eventually_eq`]: `WebDriver` has no retrying-assertion layer, and most of
-//! these assertions land immediately after a form post that is still in flight.
+//! Step definitions. They live in the test binary, not the library: the step
+//! macros register through `inventory`, which the linker may drop from an rlib.
+//! Assertions retry via [`eventually`]/[`eventually_eq`], since most follow a
+//! form post still in flight.
 
 use anyhow::{Result, ensure};
 use cucumber::{given, then, when};
@@ -554,8 +549,7 @@ async fn second_session(world: &mut LiftLogWorld, username: String) -> Result<()
 #[when("I log out all other devices")]
 async fn log_out_others(world: &mut LiftLogWorld) -> Result<()> {
     world.settings_page()?.log_out_other_devices().await?;
-    // The POST re-renders /settings in place rather than redirecting, so the
-    // banner is what says it landed.
+    // The POST re-renders /settings, so wait for the banner.
     eventually("the log-out-others banner is showing", || async {
         Ok(contains(
             world.settings_page()?.success().await?,
@@ -608,8 +602,6 @@ async fn sessions_in_timezone(
     password: String,
 ) -> Result<()> {
     ensure_user(&username, &password).await?;
-    // CDP can retime a live session, so this needs none of the fresh browser
-    // context the Playwright step opened to pin `timezoneId`.
     world.browser()?.set_timezone(&timezone).await?;
     world.login_page()?.login(&username, &password).await?;
     see_dashboard(world).await?;
@@ -622,9 +614,7 @@ async fn sessions_in_timezone(
     )
     .await?;
 
-    // `base.html` rewrites each `<time>` into a fixed `YYYY-MM-DD HH:MM GMT±H`,
-    // deliberately not `toLocaleString()`, so the shape is exact rather than
-    // locale-dependent.
+    // `base.html` renders a fixed `YYYY-MM-DD HH:MM GMT±H`, not locale-dependent.
     eventually(
         &format!("both timestamps are rendered in {timezone}"),
         || async {
@@ -679,11 +669,8 @@ async fn share_link_is_shown(world: &mut LiftLogWorld) -> Result<()> {
     Ok(())
 }
 
-// The guest assertions go over plain HTTP rather than through a second browser
-// context. The shared page is server-rendered with no scripts of its own, so
-// the response body is the whole of what a visitor's browser would show — and
-// unlike a `WebDriver` navigation it also carries the status code the revoked
-// case is entirely about.
+// Guests go over plain HTTP: the shared page has no scripts, and the revoked
+// case needs the status code.
 #[then("a guest can view the workout via the share URL")]
 async fn guest_can_view_share(world: &mut LiftLogWorld) -> Result<()> {
     let response = http::get(world.share_url()?, None).await?;
@@ -735,8 +722,6 @@ async fn see_exercise_stats(world: &mut LiftLogWorld) -> Result<()> {
         world.stats_page()?.exercise_heading().await
     })
     .await?;
-    // Once any set has been logged the chart SVG renders; the "No progress data
-    // yet" fallback only appears for an exercise with none.
     eventually("the progress chart is drawn", || async {
         world.stats_page()?.has_chart().await
     })
@@ -873,8 +858,6 @@ async fn cannot_delete_myself(world: &mut LiftLogWorld) -> Result<()> {
         world.users_page()?.marks_as_you(ADMIN).await
     })
     .await?;
-    // A link now, not a submit button — the row action opens a confirmation
-    // page rather than posting directly.
     eventually_eq("delete links on my own row", 0usize, || async {
         world.users_page()?.delete_links_for(ADMIN).await
     })
@@ -940,7 +923,7 @@ async fn on_the_workout(world: &mut LiftLogWorld) -> Result<()> {
     .await
 }
 
-/// Playwright's `toContainText`, with a missing element counting as no match.
+/// Substring match, with a missing element counting as no match.
 fn contains(haystack: Option<String>, needle: &str) -> bool {
     haystack.is_some_and(|text| text.contains(needle))
 }
@@ -970,9 +953,4 @@ fn matches_shape(value: &str, shape: &str) -> bool {
         })
 }
 
-// The no-JS path — the confirmation pages themselves — is covered in Rust
-// integration tests (`workout_test.rs`, `exercises_test.rs`, `settings_test.rs`):
-// each page renders the right consequence, is inert on GET, and refuses another
-// user's row. A scripts-off browser scenario was tried in the Playwright suite
-// and hung in CI, and a real browser adds little over those tests beyond proving
-// that an `<a href>` navigates.
+// The no-JS confirmation pages are covered by the Rust integration tests.

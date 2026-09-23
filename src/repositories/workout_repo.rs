@@ -58,8 +58,7 @@ impl WorkoutRepository {
         Ok(session)
     }
 
-    /// Fetch a session owned by `user_id`. Returns `NotFound` for both
-    /// missing rows and rows belonging to another user (don't leak existence).
+    /// `NotFound` for missing and foreign rows alike (doesn't leak existence).
     pub async fn find_owned_session(&self, id: &str, user_id: &str) -> Result<WorkoutSession> {
         let session = self
             .find_session_by_id(id)
@@ -322,14 +321,11 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Get all PRs for a user (one per exercise, max weight), each with a
-    /// second max over the window starting at `since` — the "PR (1M)" column.
+    /// One PR per exercise (max weight), plus the max since `since` for the
+    /// "PR (1M)" column.
     ///
-    /// `created_at` is compared through `datetime()` rather than as a raw
-    /// string: rows written by the app carry an offset (`… +00:00`, rusqlite's
-    /// chrono encoding) while rows created by `DEFAULT CURRENT_TIMESTAMP` do
-    /// not, so a lexicographic comparison would order the two encodings
-    /// against each other incorrectly.
+    /// `created_at` goes through `datetime()`: app-written rows carry
+    /// `+00:00`, `CURRENT_TIMESTAMP` rows don't, so raw strings misorder.
     pub async fn get_pr_summaries_by_user(
         &self,
         user_id: &str,
@@ -425,9 +421,8 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Per-session aggregates for a single exercise: top set weight, top set
-    /// reps (tie-broken by higher reps when weight ties), and total volume.
-    /// Ordered oldest → newest (`ws.date ASC, ws.created_at ASC`).
+    /// Per-session aggregates for one exercise: top set weight and reps (higher
+    /// reps on ties) and volume, oldest first.
     pub async fn get_session_metrics_for_exercise(
         &self,
         user_id: &str,
@@ -567,8 +562,7 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Set share token for a workout session (creates a new token). `ttl` of
-    /// `None` means the link never expires (see migration 012's rationale).
+    /// Set a new share token; `ttl` `None` never expires.
     pub async fn set_share_token(
         &self,
         id: &str,
@@ -597,10 +591,7 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Revoke share token for a workout session. Clears `share_expires_at`
-    /// too — leaving a dangling expiry on a row with no token would be
-    /// confusing state (a share that's simultaneously "off" and "due to
-    /// expire").
+    /// Revoke the share token, clearing `share_expires_at` with it.
     pub async fn revoke_share_token(&self, id: &str, user_id: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();
@@ -617,11 +608,8 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Find a workout session by share token. The expiry check is done in
-    /// SQL, not in Rust, so an expired token and a nonexistent token are
-    /// literally the same case to the caller — both come back `None` and
-    /// both become `AppError::NotFound` in the handler — so the response
-    /// cannot reveal that a given token once existed.
+    /// Expiry is filtered in SQL so expired and nonexistent tokens are
+    /// indistinguishable (both `None`).
     pub async fn find_session_by_share_token(&self, token: &str) -> Result<Option<WorkoutSession>> {
         let pool = self.pool.clone();
         let token = token.to_string();
@@ -638,13 +626,9 @@ impl WorkoutRepository {
         .await?
     }
 
-    /// Clear share tokens whose expiry has passed. Returns the number of rows
-    /// cleared.
-    ///
-    /// This is not what makes expiry *effective* — the SQL filter in
-    /// `find_session_by_share_token` already does that on every lookup. It
-    /// exists so the owner's workout page shows "not shared" rather than
-    /// "shared, but the link is dead" once the row is stale.
+    /// Clear expired share tokens; returns the count. Expiry is already
+    /// enforced by `find_session_by_share_token`; this keeps the owner's page
+    /// from showing a dead link as shared.
     pub async fn cleanup_expired_share_tokens(&self) -> Result<usize> {
         let pool = self.pool.clone();
         tokio::task::spawn_blocking(move || {
@@ -778,7 +762,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(sessions.len(), 3);
-        // Should be ordered by date DESC
         assert_eq!(sessions[0].date, date2);
         assert_eq!(sessions[1].date, date3);
         assert_eq!(sessions[2].date, date1);
@@ -881,13 +864,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(logs.len(), 3);
-        // With DESC ordering: newest first
-        // 105.0 is PR for bench press, 120.0 is PR for squat
+        // Newest first; 105.0 is the bench PR, 120.0 the squat PR.
         assert!(logs[0].is_pr); // 120.0 squat - PR (created last)
         assert!(logs[1].is_pr); // 105.0 bench - PR
         assert!(!logs[2].is_pr); // 100.0 bench (created first)
-        // All three were logged just now, so every all-time PR is also a
-        // 1-month PR.
+        // All logged now, so every all-time PR is also a 1-month PR.
         assert!(logs[0].is_recent_pr);
         assert!(logs[1].is_recent_pr);
         assert!(!logs[2].is_recent_pr);
@@ -911,8 +892,7 @@ mod tests {
             .unwrap();
         backdate_log(&pool, &old_log.id, Utc::now() - chrono::Duration::days(90));
 
-        // A lighter set logged today: not an all-time PR, but the best inside
-        // the rolling window.
+        // Lighter set today: best within the window only.
         repo.create_log(&recent_session.id, "ex-bench-press", 1, 8, 110.0, None)
             .await
             .unwrap();
@@ -925,8 +905,7 @@ mod tests {
         assert!(!recent_logs[0].is_pr);
         assert!(recent_logs[0].is_recent_pr);
 
-        // The old session still owns the all-time PR, but sits outside the
-        // window so it carries no 1-month badge.
+        // Old all-time PR sits outside the window: no 1-month badge.
         let old_logs = repo
             .find_logs_by_session_with_pr(&old_session.id, "user1", recent_pr_window_start())
             .await
@@ -1199,7 +1178,7 @@ mod tests {
             .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
             .await
             .unwrap();
-        // With DESC ordering: newest (110.0) first
+        // Newest (110.0) first.
         assert!(logs[0].is_pr); // 110.0 is now PR (created last)
         assert!(!logs[1].is_pr); // 100.0 is no longer PR (created first)
     }
@@ -1522,7 +1501,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(logs.len(), 1);
-        // is_pr should be false for share (we don't calculate PRs)
+        // Share view skips PR calculation.
         assert!(!logs[0].is_pr);
     }
 

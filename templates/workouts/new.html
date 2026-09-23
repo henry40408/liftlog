@@ -30,9 +30,8 @@
 </main>
 
 <script>
-/* The server prefills "today" in its own timezone; correct it to the
-   browser's today, but only while the field still holds that prefill so a
-   bfcache restore of what the user typed survives. */
+/* Swap the server's "today" for the browser's, unless the user changed it
+   (e.g. a bfcache restore). */
 (function () {
     var dateEl = document.getElementById('date');
     if (dateEl.value !== dateEl.dataset.serverToday) {

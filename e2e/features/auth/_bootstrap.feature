@@ -1,6 +1,4 @@
-# Tagged so the runner can give these the empty database, before any other
-# scenario seeds its admin. None of the three creates an account, so the
-# install is still fresh when the second pass starts.
+# Runs first, on the empty database; none of these creates an account.
 @bootstrap
 Feature: First-time setup
 

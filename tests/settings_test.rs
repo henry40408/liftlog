@@ -83,9 +83,11 @@ async fn test_settings_shows_git_version() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // GIT_VERSION is stamped in at build time, so the page's exact string is
-    // whatever this checkout describes as — only its presence is assertable.
-    assert!(body_str.contains("version") || body_str.contains("Version") || body_str.len() > 100);
+    let expected = format!("<code>{}</code>", liftlog::version::GIT_VERSION);
+    assert!(
+        body_str.contains(&expected),
+        "settings should render {expected}"
+    );
 }
 
 #[tokio::test]
@@ -250,8 +252,7 @@ async fn test_change_password_invalidates_other_sessions() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    // The response must hand back a replacement cookie, because the token the
-    // request arrived on is now gone.
+    // The request's own token is gone, so a replacement cookie is required.
     let set_cookie = response
         .headers()
         .get(header::SET_COOKIE)
@@ -272,8 +273,7 @@ async fn test_change_password_invalidates_other_sessions() {
         "the session token must be rotated, not reused"
     );
 
-    // Every pre-change token is dead: the other device, and — this is the part
-    // that was missing before — the caller's own.
+    // Every pre-change token is dead, the caller's own included.
     for (name, token) in [("current", &token_current), ("other", &token_other)] {
         assert!(
             matches!(
@@ -298,10 +298,8 @@ async fn test_change_password_invalidates_other_sessions() {
     );
 }
 
-/// The replacement cookie has to actually authenticate the next request, not
-/// merely exist. Without `SuppressSessionRefresh` the sliding middleware would
-/// append a second `Set-Cookie` carrying the *old* token, and whichever the
-/// browser kept last would decide whether the user stayed logged in.
+/// Without `SuppressSessionRefresh`, the middleware would also re-issue the
+/// old token, and the browser might keep that one.
 #[tokio::test]
 async fn test_rotated_session_cookie_authenticates_the_next_request() {
     let pool = common::setup_test_db();
@@ -409,7 +407,6 @@ async fn test_logout_others_deletes_siblings_only() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Sibling is gone, current survives.
     assert!(
         matches!(
             session_repo
@@ -432,10 +429,7 @@ async fn test_logout_others_deletes_siblings_only() {
     );
 }
 
-/// The guard used to be `onsubmit="return confirm(...)"`, which a browser
-/// with JavaScript off never runs — the form posted straight through and every
-/// other session died on the first click. The trigger is now a link to a
-/// confirmation page, so the confirmation step survives without scripts.
+/// The trigger links to a confirmation page, so confirmation works without JS.
 #[tokio::test]
 async fn test_logout_others_is_gated_by_a_confirmation_page() {
     let pool = common::setup_test_db();
@@ -467,9 +461,7 @@ async fn test_logout_others_is_gated_by_a_confirmation_page() {
     );
 }
 
-/// The other two phrasings of the session count. "0 other signed-in devices
-/// will be logged out" would be a confusing thing to offer, so that case gets
-/// its own wording.
+/// Zero other sessions gets its own wording.
 #[tokio::test]
 async fn test_logout_others_confirmation_page_phrases_the_session_count() {
     let pool = common::setup_test_db();
@@ -478,7 +470,6 @@ async fn test_logout_others_confirmation_page_phrases_the_session_count() {
 
     let current_token = common::create_session_token(&pool, &user).await;
 
-    // Only this session exists.
     let response = app
         .clone()
         .oneshot(
@@ -498,7 +489,6 @@ async fn test_logout_others_confirmation_page_phrases_the_session_count() {
         "a lone session should not be offered a logout of nobody, got: {body}"
     );
 
-    // Two more devices sign in.
     common::create_session_token(&pool, &user).await;
     common::create_session_token(&pool, &user).await;
 
@@ -521,9 +511,7 @@ async fn test_logout_others_confirmation_page_phrases_the_session_count() {
     );
 }
 
-/// The confirmation page must name how many sessions are about to end, and
-/// must not end any of them itself — a GET that logged devices out would be
-/// triggerable by any prefetch.
+/// The confirmation GET names the session count and ends none of them.
 #[tokio::test]
 async fn test_logout_others_confirmation_page_counts_sessions_without_acting() {
     let pool = common::setup_test_db();
@@ -557,7 +545,6 @@ async fn test_logout_others_confirmation_page_counts_sessions_without_acting() {
         "the page should post back to the same route"
     );
 
-    // The GET must have been inert.
     let session_repo = liftlog::repositories::SessionRepository::new(pool);
     assert!(
         matches!(
@@ -594,9 +581,6 @@ async fn test_change_password_requires_auth() {
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
 
-/// OWASP Session Management Cheat Sheet (Web Content Caching): /settings
-/// carries account details and must never be resurrected from a browser or
-/// intermediate cache after logout.
 #[tokio::test]
 async fn test_settings_page_sets_no_store() {
     let pool = common::setup_test_db();
@@ -626,9 +610,6 @@ async fn test_settings_page_sets_no_store() {
     assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
 }
 
-/// Builds a `POST /settings/password` request. The throttle tests fire the
-/// same request repeatedly, and `oneshot` consumes the router, so each call
-/// needs a freshly built one.
 fn change_password_request(cookie_header: &str, body: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
@@ -639,11 +620,8 @@ fn change_password_request(cookie_header: &str, body: &str) -> Request<Body> {
         .unwrap()
 }
 
-/// `/settings/password` is liftlog's second password-verification entry point
-/// and was previously unthrottled: an attacker holding a stolen session cookie
-/// could guess `current_password` without limit, two Argon2 operations at a
-/// time. After the budget is exhausted the route must refuse *before*
-/// verifying anything.
+/// A stolen cookie must not allow unlimited `current_password` guesses; once
+/// throttled, nothing is verified.
 #[tokio::test]
 async fn test_change_password_throttled_after_max_attempts() {
     let pool = common::setup_test_db();
@@ -688,9 +666,8 @@ async fn test_change_password_throttled_after_max_attempts() {
     );
 }
 
-/// The reservation is refunded only once the current password proved correct,
-/// so a legitimate user changing their password repeatedly is never locked
-/// out. Without the refund, the third change below would be throttled.
+/// A correct current password refunds the attempt, so repeated changes are
+/// never throttled.
 #[tokio::test]
 async fn test_successful_change_password_releases_its_attempt() {
     let pool = common::setup_test_db();
@@ -704,11 +681,8 @@ async fn test_successful_change_password_releases_its_attempt() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let mut cookie_header = common::extract_cookie_header(&session_cookie);
 
-    // A budget of 1 means every one of these must be refunded to succeed.
-    // Each success also rotates the session token, so the cookie has to be
-    // carried forward the way a browser would — reusing the original would
-    // fail on the second pass for the *wrong* reason (dead session, not
-    // throttling) and quietly stop testing the refund.
+    // Budget 1: each must be refunded. Carry the rotated cookie forward, or
+    // the next pass fails on a dead session instead of the throttle.
     let rotations = [
         ("password123", "amber-tractor-lantern"),
         ("amber-tractor-lantern", "velvet-harbour-kestrel"),
@@ -748,8 +722,7 @@ async fn test_successful_change_password_releases_its_attempt() {
     );
 }
 
-/// The throttle keys on the user id, not the client IP, so one account
-/// exhausting its budget must not spend another account's.
+/// The throttle keys on user id, not client IP.
 #[tokio::test]
 async fn test_change_password_throttle_is_per_user() {
     let pool = common::setup_test_db();
@@ -767,7 +740,6 @@ async fn test_change_password_throttle_is_per_user() {
         common::extract_cookie_header(&common::create_session_cookie(&pool, &bob).await);
     let body = "current_password=wrongpass&new_password=purple-monkey-dishwasher&confirm_password=purple-monkey-dishwasher";
 
-    // Alice burns her single attempt, then is throttled.
     for expected in [StatusCode::OK, StatusCode::TOO_MANY_REQUESTS] {
         let response = test_app
             .router
@@ -778,7 +750,6 @@ async fn test_change_password_throttle_is_per_user() {
         assert_eq!(response.status(), expected);
     }
 
-    // Bob's budget is untouched.
     let response = test_app
         .router
         .clone()
@@ -792,9 +763,7 @@ async fn test_change_password_throttle_is_per_user() {
     );
 }
 
-/// Over-long passwords are rejected outright. Crucially they must NOT be
-/// truncated to the limit and accepted — that would let a user believe a long
-/// passphrase protects them while only its prefix is ever checked.
+/// Over-long passwords are rejected, never truncated to a prefix.
 #[tokio::test]
 async fn test_change_password_rejects_over_long_password() {
     let pool = common::setup_test_db();
@@ -822,8 +791,7 @@ async fn test_change_password_rejects_over_long_password() {
         "expected the maximum-length message, got: {body_str}"
     );
 
-    // Neither the full password nor a truncated prefix of it may have been
-    // stored: the original password must still be the live one.
+    // The original password is still the live one.
     let user_repo = UserRepository::new(pool.clone());
     assert!(
         user_repo
@@ -846,9 +814,8 @@ async fn test_change_password_rejects_over_long_password() {
     );
 }
 
-/// The strength gate on the change-password route. Also pins the ordering: the
-/// policy is checked *before* the current password, so a weak new password is
-/// refused without spending an Argon2 verification on it.
+/// Also pins that the policy is checked before the current password, saving an
+/// Argon2 verification.
 #[tokio::test]
 async fn test_change_password_rejects_a_guessable_new_password() {
     let pool = common::setup_test_db();
@@ -886,8 +853,7 @@ async fn test_change_password_rejects_a_guessable_new_password() {
     );
 }
 
-/// Companion to the setup-side test: the username reaches the strength check
-/// here too, taken from the authenticated session rather than the form.
+/// The session's username reaches the strength check.
 #[tokio::test]
 async fn test_change_password_rejects_a_password_derived_from_the_username() {
     let pool = common::setup_test_db();
@@ -918,10 +884,7 @@ async fn test_change_password_rejects_a_password_derived_from_the_username() {
     );
 }
 
-/// Re-submitting the current password as the new one is refused. Without this
-/// the request would report success, destroy every other session and rotate
-/// the token — all for a password that did not change, leaving someone who
-/// was rotating a compromised credential believing they had.
+/// Reusing the current password is refused, not reported as a change.
 #[tokio::test]
 async fn test_change_password_rejects_reusing_the_current_password() {
     let pool = common::setup_test_db();
@@ -963,7 +926,7 @@ async fn test_change_password_rejects_reusing_the_current_password() {
         "got: {body_str}"
     );
 
-    // The side effects of a real change must not have happened either.
+    // Nor did any side effect of a real change happen.
     assert!(
         matches!(
             SessionRepository::new(pool.clone())

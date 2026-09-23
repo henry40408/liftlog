@@ -34,10 +34,8 @@
                 {% if user.is_admin() %}
                 <td data-label="Actions">
                     {% if u.id != user.id %}
-                    {# Links, not POST forms with a confirm() dialog: both
-                       actions now go through a page that spells out the
-                       consequence and re-checks the admin's own password. The
-                       action itself is still a POST, from that page. #}
+                    {# Deliberately no data-confirm: these pages re-check the
+                       admin's password. #}
                     <div class="actions">
                         {% if !u.role.is_admin() %}
                         <a href="/users/{{ u.id }}/promote" class="btn btn-ghost btn-sm">Promote</a>

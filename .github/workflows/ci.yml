@@ -6,9 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# One run per ref at a time. A newer push supersedes the run it interrupted;
-# a tag does not — a tagged build publishes one specific version and nothing
-# should quietly cancel it.
+# A newer push cancels the previous run on the same ref.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -66,28 +64,20 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          # `e2e` is its own workspace, deliberately outside the root one, so it
-          # has to be named or none of its dependencies are cached.
+          # `e2e` is a separate workspace and must be named to be cached.
           workspaces: |
             .
             e2e
-          # This job builds the server with the dev profile, unlike the release
-          # builds elsewhere. A cache key is only ever written once — an exact
-          # hit is restored and never re-saved — so without a key of its own
-          # this job would keep restoring whatever profile populated the key
-          # first and rebuild its dependencies every run.
+          # Own key: an exact hit is never re-saved, so sharing a key with
+          # another job would keep restoring that job's artefacts.
           key: dev
 
-      # The suite starts this binary itself; building it here keeps the compile
-      # off the test's own startup timeout.
+      # Built up front so the compile is off the suite's startup timeout.
       - name: Build server
         run: cargo build
 
-      # `e2e` is linted here rather than in build-and-test, so it shares the
-      # build this job already pays for. It is deliberately outside
-      # `cargo deny`: the browser stack pulls in licences the server's
-      # allow-list does not carry, and none of it is distributed — the Docker
-      # image contains the server alone.
+      # Linted here to share this job's build. Outside `cargo deny`: none of
+      # the browser stack ships.
       - name: Check E2E formatting
         working-directory: e2e
         run: cargo fmt --all -- --check
@@ -96,9 +86,7 @@ jobs:
         working-directory: e2e
         run: cargo clippy --all-targets -- -D warnings
 
-      # No browser install step: thirtyfour's driver manager downloads a
-      # matching chromedriver on demand, and the runner image already ships
-      # Chrome. Nothing here needs Node.
+      # The runner ships Chrome; thirtyfour downloads chromedriver.
       - name: Run E2E tests
         working-directory: e2e
         run: cargo test --test e2e
@@ -109,9 +97,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-
-      # cargo-llvm-cov installs the llvm-tools-preview component itself, so the
-      # toolchain needs no extra declaration beyond rust-toolchain.toml.
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

@@ -127,10 +127,8 @@ pub async fn update(
     Ok(Redirect::to("/exercises").into_response())
 }
 
-/// Interstitial for `delete`. The repository refuses to delete an exercise
-/// that any workout log still references (`ON DELETE RESTRICT`), so this page
-/// promises deletion only for one that is genuinely unused; the check itself
-/// stays in `delete`, which is what a POST straight to the route hits.
+/// Interstitial for `delete`. `delete` itself still enforces the
+/// referenced-exercise check (`ON DELETE RESTRICT`).
 pub async fn confirm_delete(
     State(state): State<AppState>,
     auth_user: AuthUser,

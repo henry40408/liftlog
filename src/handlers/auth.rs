@@ -52,17 +52,9 @@ struct UsersListTemplate {
 
 /// Returns the validation error message, or `None` if the form is valid.
 ///
-/// The password rules live in `password_policy_error` so the two places that
-/// accept a new password — this one (signup, admin-created users) and the
-/// settings password-change handler — cannot enforce different ones. The
-/// messages are formatted from the constants rather than spelling the numbers
-/// out, so changing a bound cannot leave a form telling users the old one.
-///
-/// `spawn_blocking` for the same reason `hash_password` uses it: the strength
-/// check is real CPU work (sub-millisecond for a typical password, but a few
-/// milliseconds for a pathological one at `MAX_PASSWORD_LEN` — and the
-/// attacker is the one choosing the password here). Long enough to stall
-/// every other task sharing that tokio worker.
+/// Shares `password_policy_error` with the settings handler so both enforce
+/// one policy. `spawn_blocking` because the strength check on an
+/// attacker-chosen password can take milliseconds.
 async fn validate_credentials(form: &CreateUser) -> Result<Option<String>> {
     if form.username.trim().is_empty() {
         return Ok(Some("Username is required".to_string()));
@@ -76,8 +68,6 @@ async fn validate_credentials(form: &CreateUser) -> Result<Option<String>> {
 }
 
 pub async fn login_page(State(state): State<AppState>, request: Request) -> Result<Response> {
-    // sliding_session_middleware injects ValidatedSession into request
-    // extensions when the cookie is valid; bounce already-logged-in users.
     if request.extensions().get::<ValidatedSession>().is_some() {
         return Ok(Redirect::to("/").into_response());
     }
@@ -119,15 +109,8 @@ pub async fn login_submit(
             .into_response());
     }
 
-    // Hold the attempt for as long as this account's recent failures have
-    // earned, *before* evaluating it. Applied to the submitted username
-    // whether or not it names a real account, so the wait cannot be used to
-    // ask whether an account exists — the same reason `verify_password`
-    // spends an Argon2 verification on unknown usernames.
-    //
-    // Waiting here rather than before responding is what makes it a rate
-    // limit: the attacker's connection is occupied for the whole delay, so
-    // they cannot fire the next guess in the meantime.
+    // Delay applies to any submitted username, real or not, so it can't
+    // reveal account existence; holding the connection is what rate-limits.
     let backoff = state.login_backoff.delay_for(&credentials.username);
     if !backoff.is_zero() {
         tokio::time::sleep(backoff).await;
@@ -139,14 +122,9 @@ pub async fn login_submit(
         .await?;
 
     if let Some(user) = user {
-        // A proven password clears the account's penalty, so a legitimate
-        // user who mistyped a few times is back to a clean slate rather than
-        // carrying the delay into their next login.
         state.login_backoff.reset(&credentials.username);
-        // Create the session before releasing the rate-limit reservation:
-        // if `session_repo.create` fails, `?` below returns early and the
-        // attempt stays charged instead of being refunded for a login that
-        // never actually completed.
+        // Create the session before releasing the reservation, so a failed
+        // create stays charged.
         let token = state.session_repo.create(&user.id).await?;
         state.login_rate_limiter.release(ip);
         audit::session_created(
@@ -158,13 +136,8 @@ pub async fn login_submit(
         );
         let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
         let mut response = (jar, Redirect::to("/")).into_response();
-        // This response's Set-Cookie carries the session identifier — the
-        // exact case OWASP's Web Content Caching guidance targets — but
-        // sliding_session_middleware only stamps Cache-Control on requests
-        // that already carried a *valid* session, and this request was
-        // unauthenticated (that's the point of logging in), so the
-        // middleware never sees a reason to touch it. Set the headers here
-        // directly instead of widening the middleware's condition.
+        // The middleware only sets Cache-Control for requests that already
+        // had a session; this one sets the session cookie, so do it here.
         response.headers_mut().insert(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
@@ -175,18 +148,12 @@ pub async fn login_submit(
         );
         Ok(response)
     } else {
-        // Deliberately emitted for both failure modes `verify_password`
-        // collapses together (unknown username, wrong password) with the same
-        // wording and the same event: the whole point of that collapse is
-        // that nothing observable distinguishes them, and an audit event that
-        // said which one it was would reintroduce the enumeration oracle in
-        // the operator's log — where a compromised log reader could read it.
+        // One event for unknown user and wrong password alike, so the log
+        // is not an enumeration oracle.
         state
             .login_backoff
             .record_failure(credentials.username.clone());
-        // `backoff_ms` is the delay this attempt already served, not the one
-        // the next will: it makes the escalation visible in the log without
-        // needing a second event just to say the throttle engaged.
+        // `backoff_ms` is the delay this attempt served.
         audit::login_failed(
             &audit_ctx,
             &credentials.username,
@@ -243,11 +210,7 @@ pub async fn setup_submit(
     let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
 
     let mut response = (jar, Redirect::to("/")).into_response();
-    // Same rationale as login_submit's success path: this response's
-    // Set-Cookie carries the freshly created session identifier, and the
-    // request that produced it was unauthenticated (there was no user yet),
-    // so sliding_session_middleware's request-scoped guard never fires for
-    // it. Set the headers directly here rather than widening the middleware.
+    // See login_submit: the middleware won't set Cache-Control here.
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
@@ -272,22 +235,10 @@ pub async fn logout(
     }
     let jar = jar.add(remove_session_cookie(state.cookie_secure));
     let mut response = (jar, Redirect::to("/auth/login")).into_response();
-    // Tell sliding_session_middleware not to overwrite the removal cookie
-    // with a refreshed one.
     response.extensions_mut().insert(SuppressSessionRefresh);
-    // OWASP Session Management Cheat Sheet (Manual Session Expiration): ask
-    // the browser to drop the site's cookies, cache and local storage on
-    // logout, not just the one session cookie above — covers anything else
-    // an XSS or a shared machine could have stashed. The quotes around each
-    // directive are required syntax (a comma-separated list of quoted
-    // strings) — sending `cache, cookies, storage` unquoted makes browsers
-    // ignore the header entirely, silently. Deliberately omitting
-    // "executionContexts": it asks the browser to reload the associated
-    // browsing contexts, which interacts inconsistently across browsers with
-    // the redirect this handler already issues. Sent unconditionally
-    // (not gated on `state.cookie_secure`) because browsers already ignore
-    // this header on non-secure origins, so a conditional here would only
-    // add a branch without changing behaviour.
+    // Values must be quoted or browsers ignore the header. "executionContexts"
+    // is omitted: its reload clashes with the redirect. Browsers ignore it on
+    // insecure origins, so no `cookie_secure` gate.
     response.headers_mut().insert(
         axum::http::HeaderName::from_static("clear-site-data"),
         axum::http::HeaderValue::from_static("\"cache\", \"cookies\", \"storage\""),
@@ -346,17 +297,13 @@ pub async fn users_list(State(state): State<AppState>, auth_user: AuthUser) -> R
     Ok(Html(template.render()?).into_response())
 }
 
-/// The password an admin re-enters on the confirmation page before a
-/// destructive user-management action goes through.
+/// The admin's password, re-entered to confirm a user-management action.
 #[derive(Debug, serde::Deserialize)]
 pub struct ConfirmActionForm {
     pub current_password: String,
 }
 
-/// Which sensitive action a confirmation page is gating. Keeps the wording,
-/// the form target and the audit `action` string for each one in a single
-/// place, so the page and the handler that acts on it cannot disagree about
-/// what is being confirmed.
+/// Keeps each action's wording, form target and audit name in one place.
 #[derive(Clone, Copy)]
 enum SensitiveAction {
     PromoteUser,
@@ -371,9 +318,6 @@ impl SensitiveAction {
         }
     }
 
-    /// Spelled out in full on the page: the point of an interstitial is that
-    /// the admin reads what is about to happen, which a `window.confirm()`
-    /// one-liner does not encourage.
     fn consequence(self, username: &str) -> String {
         match self {
             Self::PromoteUser => format!(
@@ -401,10 +345,7 @@ impl SensitiveAction {
     }
 }
 
-/// Renders the confirmation page for `action` against `target_id`.
-///
-/// Looks the target up so the page can name them; a nonexistent id is a 404
-/// rather than a page offering to delete nobody.
+/// Renders the re-auth confirmation page; a nonexistent target is a 404.
 async fn render_confirm_page(
     state: &AppState,
     admin_user: AuthUser,
@@ -428,20 +369,10 @@ async fn render_confirm_page(
     Ok(Html(template.render()?).into_response())
 }
 
-/// Verifies the admin's own password before a sensitive action proceeds
-/// (OWASP Authentication Cheat Sheet, *Require Re-authentication for Sensitive
-/// Features*). Returns the rendered confirmation page — carrying an error —
-/// when the check fails, or `None` when the caller may go ahead.
-///
-/// The CSRF origin guard already blocks a cross-site *trigger* of these
-/// routes; what it cannot do is stop someone who holds the admin's session
-/// cookie outright, or has walked up to an unlocked browser. Requiring the
-/// password turns "has the cookie" into "knows the password" for the two
-/// actions that can hand out admin rights or destroy an account.
-///
-/// Throttled on the same per-user budget as the password change: this is
-/// another authenticated route that verifies a password, so leaving it
-/// unmetered would just move an attacker's guessing here.
+/// Re-checks the admin's password before a sensitive action (OWASP
+/// re-authentication), turning "has the cookie" into "knows the password".
+/// Returns the confirmation page with an error on failure, `None` to proceed.
+/// Shares the per-user throttle with password change.
 async fn require_reauth(
     state: &AppState,
     admin_user: &AuthUser,
@@ -557,27 +488,15 @@ pub async fn delete_user(
         return Ok(rejection);
     }
 
-    // Read the session count *before* the delete. It cannot be derived from
-    // the explicit cleanup below: `sessions.user_id` is ON DELETE CASCADE,
-    // enforcement is on for every pooled connection (`src/db.rs`), so the
-    // cascade removes those rows as part of the `users` delete and the
-    // cleanup below finds nothing left to count — which would log
-    // `count: 0` for an action that really did destroy sessions.
+    // Count before the delete: ON DELETE CASCADE removes the sessions with the
+    // user row, leaving nothing to count afterwards.
     let sessions_destroyed = state.session_repo.count_for_user(&user_id).await?;
 
-    // The user row goes first. If it fails, `?` returns having changed
-    // nothing — whereas cleaning sessions up first would leave a surviving
-    // account with every session destroyed and an audit line claiming the
-    // account was deleted.
+    // User row first, so a failure leaves sessions intact.
     let existed = state.user_repo.delete(&user_id).await?;
     if existed {
-        // Mop up whatever the cascade did not take. In the normal case the
-        // `ON DELETE CASCADE` above already removed every session and this
-        // is a harmless no-op; it only does real work if a connection ever
-        // ran with `PRAGMA foreign_keys` off (there is no such connection
-        // today, but nothing prevents a future one). Orphaned rows cannot
-        // authenticate — `validate_and_touch` INNER JOINs `users` — but they
-        // would otherwise sit until the hourly sweep retires them.
+        // Normally a no-op after the cascade; covers a connection with
+        // `foreign_keys` off.
         state.session_repo.delete_all_for_user(&user_id).await?;
         let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
         audit::sessions_destroyed_bulk(
@@ -617,17 +536,9 @@ pub async fn promote_user(
         .update_role(&user_id, UserRole::Admin)
         .await?;
 
-    // OWASP Session Management Cheat Sheet, "Renew the Session ID After Any
-    // Privilege Level Change": a role change is exactly that. Permissions
-    // themselves already take effect immediately — `validate_and_touch`
-    // re-reads `users.role` on every request — so the risk being closed here
-    // is the reverse one: a token stolen while the account was an ordinary
-    // user would silently inherit admin the moment this runs, with no
-    // reauthentication anywhere in between. Dropping every session forces the
-    // promoted user to log in again under their new privilege level.
-    //
-    // Gated on `promoted` so a promote against a nonexistent id doesn't log a
-    // role_change that never happened.
+    // Renew sessions on privilege change (OWASP): a token stolen before the
+    // promotion must not inherit admin. Gated on `promoted` so a missing id
+    // logs nothing.
     if promoted {
         let destroyed = state.session_repo.delete_all_for_user(&user_id).await?;
         let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());

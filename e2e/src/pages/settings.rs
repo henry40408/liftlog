@@ -5,11 +5,7 @@ use thirtyfour::prelude::*;
 
 use super::{click_button, click_link, disable_validation, fill, goto, optional, text};
 
-/// The sessions table, picked by its own column header.
-///
-/// `/settings` renders two `.data-table`s — active sessions and application
-/// info — so a positional selector would silently start asserting about the
-/// wrong one the day a third is added.
+/// The sessions table, picked by header: `/settings` has several `.data-table`s.
 const SESSIONS_TABLE: &str =
     "//table[contains(@class,'data-table')][.//th[normalize-space(.)='Device']]";
 
@@ -20,11 +16,8 @@ impl SettingsPage<'_> {
         goto(self.0, "/settings").await
     }
 
-    /// Fills the change-password form and submits it.
-    ///
-    /// Client-side validation is turned off first: the new-password field
-    /// carries `minlength`, and the scenarios submitting a deliberately-short
-    /// password are there to lock the *server's* check.
+    /// Fills and submits the change-password form with client-side validation
+    /// off, so short passwords reach the server's check.
     pub async fn change_password(&self, current: &str, next: &str, confirm: &str) -> Result<()> {
         self.goto().await?;
         disable_validation(self.0, "form[action=\"/settings/password\"]").await?;
@@ -44,11 +37,8 @@ impl SettingsPage<'_> {
         text(self.0, By::Css(".error")).await
     }
 
-    /// Ends every session but this one.
-    ///
-    /// The trigger is a link to a confirmation page, intercepted by `base.html`
-    /// into a `window.confirm()`. Its POST re-renders `/settings` in place
-    /// rather than redirecting, so the success banner is what says it worked.
+    /// Ends every session but this one. The POST re-renders `/settings`, so
+    /// callers wait for the success banner.
     pub async fn log_out_other_devices(&self) -> Result<()> {
         self.goto().await?;
         click_link(self.0, "Log out all other devices").await
@@ -77,11 +67,8 @@ impl SettingsPage<'_> {
         .is_some())
     }
 
-    /// The `data-label` of every cell in the first session row.
-    ///
-    /// Under 480px the table collapses to cards and the column headers are
-    /// hidden; `td::before` re-prints them from `data-label`. Without it the two
-    /// timestamps sit next to each other with nothing telling them apart.
+    /// The `data-label` of every cell in the first session row — the headers
+    /// `td::before` prints once the table collapses to cards under 480px.
     pub async fn first_row_labels(&self) -> Result<Vec<String>> {
         let cells = self
             .0
@@ -101,10 +88,8 @@ impl SettingsPage<'_> {
         Ok(labels)
     }
 
-    /// The rendered text of both timestamps in the first session row.
-    ///
-    /// Server-rendered as UTC and rewritten by `base.html` into the browser's
-    /// own zone, which is the behaviour the timezone scenario is checking.
+    /// The rendered text of both timestamps in the first session row, after
+    /// `base.html` rewrites them into the browser's zone.
     pub async fn first_row_times(&self) -> Result<Vec<String>> {
         let times = self
             .0
