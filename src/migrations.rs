@@ -1,7 +1,4 @@
-//! Embedded database migrations
-//!
-//! This module contains all SQL migrations embedded into the binary,
-//! eliminating the need for external migration files at runtime.
+//! SQL migrations embedded into the binary.
 
 use crate::db::DbPool;
 
@@ -49,10 +46,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Run all pending migrations on the database pool.
-///
-/// This function tracks which migrations have been applied in a `_migrations` table
-/// and only runs migrations that haven't been applied yet.
+/// Applies migrations not yet recorded in `_migrations`.
 pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
     use std::collections::HashSet;
 
@@ -87,21 +81,12 @@ pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
         conn.execute("INSERT INTO _migrations (name) VALUES (?)", [filename])?;
     }
 
-    // Migration 010 turns foreign_keys off for its table rebuild and
-    // deliberately does not turn it back on itself (see that migration's
-    // trailing comment) — only the pool's connection initialiser is allowed
-    // to be the source of truth for every *other* connection. But this
-    // particular connection came from the pool and returns to it once this
-    // function ends, so without restoring the pragma here it would sit in
-    // the pool carrying enforcement-off state and could be handed out to a
-    // real request later, silently unenforced.
+    // 010 and 011 turn foreign_keys off and don't restore it; this pooled
+    // connection would otherwise serve later requests unenforced.
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
-    // Confirm 011 left no FK violations behind. Warn rather than abort:
-    // locking an operator out of their own instance at startup is worse than
-    // carrying orphan rows, and orphans are not an authentication risk —
-    // validate_and_touch INNER JOINs users, so a session whose user is gone
-    // simply fails to validate.
+    // Warn, don't abort: orphans are harmless (validate_and_touch INNER JOINs
+    // users), a startup lockout is not.
     {
         let mut stmt = conn.prepare("PRAGMA foreign_key_check")?;
         let violations: Vec<(String, i64)> = stmt
@@ -120,10 +105,7 @@ pub fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run all migrations for tests (without tracking).
-///
-/// This is a simpler version that just runs all migrations without tracking,
-/// suitable for in-memory test databases that are created fresh each time.
+/// Applies every migration without tracking, for fresh in-memory test DBs.
 #[allow(dead_code)] // Used by integration tests
 pub fn run_migrations_for_tests(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
     let conn = pool.get()?;
@@ -132,12 +114,7 @@ pub fn run_migrations_for_tests(pool: &DbPool) -> Result<(), Box<dyn std::error:
         conn.execute_batch(sql)?;
     }
 
-    // See the matching comment in `run_migrations`: migration 010 turns
-    // foreign_keys off for its rebuild and does not restore it, so this
-    // connection (reused by every later `pool.get()` call against a
-    // max_size(1) test pool — see `create_memory_pool`) must have it
-    // restored here or every test built on this helper would silently run
-    // with enforcement off.
+    // As in `run_migrations`; the max_size(1) test pool reuses this connection.
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
     Ok(())
@@ -166,8 +143,6 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let pool = create_memory_pool().expect("memory pool");
         run_migrations(&pool).expect("first run");
-        // Second invocation must not re-apply or error; the HashSet path
-        // should short-circuit each migration as already applied.
         run_migrations(&pool).expect("second run");
 
         let conn = pool.get().unwrap();
@@ -193,16 +168,7 @@ mod tests {
 
     #[test]
     fn cleanup_migration_removes_preexisting_orphans() {
-        // The bundled SQLite in this build defaults PRAGMA foreign_keys to ON
-        // (SQLITE_DEFAULT_FOREIGN_KEYS), so a bare memory connection would
-        // block inserting the orphan rows this test needs to set up. Build a
-        // raw pool and explicitly turn enforcement off below, after the
-        // schema exists, rather than relying on create_memory_pool() (which
-        // now turns it ON) or on migration 010 happening to leave it off as
-        // a side effect. Note max_size(1): every pool.get() below hands back
-        // the same physical connection, so the schema, the orphan inserts,
-        // and the cleanup migration all land on one connection with no risk
-        // of a second connection missing state.
+        // max_size(1): schema, orphan inserts and cleanup share one connection.
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let pool = r2d2::Pool::builder()
             .max_size(1)
@@ -211,10 +177,7 @@ mod tests {
 
         let conn = pool.get().unwrap();
 
-        // Locate 011 by name rather than assuming it's `MIGRATIONS.last()` —
-        // that assumption broke once 012 was appended after it. Build the
-        // schema with every migration up to (not including) the cleanup
-        // one, so orphans can still be inserted afterwards.
+        // Schema up to (not including) 011, located by name.
         let cleanup_idx = MIGRATIONS
             .iter()
             .position(|(name, _)| *name == "011_cleanup_orphan_rows.sql")
@@ -223,9 +186,7 @@ mod tests {
             conn.execute_batch(sql).unwrap();
         }
 
-        // Explicit, not incidental: this test's orphan inserts must not
-        // depend on 011 itself (which now turns the pragma off internally)
-        // or on migration 010's side effect.
+        // Explicit, so the orphan inserts don't rely on 010's side effect.
         conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
 
         conn.execute(
@@ -244,8 +205,6 @@ mod tests {
         .unwrap();
 
         // Orphan workout_log: session_id matches no workout_sessions row.
-        // (exercise_id must point at a real exercise; that FK isn't under
-        // test here.)
         conn.execute(
             "INSERT INTO exercises (id, name, category, user_id) \
              VALUES ('ex1', 'Squat', 'legs', 'u1')",
@@ -283,20 +242,11 @@ mod tests {
 
     #[test]
     fn cleanup_migration_clears_orphans_on_a_db_already_at_010() {
-        // Exercises the path FIX 1 targets: a database that already has 010
-        // applied causes `run_migrations` to skip 010 entirely (its filename
-        // is already recorded in `_migrations`), so 011 must behave
-        // correctly without 010 having run in the same batch to leave
-        // foreign_keys off for it. `create_memory_pool`'s max_size(1) means
-        // every `pool.get()` below returns the same physical connection, so
-        // schema setup, the orphan inserts, and the real `run_migrations`
-        // call all land on one connection with nothing to miss.
+        // An existing DB skips 010, so 011 must work without 010 having just
+        // turned foreign_keys off.
         let pool = create_memory_pool().expect("memory pool");
         let conn = pool.get().unwrap();
 
-        // Apply 001 through 010 by filename, not by positional slicing — a
-        // later migration inserted between them would silently break an
-        // index assumption, exactly as it did for the test above.
         let idx_010 = MIGRATIONS
             .iter()
             .position(|(name, _)| *name == "010_rebuild_sessions_with_last_touched_at.sql")
@@ -309,11 +259,7 @@ mod tests {
             conn.execute_batch(sql).unwrap();
         }
 
-        // Record 001-010 as already applied, exactly as `_migrations` would
-        // read on a real database that was upgraded through 010 in the past.
-        // The real `run_migrations` call below will therefore skip all of
-        // them — 010 in particular — and go straight to 011, the path that
-        // was previously untested.
+        // Record 001–010 as applied, so `run_migrations` starts at 011.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS _migrations (
                 name TEXT PRIMARY KEY,
@@ -327,12 +273,7 @@ mod tests {
                 .unwrap();
         }
 
-        // create_memory_pool() enables foreign_keys by default; turn it off
-        // to insert the orphan rows below. Migration 011 no longer cares
-        // whether this connection enters it with the pragma on or off, since
-        // it now sets the pragma itself — this is purely to let the test set
-        // up an inconsistent state that a real, long-lived database could
-        // have accumulated before 011 first shipped.
+        // Off only to insert the orphans below.
         conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
 
         conn.execute(
@@ -366,11 +307,8 @@ mod tests {
         )
         .unwrap();
 
-        // A workout_log that references a *real* workout_session but the
-        // orphan exercise above: it is not itself orphaned until the
-        // exercise row is deleted. The old children-first ordering missed
-        // exactly this case — it deleted workout_logs before the exercise
-        // delete created this orphan, so the row survived forever.
+        // A log under a real session but the orphan exercise: orphaned only
+        // once the exercise is deleted, so 011 must delete parents first.
         conn.execute(
             "INSERT INTO workout_sessions (id, user_id, date, created_at) \
              VALUES ('real-ws', 'u1', '2024-01-02', datetime('now'))",
@@ -384,10 +322,7 @@ mod tests {
         )
         .unwrap();
 
-        // The pool is max_size(1): `run_migrations` below needs to check out
-        // that single connection itself, so the setup connection must be
-        // released first or the call would block forever waiting for a
-        // connection nothing will ever return.
+        // max_size(1): release it or `run_migrations` blocks forever.
         drop(conn);
 
         run_migrations(&pool).expect("run_migrations should not abort on pre-existing orphans");

@@ -35,7 +35,6 @@ async fn test_admin_can_access_users_page() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&body);
 
-    // Should show the users list with the admin user
     assert!(body_str.contains("admin"));
 }
 
@@ -60,8 +59,6 @@ async fn test_user_can_access_users_page() {
         .await
         .unwrap();
 
-    // Users list is accessible to all logged in users (they can see the list)
-    // but admin-only actions are restricted
     assert_eq!(response.status(), StatusCode::OK);
 }
 
@@ -201,7 +198,7 @@ async fn test_admin_cannot_self_delete() {
         .await
         .unwrap();
 
-    // Should get 400 Bad Request (cannot delete yourself)
+    // Cannot delete yourself.
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let user_repo = UserRepository::new(pool);
@@ -242,10 +239,8 @@ async fn test_admin_can_promote_user() {
     assert_eq!(found.role, UserRole::Admin);
 }
 
-/// A role change is a privilege-level change, so every session the promoted
-/// user holds must be destroyed: a token stolen while the account was an
-/// ordinary user must not silently become an admin token. The admin doing the
-/// promoting keeps their own session.
+/// Promotion kills the user's sessions, so a stolen user token never becomes
+/// an admin token. The promoting admin keeps theirs.
 #[tokio::test]
 async fn test_promote_destroys_the_promoted_users_sessions() {
     let pool = common::setup_test_db();
@@ -398,7 +393,7 @@ async fn test_unauthenticated_cannot_access_users() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a user so the app doesn't redirect to setup
+    // Otherwise the app redirects to setup.
     common::create_test_user(&pool, "existing", "password", UserRole::User).await;
 
     let response = test_app
@@ -416,9 +411,7 @@ async fn test_unauthenticated_cannot_access_users() {
     assert_eq!(response.headers().get("location").unwrap(), "/auth/login");
 }
 
-/// The whole point of the confirmation step: holding the admin's session
-/// cookie is no longer enough to promote someone. Without the password the
-/// action must not happen.
+/// An admin cookie alone cannot promote; the password is required.
 #[tokio::test]
 async fn test_promote_without_the_password_does_nothing() {
     let pool = common::setup_test_db();
@@ -443,7 +436,7 @@ async fn test_promote_without_the_password_does_nothing() {
         .await
         .unwrap();
 
-    // Re-rendered confirmation page, not a redirect: the action did not run.
+    // Re-rendered, not redirected: nothing happened.
     assert_eq!(response.status(), StatusCode::OK);
 
     let user_repo = UserRepository::new(pool);
@@ -454,8 +447,6 @@ async fn test_promote_without_the_password_does_nothing() {
     );
 }
 
-/// Same for the destructive one — and this is the case where getting it wrong
-/// is unrecoverable.
 #[tokio::test]
 async fn test_delete_without_the_password_does_nothing() {
     let pool = common::setup_test_db();
@@ -489,8 +480,7 @@ async fn test_delete_without_the_password_does_nothing() {
     );
 }
 
-/// The confirmation page names the target and spells out the consequence, so
-/// the admin is not confirming an action they cannot see the shape of.
+/// The confirmation page names the target and the consequence.
 #[tokio::test]
 async fn test_delete_confirmation_page_names_the_target() {
     let pool = common::setup_test_db();
@@ -527,8 +517,7 @@ async fn test_delete_confirmation_page_names_the_target() {
     );
 }
 
-/// A non-admin must not even see the confirmation page — otherwise the page
-/// would disclose that a given user id exists, and to whom it belongs.
+/// A non-admin can't see the confirmation page, which would reveal the user.
 #[tokio::test]
 async fn test_non_admin_cannot_open_the_confirmation_page() {
     let pool = common::setup_test_db();
@@ -554,9 +543,7 @@ async fn test_non_admin_cannot_open_the_confirmation_page() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-/// The re-auth check shares the password-change throttle, so an attacker
-/// holding a stolen admin cookie cannot guess the password by hammering this
-/// route instead of `/settings/password`.
+/// Re-auth shares the password-change throttle, so it is no guessing oracle.
 #[tokio::test]
 async fn test_reauth_is_throttled() {
     let pool = common::setup_test_db();
@@ -599,9 +586,7 @@ async fn test_reauth_is_throttled() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// The promote confirmation page, which the delete-side test does not cover.
-/// It has to state that promotion is a privilege grant, not just ask for a
-/// password — an admin clicking through a bare prompt learns nothing.
+/// The promote page says it grants admin, not just asks for a password.
 #[tokio::test]
 async fn test_promote_confirmation_page_names_the_target_and_the_grant() {
     let pool = common::setup_test_db();
@@ -638,10 +623,7 @@ async fn test_promote_confirmation_page_names_the_target_and_the_grant() {
     );
 }
 
-/// The self-delete guard has to fire on the confirmation page too, not only on
-/// the POST. Otherwise an admin is offered a page promising to delete their own
-/// account, and only finds out it was never possible after typing their
-/// password.
+/// The self-delete guard fires on the confirmation page too, not only the POST.
 #[tokio::test]
 async fn test_delete_confirmation_page_refuses_self() {
     let pool = common::setup_test_db();
@@ -666,8 +648,6 @@ async fn test_delete_confirmation_page_refuses_self() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-/// A confirmation page for an id that does not exist must 404 rather than
-/// render a form offering to act on nobody.
 #[tokio::test]
 async fn test_confirmation_page_404s_for_an_unknown_user() {
     let pool = common::setup_test_db();

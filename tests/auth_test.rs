@@ -27,12 +27,8 @@ async fn test_login_page_redirects_to_setup_when_no_users() {
     assert_eq!(response.headers().get("location").unwrap(), "/auth/setup");
 }
 
-/// An admin deleting a user must also delete every session belonging to
-/// that user. `sessions.user_id` does have `ON DELETE CASCADE` and
-/// enforcement is on for every pooled connection (src/db.rs), so this
-/// currently happens via the cascade; the handler's explicit cleanup is a
-/// backstop for a connection that might ever run with enforcement off, and
-/// without either one those rows would be orphaned forever.
+/// Deleting a user must also delete their sessions (via the FK cascade or the
+/// handler's explicit cleanup).
 #[tokio::test]
 async fn test_admin_delete_user_removes_their_sessions() {
     let pool = common::setup_test_db();
@@ -74,11 +70,8 @@ async fn test_admin_delete_user_removes_their_sessions() {
     assert_eq!(count, 0, "deleted user's sessions should all be gone");
 }
 
-/// When the user delete fails partway through, sessions must not be cleaned up
-/// or logged as destroyed — only the user row deletion is attempted, so if it
-/// fails, nothing changes. This regression test reproduces the bug: sessions
-/// were deleted before the user row delete, so a failed delete left the user
-/// alive but all their sessions orphaned.
+/// Regression: sessions used to be deleted before the user row, so a failed
+/// delete left the user alive with no sessions.
 #[tokio::test]
 async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
     let pool = common::setup_test_db();
@@ -92,7 +85,6 @@ async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
     let _victim_token1 = common::create_session_token(&pool, &victim).await;
     let _victim_token2 = common::create_session_token(&pool, &victim).await;
 
-    // Install a trigger that blocks deletion of the victim user
     {
         let conn = pool.get().unwrap();
         conn.execute(
@@ -121,7 +113,6 @@ async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
         .await
         .unwrap();
 
-    // The delete should have failed. Database error → INTERNAL_SERVER_ERROR.
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     {
@@ -155,20 +146,15 @@ async fn test_admin_delete_user_keeps_sessions_when_user_delete_fails() {
     }
 }
 
-/// Pins that `delete_user` is correct whether `SQLite`'s cascade deletes the
-/// sessions or the handler's explicit cleanup does. `setup_test_db` builds
-/// its pool via `create_memory_pool` (`src/db.rs`), which is `max_size(1)`
-/// — a single physical connection shared by every `pool.get()` call in this
-/// test process, including the one the request handler will use inside
-/// `spawn_blocking`. So enabling `PRAGMA foreign_keys = ON` on the
-/// connection we grab here reaches the request's connection too; there is
-/// no second connection for it to miss.
+/// Exercises the handler's explicit session cleanup with the cascade disabled.
+/// The test pool is a single connection (`max_size(1)`), so this pragma also
+/// reaches the handler's connection.
 #[tokio::test]
-async fn test_admin_delete_user_removes_sessions_even_with_foreign_keys_enforced() {
+async fn test_admin_delete_user_removes_sessions_without_foreign_keys() {
     let pool = common::setup_test_db();
     {
         let conn = pool.get().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
     }
     let test_app = common::create_test_app_with_session(pool.clone());
 
@@ -207,7 +193,7 @@ async fn test_admin_delete_user_removes_sessions_even_with_foreign_keys_enforced
         .unwrap();
     assert_eq!(
         session_count, 0,
-        "victim's sessions should be gone whether the cascade or the explicit cleanup did it"
+        "the explicit cleanup should remove the sessions without the cascade"
     );
 
     let user_count: i64 = conn
@@ -220,13 +206,7 @@ async fn test_admin_delete_user_removes_sessions_even_with_foreign_keys_enforced
     assert_eq!(user_count, 0, "victim's user row should be gone");
 }
 
-/// Distinct from `test_admin_delete_user_removes_their_sessions` above: that
-/// test only proves sessions are gone by the time the handler responds,
-/// which is true whether the handler's explicit cleanup or the DB cascade
-/// did it. This test isolates the cascade itself — PRAGMA `foreign_keys=ON`
-/// is now the default for every pooled connection (src/db.rs), so
-/// `sessions.user_id REFERENCES users(id) ON DELETE CASCADE` fires on the
-/// bare `DELETE FROM users` regardless of what the handler does afterwards.
+/// Isolates the cascade: a bare `DELETE FROM users`, no handler involved.
 #[tokio::test]
 async fn test_deleting_user_cascades_their_sessions() {
     let pool = common::setup_test_db();
@@ -333,7 +313,6 @@ async fn test_login_invalid_credentials() {
         .await
         .unwrap();
 
-    // Should return OK with error message (not redirect)
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -346,7 +325,6 @@ async fn test_login_nonexistent_user() {
     let pool = common::setup_test_db();
     let test_app = common::create_test_app_with_session(pool.clone());
 
-    // Create a user so we don't get redirected to setup
     common::create_test_user(&pool, "existing", "password", UserRole::User).await;
 
     let response = test_app
@@ -422,8 +400,7 @@ async fn test_logout_sets_clear_site_data() {
         .await
         .unwrap();
 
-    // Byte-for-byte: unquoted directives make browsers silently ignore the
-    // whole header, so a loose `contains` check wouldn't catch that mistake.
+    // Exact match: browsers ignore the whole header if a directive is unquoted.
     let clear_site_data = response
         .headers()
         .get("clear-site-data")
@@ -512,7 +489,6 @@ async fn test_setup_rejects_empty_username() {
         .await
         .unwrap();
 
-    // Validation failure re-renders the setup form (200 OK).
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let html = String::from_utf8_lossy(&body);
@@ -551,9 +527,7 @@ async fn test_setup_rejects_short_password() {
     assert_eq!(count, 0);
 }
 
-/// Pins the boundary itself rather than "some short password is rejected":
-/// one character under the minimum must fail and exactly the minimum must
-/// succeed, so an off-by-one in the comparison cannot pass.
+/// Pins the exact boundary so an off-by-one cannot pass.
 #[tokio::test]
 async fn test_setup_password_length_boundary() {
     for (password, should_create) in [("gymrat.2026", false), ("gymrat.2026!", true)] {
@@ -621,7 +595,7 @@ async fn test_sliding_session_no_cookie_when_within_throttle() {
     let pool = common::setup_test_db();
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
-    // Fresh session: last_touched_at is ~now, so within throttle.
+    // Fresh session: within the touch throttle.
     let token = common::create_session_token(&pool, &user).await;
 
     let app = common::create_test_app(pool);
@@ -673,8 +647,7 @@ async fn test_over_age_session_redirects_to_login() {
     let user = common::create_test_user(&pool, "alice", "password123", UserRole::User).await;
 
     let token = common::create_session_token(&pool, &user).await;
-    // Over the 90-day absolute cap even though expires_at (created as
-    // now + 7d idle TTL) is still in the future.
+    // Past the 90-day absolute cap, though the idle expiry is still ahead.
     common::age_session_creation(&pool, &token, 91);
 
     let app = common::create_test_app(pool);
@@ -988,15 +961,10 @@ async fn test_login_page_redirects_to_dashboard_when_already_authenticated() {
     assert_eq!(response.headers().get("location").unwrap(), "/");
 }
 
-// Nothing above ever attaches a `ConnectInfo`, so `login_submit` always sees
-// `peer = None` and every request falls into the single "no peer" bucket.
-// `oneshot` doesn't run the `into_make_service_with_connect_info` layer that
-// does this in production, so these tests attach it manually via
-// `common::with_peer` to actually exercise the per-IP dimension of
-// `crate::net::client_ip` end to end.
+// `oneshot` attaches no `ConnectInfo`, so the per-IP tests below add one via
+// `common::with_peer`.
 
-/// Builds a login POST with a wrong password (so `release` never fires) and
-/// the given extra headers.
+/// A failing login POST (so the limiter is never released).
 fn wrong_password_login_request(headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = Request::builder()
         .method("POST")
@@ -1077,8 +1045,7 @@ async fn test_untrusted_peer_forged_xff_is_ignored() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Same (untrusted) peer, different forged X-Forwarded-For: must still
-    // land in the same bucket, proving the header was ignored.
+    // Same untrusted peer, different forged XFF: same bucket.
     let response = test_app
         .router
         .clone()
@@ -1114,7 +1081,7 @@ async fn test_loopback_peer_honours_rightmost_xff_hop() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Different rightmost hop -> a different bucket -> still allowed.
+    // Different rightmost hop: different bucket.
     let response = test_app
         .router
         .clone()
@@ -1126,9 +1093,7 @@ async fn test_loopback_peer_honours_rightmost_xff_hop() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Same rightmost hop as the first request, different leftmost -> same
-    // bucket -> refused. This is what fails if the leftmost hop is ever
-    // read instead of the rightmost.
+    // Same rightmost hop, different leftmost: same bucket.
     let response = test_app
         .router
         .clone()
@@ -1141,19 +1106,8 @@ async fn test_loopback_peer_honours_rightmost_xff_hop() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// Regression test for the confirmed bypass in Fix 1a: two separate
-/// `X-Forwarded-For` header field lines must bucket by the *last* line, not
-/// the first and not by ignoring the header entirely.
-///
-/// Three requests from the same peer, limit 1:
-///   1. `["1.1.1.1", "198.51.100.7"]` -> 200
-///   2. `["1.1.1.1", "198.51.100.8"]` -> 200 (different last line -> different bucket)
-///   3. `["9.9.9.9", "198.51.100.7"]` -> 429 (same last line as #1, different first line -> same bucket)
-///
-/// If the header were ignored, all three would bucket by the shared peer and
-/// #2 would be 429. If the *first* line were read instead of the last, #1
-/// and #2 would share a bucket (`1.1.1.1`) and #2 would be 429. Either
-/// regression fails this test.
+/// Repeated `X-Forwarded-For` lines bucket by the last line. Reading the first
+/// line, or ignoring the header, would make the second request 429.
 #[tokio::test]
 async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
     let pool = common::setup_test_db();
@@ -1209,10 +1163,8 @@ async fn test_duplicate_xff_header_lines_bucket_by_the_last_line() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// Regression test for the confirmed bypass: with `LIFTLOG_TRUSTED_PROXY_HEADER`
-/// unset (the default), a forged `X-Forwarded-For` must not mint a fresh
-/// rate-limit bucket, even from a loopback peer that would have been
-/// trusted had a header been configured.
+/// With `LIFTLOG_TRUSTED_PROXY_HEADER` unset, a forged `X-Forwarded-For` must
+/// not mint a fresh bucket, even from loopback.
 #[tokio::test]
 async fn test_forwarding_header_ignored_when_not_configured() {
     let pool = common::setup_test_db();
@@ -1234,9 +1186,7 @@ async fn test_forwarding_header_ignored_when_not_configured() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Different forged X-Forwarded-For, same peer: must still land in the
-    // same bucket, proving the header was never read because no header is
-    // configured.
+    // Different forged XFF, same peer: same bucket.
     let response = test_app
         .router
         .clone()
@@ -1249,8 +1199,7 @@ async fn test_forwarding_header_ignored_when_not_configured() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// When `LIFTLOG_TRUSTED_PROXY_HEADER` selects `X-Forwarded-For`, `X-Real-IP` must
-/// never be consulted, even when XFF is entirely absent from the request.
+/// With `X-Forwarded-For` selected, `X-Real-IP` is ignored even when XFF is absent.
 #[tokio::test]
 async fn test_x_real_ip_not_honoured_when_header_is_x_forwarded_for() {
     let pool = common::setup_test_db();
@@ -1274,8 +1223,7 @@ async fn test_x_real_ip_not_honoured_when_header_is_x_forwarded_for() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Different X-Real-IP, no XFF at all: must still land in the same
-    // bucket (the peer), proving the non-selected header is never read.
+    // Different X-Real-IP, no XFF: still the peer's bucket.
     let response = test_app
         .router
         .clone()
@@ -1316,8 +1264,7 @@ async fn sliding_session_reissues_cookie_when_throttle_elapsed(cookie_secure: bo
 
     assert_ne!(response.status(), StatusCode::SEE_OTHER);
 
-    // And Set-Cookie should have been re-issued with a fresh Max-Age, under
-    // whichever cookie name this deployment actually uses.
+    // Cookie re-issued with a fresh Max-Age.
     let set_cookie = response
         .headers()
         .get(header::SET_COOKIE)
@@ -1370,8 +1317,7 @@ async fn logout_does_not_get_overridden_by_sliding_refresh(cookie_secure: bool) 
         .await
         .unwrap();
 
-    // Exactly one Set-Cookie for the session cookie, and it must be the
-    // removal, whichever cookie name this deployment uses.
+    // Exactly one session Set-Cookie, and it is the removal.
     let expected_name = liftlog::session::session_cookie_name(cookie_secure);
     let prefix = format!("{expected_name}=");
     let session_cookies: Vec<_> = response
@@ -1403,13 +1349,9 @@ async fn test_logout_does_not_get_overridden_by_sliding_refresh_secure() {
     logout_does_not_get_overridden_by_sliding_refresh(true).await;
 }
 
-/// End-to-end walk of the `LIFTLOG_COOKIE_SECURE=true` deployment path: login sets
-/// the `__Host-session` cookie, an aged session slides and re-issues it, and
-/// logout clears it. Guards against `SessionLayerState.cookie_secure` ever
-/// getting lost: without it, a secure deployment would keep re-issuing a
-/// plain `session=` cookie that `get_session_token` never reads, silently
-/// logging active users out at the 7-day idle mark with nothing failing in
-/// CI.
+/// `LIFTLOG_COOKIE_SECURE=true` end to end: login, slide and logout all use
+/// `__Host-session`. Losing `SessionLayerState.cookie_secure` would re-issue a
+/// plain `session=` cookie that is never read, logging users out after 7 days.
 #[tokio::test]
 async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
     let pool = common::setup_test_db();
@@ -1502,9 +1444,7 @@ async fn test_secure_cookie_end_to_end_login_sliding_refresh_logout() {
     assert!(set_cookie.contains("Max-Age=0"));
 }
 
-/// OWASP Session Management Cheat Sheet (Web Content Caching): authenticated
-/// responses must tell browsers/proxies not to persist them, so the back
-/// button on a shared device can't resurrect private content after logout.
+/// Authenticated pages must not be cached, so Back can't reveal them after logout.
 #[tokio::test]
 async fn test_authenticated_page_sets_no_store() {
     let pool = common::setup_test_db();
@@ -1534,15 +1474,11 @@ async fn test_authenticated_page_sets_no_store() {
     assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
 }
 
-/// Pins current behaviour: /auth/login holds no private content and is
-/// reached with no valid session, so `sliding_session_middleware` never sets
-/// `authenticated` and must not attach Cache-Control here. Guards against
-/// silently widening the scope of the no-store change beyond authenticated
-/// pages.
+/// No-store is scoped to authenticated requests; the login page stays cacheable.
 #[tokio::test]
 async fn test_unauthenticated_login_page_has_no_cache_control() {
     let pool = common::setup_test_db();
-    // A user must exist, otherwise /auth/login redirects to /auth/setup.
+    // Otherwise /auth/login redirects to /auth/setup.
     common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
     let app = common::create_test_app(pool);
 
@@ -1560,12 +1496,8 @@ async fn test_unauthenticated_login_page_has_no_cache_control() {
     assert!(response.headers().get("cache-control").is_none());
 }
 
-/// OWASP Session Management Cheat Sheet (Web Content Caching): the login
-/// success response is the one place a *previously unauthenticated* request
-/// transmits a fresh session identifier (via Set-Cookie), so
-/// `sliding_session_middleware`'s request-scoped guard — which only stamps
-/// Cache-Control when the incoming request already carried a valid session —
-/// can never cover it. `login_submit` must set the headers itself.
+/// The login response carries a new session cookie but its request had no
+/// session, so the middleware's no-store never applies; `login_submit` sets it.
 #[tokio::test]
 async fn test_login_success_response_is_not_cacheable() {
     let pool = common::setup_test_db();
@@ -1595,9 +1527,7 @@ async fn test_login_success_response_is_not_cacheable() {
     assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
 }
 
-/// Same rationale as `test_login_success_response_is_not_cacheable`, for the
-/// first-user bootstrap path: `setup_submit`'s success response also mints
-/// and transmits a fresh session identifier from an unauthenticated request.
+/// As `test_login_success_response_is_not_cacheable`, for `setup_submit`.
 #[tokio::test]
 async fn test_setup_success_response_is_not_cacheable() {
     let pool = common::setup_test_db();
@@ -1628,9 +1558,7 @@ async fn test_setup_success_response_is_not_cacheable() {
     assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
 }
 
-/// HSTS is opt-in: a default-built app must never send
-/// `Strict-Transport-Security`. Pins that the feature does not leak on by
-/// accident.
+/// HSTS is opt-in: off by default.
 #[tokio::test]
 async fn test_no_hsts_header_by_default() {
     let pool = common::setup_test_db();
@@ -1654,8 +1582,6 @@ async fn test_no_hsts_header_by_default() {
     );
 }
 
-/// When `LIFTLOG_HSTS_MAX_AGE` is configured (without subdomains), the header carries
-/// exactly `max-age=<N>`.
 #[tokio::test]
 async fn test_hsts_header_present_when_configured() {
     let pool = common::setup_test_db();
@@ -1677,8 +1603,6 @@ async fn test_hsts_header_present_when_configured() {
     );
 }
 
-/// When `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS` is also configured, the header carries
-/// `includeSubDomains` as well.
 #[tokio::test]
 async fn test_hsts_header_includes_subdomains_when_configured() {
     let pool = common::setup_test_db();
@@ -1700,10 +1624,7 @@ async fn test_hsts_header_includes_subdomains_when_configured() {
     );
 }
 
-/// Layer-ordering regression guard: HSTS must be the *outermost* layer so it
-/// still lands on a response that the CSRF guard rejects before the
-/// request reaches session validation or a handler. If the HSTS layer were
-/// registered inside the CSRF guard instead of outside it, this would fail.
+/// HSTS must be outside the CSRF guard so it also lands on its 403.
 #[tokio::test]
 async fn test_hsts_header_present_on_csrf_rejection() {
     let pool = common::setup_test_db();
@@ -1729,8 +1650,7 @@ async fn test_hsts_header_present_on_csrf_rejection() {
     );
 }
 
-/// The four baseline headers, unlike HSTS, are unconditional — no env var
-/// gates them, so a deployment cannot end up without them by omission.
+/// The baseline headers are unconditional, unlike HSTS.
 fn assert_baseline_headers(headers: &axum::http::HeaderMap) {
     assert_eq!(
         headers.get("content-security-policy").unwrap(),
@@ -1762,10 +1682,8 @@ async fn test_baseline_security_headers_on_a_normal_response() {
     assert_baseline_headers(response.headers());
 }
 
-/// The clickjacking defence is worthless if it only ships on responses that
-/// reach a handler. These two cover the paths that short-circuit inside a
-/// middleware instead — the CSRF guard's 403 and the auth redirect's 302 —
-/// which is what pins the layer's registration point.
+/// Baseline headers must also cover responses that short-circuit in
+/// middleware: the CSRF 403 and the auth 302.
 #[tokio::test]
 async fn test_baseline_security_headers_on_csrf_rejection() {
     let pool = common::setup_test_db();
@@ -1807,8 +1725,7 @@ async fn test_baseline_security_headers_on_auth_redirect() {
     assert_baseline_headers(response.headers());
 }
 
-/// The public share page is the one route a third party is meant to open, so
-/// it is also the one most likely to be embedded — it must not be an exception.
+/// The public share page is the likeliest to be embedded; no exception.
 #[tokio::test]
 async fn test_baseline_security_headers_on_the_public_share_route() {
     let pool = common::setup_test_db();
@@ -1827,11 +1744,7 @@ async fn test_baseline_security_headers_on_the_public_share_route() {
     assert_baseline_headers(response.headers());
 }
 
-/// Companion to `test_setup_rejects_short_password` at the other bound. The
-/// maximum exists so the hash comparison has a bounded input (OWASP:
-/// "protect against denial of service attacks with very long inputs"), and
-/// rejection — never truncation — is what keeps the accepted password and the
-/// one the user typed the same string.
+/// The maximum bounds hashing cost; over-long input is rejected, never truncated.
 #[tokio::test]
 async fn test_setup_rejects_over_long_password() {
     let pool = common::setup_test_db();
@@ -1867,10 +1780,8 @@ async fn test_setup_rejects_over_long_password() {
     );
 }
 
-/// The strength gate, reaching the handler. `MyPassword12` clears the length
-/// floor and has upper case, lower case and digits — every composition rule
-/// accepts it — so this proves the handler consults `password_policy_error`
-/// and not just the length bounds.
+/// `MyPassword12` passes length and composition rules, so only the strength
+/// check (`password_policy_error`) can reject it.
 #[tokio::test]
 async fn test_setup_rejects_a_guessable_password() {
     let pool = common::setup_test_db();
@@ -1901,11 +1812,8 @@ async fn test_setup_rejects_a_guessable_password() {
     assert_eq!(user_repo.count().await.unwrap(), 0);
 }
 
-/// Proves the *username* is threaded into the strength check as a
-/// `user_inputs` entry. `henrylifts.42x` is strong on its own — the unit test
-/// pins that — so the only way this can be rejected is if the handler passed
-/// the username down. Nothing else in the suite would catch that argument
-/// being dropped.
+/// `henrylifts.42x` is strong on its own, so rejection proves the handler
+/// passes the username into the strength check.
 #[tokio::test]
 async fn test_setup_rejects_a_password_derived_from_the_username() {
     let pool = common::setup_test_db();
@@ -1933,18 +1841,13 @@ async fn test_setup_rejects_a_password_derived_from_the_username() {
     );
 }
 
-/// The per-account backoff, end to end. The per-IP limiter is left generous
-/// here and each request carries a *different* peer address, so nothing but
-/// the account-keyed counter can be what slows these down — which is exactly
-/// the gap this closes: a spray from many sources against one account.
-///
-/// Asserts a lower bound on elapsed time only. An upper bound would be flaky
-/// on a loaded CI runner; a lower bound cannot be.
+/// Per-account backoff against a spray from many peers; the per-IP limit is
+/// generous so only the account counter can cause the delay. Only a lower
+/// bound is asserted, since an upper bound would flake on slow CI.
 #[tokio::test]
 async fn test_repeated_failures_against_one_account_are_delayed() {
     let pool = common::setup_test_db();
-    // One free attempt, then 150ms, 300ms, … Small enough to keep the test
-    // quick, large enough to measure without racing the clock.
+    // One free attempt, then 150ms, 300ms, …
     let base = std::time::Duration::from_millis(150);
     let test_app = common::create_test_app_with_login_backoff(pool.clone(), 1, base);
     common::create_test_user(&pool, "victim", "password123", UserRole::User).await;
@@ -1961,7 +1864,6 @@ async fn test_repeated_failures_against_one_account_are_delayed() {
         )
     };
 
-    // First failure is free, and spends the allowance.
     let response = test_app
         .router
         .clone()
@@ -1970,7 +1872,7 @@ async fn test_repeated_failures_against_one_account_are_delayed() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Second attempt, from a different source address, must now wait.
+    // Second attempt, from another address, must wait.
     let started = std::time::Instant::now();
     let response = test_app
         .router
@@ -1987,11 +1889,7 @@ async fn test_repeated_failures_against_one_account_are_delayed() {
     );
 }
 
-/// Sign Out has to be a real submit button. It was once `type="button"`
-/// driven by an inline `onclick` that called `form.submit()`, which meant a
-/// browser with JavaScript off could never end its session — the one control
-/// in the app with no non-JS path at all. Asserting the rendered markup keeps
-/// it from regressing.
+/// Sign Out must be a real submit button so it works without JavaScript.
 #[tokio::test]
 async fn test_sign_out_button_works_without_javascript() {
     let pool = common::setup_test_db();

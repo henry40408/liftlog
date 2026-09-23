@@ -27,20 +27,14 @@ impl StatsPage<'_> {
         Ok(heading.is_some() && grid.is_some())
     }
 
-    /// The `<h1>` of the exercise page, which is the exercise's name.
-    ///
-    /// Read as DOM text: the heading is styled `text-transform: uppercase`, so
-    /// the rendered text would never equal the name the scenario created.
+    /// The exercise page's `<h1>`, as DOM text (it is `text-transform: uppercase`).
     pub async fn exercise_heading(&self) -> Result<String> {
         dom_text(self.0, "h1")
             .await?
             .context("the exercise stats page has no heading")
     }
 
-    /// Is the progress chart drawn?
-    ///
-    /// The SVG renders once any set has been logged; the "No progress data yet"
-    /// fallback only appears for an exercise with none.
+    /// Is the progress chart drawn? Only once a set has been logged.
     pub async fn has_chart(&self) -> Result<bool> {
         Ok(optional(self.0, By::Id("exercise-chart")).await?.is_some())
     }

@@ -9,21 +9,8 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
     let path = path.split('?').next().unwrap_or(path);
 
     if path == ":memory:" {
-        // PRAGMA foreign_keys is per-connection. The bundled SQLite in this
-        // build happens to compile with SQLITE_DEFAULT_FOREIGN_KEYS, so it
-        // already defaults to ON here — but that default is a build-time
-        // compile flag, not something this crate controls or can rely on
-        // staying true (a non-bundled libsqlite3, or a different bundled
-        // build, may default it to OFF). Migration 010 also demonstrated the
-        // failure mode directly: it turns the pragma off for its own
-        // rebuild and, by design, leaves the one pooled connection that ran
-        // migrations with it off afterwards (see run_migrations' restore at
-        // the end of the loop). Setting it explicitly here, in every pool's
-        // connection initialiser, makes enforcement an invariant of this
-        // codebase rather than an accident of how SQLite was compiled. All
-        // three pool-construction paths in this file must agree on this
-        // pragma, or enforcement would depend on which pooled connection a
-        // given request happens to get.
+        // foreign_keys is per-connection and its default is a compile flag,
+        // so every pool initialiser in this file sets it explicitly.
         let manager = SqliteConnectionManager::memory()
             .with_init(|conn| conn.execute_batch("PRAGMA foreign_keys=ON;"));
         return Pool::builder().max_size(1).build(manager);
@@ -42,11 +29,8 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, r2d2::Error> {
     Pool::builder().max_size(10).build(manager)
 }
 
-/// Flush the WAL back into the main database and truncate the `-wal` file.
-///
-/// Run on graceful shutdown so the on-disk DB is self-contained; the `-wal`
-/// and `-shm` siblings are then removed by `SQLite` when the pool's last
-/// connection closes.
+/// Truncating WAL checkpoint, run on shutdown so the DB file is
+/// self-contained; SQLite removes `-wal`/`-shm` when the pool closes.
 pub fn checkpoint(pool: &DbPool) -> anyhow::Result<()> {
     let conn = pool.get()?;
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
@@ -55,10 +39,7 @@ pub fn checkpoint(pool: &DbPool) -> anyhow::Result<()> {
 
 #[allow(dead_code)]
 pub fn create_memory_pool() -> Result<DbPool, r2d2::Error> {
-    // Must match create_pool's enforcement (see the comment there): this is
-    // the pool tests/common/mod.rs::setup_test_db and the repository unit
-    // tests build on, so if it disagreed with production, none of the
-    // cascade/restrict behaviour changes would be covered by any test.
+    // Must match `create_pool`, or tests wouldn't exercise real FK behaviour.
     let manager = SqliteConnectionManager::memory()
         .with_init(|conn| conn.execute_batch("PRAGMA foreign_keys=ON;"));
     Pool::builder().max_size(1).build(manager)
@@ -189,10 +170,7 @@ mod tests {
         let tmp = TempDbPath::new();
         let pool = create_pool(&tmp.url()).expect("file pool");
 
-        // Hold several connections at once so r2d2 is forced to actually
-        // create more than one, pinning that the pragma is set uniformly by
-        // the pool's connection initialiser rather than by chance on
-        // whichever single connection a test happens to grab.
+        // Hold several at once so r2d2 must create more than one connection.
         let conns: Vec<_> = (0..5).map(|_| pool.get().expect("get conn")).collect();
 
         for conn in &conns {

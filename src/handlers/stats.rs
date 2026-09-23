@@ -24,8 +24,7 @@ struct StatsTemplate {
     prs: Vec<PersonalRecordSummary>,
 }
 
-/// Geometry + flags used to draw the *default* server-rendered SVG.
-/// Computed in the handler so the template stays declarative.
+/// Precomputed geometry for the server-rendered SVG of the requested series.
 pub(crate) struct RenderedChart {
     pub(crate) width: f64,
     pub(crate) height: f64,
@@ -47,10 +46,8 @@ pub(crate) struct RenderedPoint {
     pub(crate) x: f64,
     pub(crate) y: f64,
     pub(crate) is_pr: bool,
-    /// Left edge and width of this point's hover band. The bands are
-    /// server-rendered `<rect>`s carrying an SVG `<title>`, which browsers
-    /// surface as a native tooltip with no scripting at all — the reason the
-    /// figures are readable on hover without the JS tooltip.
+    /// Left edge and width of this point's hover band; its SVG `<title>` is
+    /// the no-JS tooltip.
     pub(crate) hit_x: f64,
     pub(crate) hit_width: f64,
     /// Tooltip text. Mirrors what `showTip` builds client-side.
@@ -72,9 +69,7 @@ struct ExerciseStatsTemplate {
     /// JSON-encoded full `Vec<ChartPoint>` for the client switcher.
     /// Already escaped: `</` → `<\/` so it cannot break out of `<script>`.
     chart_data_json: String,
-    /// Active tab, as the query-string spellings the links use. The template
-    /// compares these to mark `is-active`, so the server-rendered SVG and the
-    /// highlighted tab cannot disagree.
+    /// Active tab, in query-string spelling, so the tab and SVG agree.
     metric: &'static str,
     range: &'static str,
 }
@@ -94,11 +89,8 @@ const PAD_T: f64 = 14.0;
 const PAD_B: f64 = 28.0;
 
 /// Which series the chart plots.
-///
-/// The tabs are links, so this arrives in the query string and has to
-/// survive anything typed there — hence `from_query` falling back to the
-/// default rather than erroring. A bad `?metric=` is a stale bookmark, not
-/// something worth a 400.
+/// Arrives from a user-editable query string, so unknown values fall back to
+/// the default rather than erroring.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ChartMetric {
     #[default]
@@ -159,8 +151,7 @@ impl ChartRange {
     }
 }
 
-/// `?metric=&range=` on the exercise stats page. Both are optional and both
-/// tolerate nonsense; see `ChartMetric::from_query`.
+/// `?metric=&range=`; both optional, unknown values fall back to defaults.
 #[derive(Deserialize)]
 pub struct ChartQuery {
     metric: Option<String>,
@@ -187,7 +178,7 @@ fn render_chart(
     let values: Vec<f64> = slice.iter().map(|p| metric.value(p)).collect();
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Pad y range a bit so the line isn't flush against the top.
+    // Pad the y range so the line isn't flush against the edges.
     let (y_min, y_max) = if (max - min).abs() < 1e-9 {
         (min - 1.0, max + 1.0)
     } else {
@@ -199,20 +190,16 @@ fn render_chart(
     let plot_h = CHART_H - PAD_T - PAD_B;
     let n = slice.len();
 
-    // Running max for PR detection.
     let mut running_max = f64::NEG_INFINITY;
     let mut rendered_points = Vec::with_capacity(n);
     let mut polyline_parts = Vec::with_capacity(n);
 
-    // Hover bands, mirroring the geometry the client redraw uses: a full
-    // band per interior point, half-bands at the two ends.
+    // Hover bands mirror the client: full per interior point, half at the ends.
     let band_w = plot_w / (n as f64 - 1.0).max(1.0);
 
     for (i, p) in slice.iter().enumerate() {
         let x = PAD_L + (i as f64 / (n as f64 - 1.0)) * plot_w;
-        // A "PR" dot is a running best *of the plotted series*, matching what
-        // the client redraw does — on the volume tab the gold dots mark the
-        // biggest sessions, not the heaviest top sets.
+        // PR = running best of the plotted series, as on the client.
         let value = metric.value(p);
         let y = PAD_T + (1.0 - (value - y_min) / (y_max - y_min)) * plot_h;
         let is_pr = value > running_max;
@@ -326,9 +313,7 @@ pub async fn exercise_stats(
     Path(exercise_id): Path<String>,
     Query(query): Query<ChartQuery>,
 ) -> Result<Response> {
-    // The history/PR/metrics queries below are all scoped by `auth_user.id`, but
-    // the exercise record itself is rendered, so fetching it unscoped disclosed
-    // another user's exercise name and category.
+    // Scoped fetch: the exercise's name and category are rendered.
     let exercise = state
         .exercise_repo
         .find_owned(&exercise_id, &auth_user.id)

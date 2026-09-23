@@ -1,20 +1,5 @@
-//! Proves that `src/audit.rs`'s events are actually emitted with the claimed
-//! shape at real call sites, not just that the pure helper functions it
-//! wraps (`token_fingerprint`) behave correctly in isolation.
-//!
-//! Two invariants are pinned here because mutation testing showed neither
-//! was covered by anything else in the suite:
-//!   - `login_submit` must log a salted fingerprint of the new session
-//!     token, never the raw token itself (OWASP: a leaked log line must not
-//!     be equivalent to a leaked cookie).
-//!   - `logout_others` must log the *actual* number of sessions destroyed,
-//!     not a placeholder.
-//!
-//! Both are verified by capturing real `tracing` output through a
-//! `tracing_subscriber` subscriber installed for the test, rather than by
-//! asserting on `audit::*`'s return value (there isn't one) or by calling
-//! the module's functions directly (that would just re-test the pure
-//! formatting code, not the call sites).
+//! Asserts audit events as emitted at real call sites, by capturing `tracing`
+//! output.
 
 mod common;
 
@@ -29,10 +14,7 @@ use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 use tracing_subscriber::fmt::MakeWriter;
 
-/// An in-memory `tracing` sink. Cloning shares the same underlying buffer
-/// (that's the point — `tracing_subscriber::fmt` clones the `MakeWriter`
-/// once per event/span it writes), so the test keeps its own handle to read
-/// back what was written.
+/// An in-memory `tracing` sink; clones share one buffer.
 #[derive(Clone, Default)]
 struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
 
@@ -61,24 +43,9 @@ impl<'a> MakeWriter<'a> for CapturingWriter {
     }
 }
 
-/// Installs a `tracing` subscriber that writes to `writer` and lets
-/// `liftlog::audit` events at `info` (and above) through, then returns a
-/// guard-like value: dropping the returned `DefaultGuard` would normally
-/// restore the previous subscriber, but this deliberately uses
-/// `set_global_default` instead of `with_default`/a `DefaultGuard`.
-///
-/// Why global rather than thread-local: the events under test
-/// (`audit::session_created`, `audit::sessions_destroyed_bulk`) are emitted
-/// directly on the async handler's task, not inside `spawn_blocking` — so a
-/// thread-local subscriber installed via `tracing::subscriber::with_default`
-/// around a `#[tokio::test]`'s (default current-thread-runtime) body would
-/// also have worked. `set_global_default` is used instead because it needs
-/// no scope-guard bookkeeping around the `.oneshot(...)` call, and because
-/// nextest — unlike plain `cargo test` — runs every test in its own process
-/// (confirmed by this crate's CLAUDE.md), so one test installing a process
-/// -global subscriber can never leak into or collide with another test's.
-/// This would NOT be safe under plain `cargo test`, which runs many tests as
-/// threads inside one shared process.
+/// Installs a process-global subscriber for `liftlog::audit=info`. Relies on
+/// nextest's process-per-test; under plain `cargo test` the second install
+/// panics.
 fn install_capturing_subscriber(writer: CapturingWriter) {
     let subscriber = tracing_subscriber::fmt()
         .with_writer(writer)
@@ -89,10 +56,7 @@ fn install_capturing_subscriber(writer: CapturingWriter) {
         .expect("no subscriber should already be installed in this test process");
 }
 
-/// Pulls the value out of a `key="value"` (or bare `key=value`) pair in a
-/// captured log line. `tracing_subscriber`'s default field formatter Debug
-/// -formats string fields, which wraps them in quotes; this strips those if
-/// present so callers get the raw value either way.
+/// Value of `key="value"` or `key=value` in a log line, unquoted.
 fn extract_field<'a>(log: &'a str, field: &str) -> Option<&'a str> {
     let needle = format!("{field}=");
     let start = log.find(&needle)? + needle.len();
@@ -160,8 +124,7 @@ async fn login_emits_session_created_with_a_fingerprint_not_the_raw_token() {
         "session_fp should be lowercase hex, got: {fp}"
     );
 
-    // The critical assertion: the raw token handed to the browser must never
-    // appear anywhere in the captured log output.
+    // A leaked log line must not be as good as a leaked cookie.
     assert!(
         !log.contains(&raw_token),
         "raw session token leaked into the audit log: {log}"
@@ -177,8 +140,7 @@ async fn logout_others_reports_the_number_of_sessions_actually_destroyed() {
     let test_app = common::create_test_app_with_session(pool.clone());
 
     let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
-    // Three sessions total; the request below authenticates with one of
-    // them, so exactly 2 should be destroyed by logout-others.
+    // Three sessions; the request uses one, so 2 are destroyed.
     let token1 = common::create_session_token(&pool, &user).await;
     let _token2 = common::create_session_token(&pool, &user).await;
     let _token3 = common::create_session_token(&pool, &user).await;
@@ -218,10 +180,7 @@ async fn logout_others_reports_the_number_of_sessions_actually_destroyed() {
     );
 }
 
-/// The gap this closes: before `audit::login_failed` existed, a brute-force
-/// run against liftlog left *no trace at all* — only successful logins were
-/// logged. OWASP's *Logging and Monitoring* section requires that all
-/// password failures be logged.
+/// Every password failure is logged, so brute force leaves a trace.
 #[tokio::test]
 async fn failed_login_emits_an_audit_event_naming_the_attempted_username() {
     let writer = CapturingWriter::default();
@@ -263,10 +222,8 @@ async fn failed_login_emits_an_audit_event_naming_the_attempted_username() {
     );
 }
 
-/// An unknown username and a wrong password must produce the *same* event
-/// with the same wording. Emitting distinguishable events would rebuild the
-/// user-enumeration oracle that `verify_password`'s constant-cost dummy-hash
-/// path exists to remove — just in the operator's log instead of the response.
+/// Unknown username and wrong password log the same event, so the log is no
+/// user-enumeration oracle.
 #[tokio::test]
 async fn failed_login_for_an_unknown_user_is_indistinguishable_in_the_log() {
     let writer = CapturingWriter::default();
@@ -306,9 +263,7 @@ async fn failed_login_for_an_unknown_user_is_indistinguishable_in_the_log() {
         "expected one event per attempt, got: {log}"
     );
 
-    // Strip the two things that legitimately differ — the leading timestamp,
-    // and the username itself — so the comparison is about everything else:
-    // level, event name, message wording and the set of fields present.
+    // Strip the timestamp and username; everything else must match.
     let normalise = |line: &str| {
         let without_timestamp = line.split_once(" WARN ").map_or(line, |(_, rest)| rest);
         without_timestamp
@@ -322,8 +277,7 @@ async fn failed_login_for_an_unknown_user_is_indistinguishable_in_the_log() {
     );
 }
 
-/// The cheat sheet also asks that lockouts themselves be logged, as a signal
-/// distinct from an ordinary credential failure.
+/// Lockouts are logged as their own event.
 #[tokio::test]
 async fn throttled_login_emits_its_own_audit_event() {
     let writer = CapturingWriter::default();
@@ -365,8 +319,7 @@ async fn throttled_login_emits_its_own_audit_event() {
     );
 }
 
-/// The password-change route verifies a password too, so a wrong
-/// `current_password` is a password failure and must be logged like one.
+/// A wrong `current_password` on password change is logged as a failure too.
 #[tokio::test]
 async fn failed_password_change_emits_an_audit_event() {
     let writer = CapturingWriter::default();
@@ -415,10 +368,7 @@ async fn failed_password_change_emits_an_audit_event() {
     );
 }
 
-/// Every request-scoped audit event claims to carry a `user_agent`, truncated
-/// to 256 chars. `audit::tests` covers the truncation helper in isolation, but
-/// nothing covered the field actually reaching a log line — so a hostile
-/// `User-Agent` is sent here and read back off the event.
+/// `user_agent` reaches the event, truncated to 256 chars.
 #[tokio::test]
 async fn audit_events_record_a_truncated_user_agent() {
     let writer = CapturingWriter::default();
@@ -460,19 +410,9 @@ async fn audit_events_record_a_truncated_user_agent() {
     );
 }
 
-/// The per-account backoff's semantics, asserted on the exact `backoff_ms`
-/// the audit log reports rather than on wall-clock time.
-///
-/// Wall-clock assertions were the obvious way to write these and the wrong
-/// one: an *upper* bound ("this login was not delayed") is unfalsifiable on a
-/// loaded runner, and did in fact fail the first time this suite ran under
-/// `cargo llvm-cov`, where instrumentation pushed an ordinary Argon2
-/// verification past the threshold. `backoff_ms` states what the code
-/// actually decided, so these are exact. The one thing a log cannot prove —
-/// that the delay is really served — is covered by the single lower-bound
-/// timing test in `auth_test`.
-///
-/// The base is 10ms, so the whole test sleeps for tens of milliseconds.
+/// Per-account backoff, asserted on the logged `backoff_ms` rather than wall
+/// clock, which flakes on slow runners. That the delay is served is covered
+/// by the lower-bound timing test in `auth_test`.
 #[tokio::test]
 async fn login_backoff_climbs_per_account_and_resets_on_success() {
     let writer = CapturingWriter::default();
@@ -498,7 +438,6 @@ async fn login_backoff_climbs_per_account_and_resets_on_success() {
             .unwrap()
     };
 
-    // Reads `backoff_ms` off the most recent auth.login.failed line.
     let last_backoff = |log: &str| -> u64 {
         log.lines()
             .rfind(|l| l.contains("auth.login.failed"))
@@ -538,8 +477,7 @@ async fn login_backoff_climbs_per_account_and_resets_on_success() {
         "another account must not inherit the penalty"
     );
 
-    // A proven password clears the victim's penalty: the next failure is back
-    // to the free tier.
+    // A correct password clears the penalty.
     let response = test_app
         .router
         .clone()
@@ -561,12 +499,8 @@ async fn login_backoff_climbs_per_account_and_resets_on_success() {
     );
 }
 
-/// The guard's only symptom is an unexplained `403`, so the event has to name
-/// which branch rejected: `sec_fetch_site` is the browser declaring the request
-/// cross-site, while `origin_fallback` means it did not send `Sec-Fetch-Site`
-/// at all and the `Origin`/`Host` comparison failed — which a reverse proxy
-/// rewriting `Host` trips just as readily as an attacker. An operator has to be
-/// able to tell those apart from the log alone.
+/// The event names the rejecting branch, so an operator can tell a cross-site
+/// request (`sec_fetch_site`) from a proxy mangling `Host` (`origin_fallback`).
 #[tokio::test]
 async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected() {
     let writer = CapturingWriter::default();
@@ -609,10 +543,7 @@ async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected()
     );
     assert_eq!(extract_field(&log, "path"), Some("/workouts"));
 
-    // A stripped `Host` is the misconfiguration case and must not be reported
-    // as the same thing as the one above: it reaches the `Origin` fallback
-    // instead of being declared cross-site by the browser.
-    let writer2 = CapturingWriter::default();
+    // No `Sec-Fetch-Site` and no `Host`: the `Origin` fallback rejects.
     let response = test_app
         .router
         .oneshot(
@@ -626,9 +557,6 @@ async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected()
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    // Both requests wrote to the same process-global subscriber, so read the
-    // accumulated buffer rather than `writer2` (which is a fresh, empty sink).
-    drop(writer2);
     let log = writer.contents();
     assert!(
         log.contains("reason=\"origin_fallback\"") || log.contains("reason=origin_fallback"),
@@ -636,9 +564,7 @@ async fn rejected_cross_site_requests_are_logged_with_the_branch_that_rejected()
     );
 }
 
-/// A hostile `Origin` is attacker-controlled and unbounded, and reaches the log
-/// without anything having validated it — failing to parse is often precisely
-/// why the request was rejected.
+/// `Origin` is attacker-controlled and unbounded.
 #[tokio::test]
 async fn a_hostile_origin_is_truncated_in_the_audit_log() {
     let writer = CapturingWriter::default();

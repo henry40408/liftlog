@@ -43,10 +43,7 @@ async fn render_page(
     render_page_with_status(state, auth_user, error, success, StatusCode::OK).await
 }
 
-/// `render_page`, but for the one caller that must not answer `200`: a
-/// throttled password change is a refusal, and returning `200` would leave
-/// automated clients (and any log-based alerting keyed on status) unable to
-/// see that the request was rejected rather than processed.
+/// `render_page` with a non-200 status, so a throttled change reads as refused.
 async fn render_page_with_status(
     state: &AppState,
     auth_user: AuthUser,
@@ -78,20 +75,11 @@ pub async fn change_password(
     let validation_error = if form.new_password != form.confirm_password {
         Some("New passwords do not match".to_string())
     } else if form.new_password == form.current_password {
-        // Checked before the policy gate so the message is the specific one.
-        // This is a correctness guard rather than a security control: the
-        // request would otherwise "succeed" while changing nothing, tell the
-        // user their password was changed, and destroy their other sessions —
-        // all for a no-op. Someone rotating a possibly-compromised password
-        // would walk away believing they had.
+        // Otherwise a no-op "change" would report success and drop sessions.
         Some("New password must be different from the current password".to_string())
     } else {
-        // Same policy as signup and admin-created users; see
-        // `password_policy_error`. The length ceiling also caps what reaches
-        // Argon2 on this route, which runs it twice per request.
-        //
-        // `spawn_blocking` for the same reason as `validate_credentials`: the
-        // strength check is CPU work on an attacker-chosen input.
+        // Shared policy (`password_policy_error`); the length cap also bounds
+        // Argon2 work. `spawn_blocking`: CPU work on attacker input.
         let new_password = form.new_password.clone();
         let username = auth_user.username.clone();
         tokio::task::spawn_blocking(move || {
@@ -106,18 +94,9 @@ pub async fn change_password(
 
     let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
 
-    // This is liftlog's *second* password-verification entry point, and until
-    // now the only unthrottled one — an attacker holding a stolen session
-    // cookie could guess `current_password` without limit, and each attempt
-    // cost two Argon2 operations (19 MiB each) of server CPU and memory.
-    //
-    // Keyed by user id rather than client IP: the request is authenticated,
-    // so the account under attack is known exactly, and an IP key would let
-    // the same stolen session buy a fresh budget from every source address.
-    // The budget is charged *before* verification, which is what bounds the
-    // Argon2 work; it is handed back below only once the current password
-    // proved correct, so a legitimate user changing their password repeatedly
-    // is never locked out while a guesser's failures all stay charged.
+    // Throttle current-password guessing with a stolen cookie. Keyed by user
+    // id so new IPs don't buy fresh budget; charged before verifying and
+    // refunded only on success.
     if !state
         .sensitive_action_rate_limiter
         .try_acquire(auth_user.id.clone())
@@ -154,29 +133,14 @@ pub async fn change_password(
         .change_password(&auth_user.id, &form.new_password)
         .await?;
 
-    // Refund only now: the reservation stays charged for every path above
-    // that did not prove knowledge of the current password.
     state
         .sensitive_action_rate_limiter
         .release(auth_user.id.clone());
 
-    // OWASP Session Management Cheat Sheet, "Renew the Session ID After Any
-    // Privilege Level Change" and the Authentication Cheat Sheet's
-    // *Re-authentication After Risk Events* ("invalidate sessions after
-    // re-authentication and rotate tokens"): a credential change is the risk
-    // event. Destroying the *other* sessions was already happening; what was
-    // missing is that the token in the user's own browser survived unchanged,
-    // so a token captured before the change kept working after it — and
-    // changing a password one believes to be compromised is exactly when that
-    // matters.
-    //
-    // The new session is created *before* anything is destroyed: if `create`
-    // fails, `?` returns having changed nothing but the password, leaving the
-    // user logged in on their existing token rather than logged out with no
-    // way back in. Passing the *new* token as the exception to
-    // `delete_all_for_user_except` then retires the old current session in the
-    // same statement as every other device, so there is no window in which
-    // both tokens are live.
+    // Rotate the current token too (OWASP: renew after risk events), so a
+    // token captured before the change stops working. Create first: if it
+    // fails the user keeps their old session. Excluding only the new token
+    // retires the old one with every other device in one statement.
     let new_token = state.session_repo.create(&auth_user.id).await?;
     let new_fp = token_fingerprint(&new_token, state.log_salt.as_ref());
     let deleted_sessions = state
@@ -184,9 +148,7 @@ pub async fn change_password(
         .delete_all_for_user_except(&auth_user.id, &new_token)
         .await?;
 
-    // `count` now includes the rotated-away session, not just the other
-    // devices — accurate, and the `session.created` event below names the
-    // replacement, so the pair still reconciles.
+    // `count` includes the rotated-away session.
     audit::sessions_destroyed_bulk(
         &audit_ctx,
         &actor_fp,
@@ -202,10 +164,7 @@ pub async fn change_password(
         "password_change_rotation",
     );
 
-    // The settings page marks the current row "This device" by comparing each
-    // session's token against `user.session_token`, so the rendered identity
-    // has to carry the new token — otherwise the page the user lands on shows
-    // every session as somebody else's.
+    // The page marks "This device" by token, so render with the new one.
     let mut auth_user = auth_user;
     auth_user.session_token = new_token.clone();
 
@@ -217,10 +176,8 @@ pub async fn change_password(
     )
     .await?;
 
-    // Hand the browser the replacement cookie, and stop
-    // `sliding_session_middleware` from appending a refresh for the token
-    // that this request arrived with — that token no longer exists, and its
-    // `Set-Cookie` would land after ours and log the user straight out.
+    // Suppress the middleware's refresh of the now-deleted old token, whose
+    // Set-Cookie would land after ours and log the user out.
     let cookie = create_session_cookie(&new_token, state.cookie_secure);
     response.headers_mut().append(
         axum::http::header::SET_COOKIE,
@@ -233,9 +190,7 @@ pub async fn change_password(
     Ok(response)
 }
 
-/// Interstitial for `logout_others`. Counts the sessions that will actually
-/// be dropped — "log out everywhere else" reads very differently when it is
-/// about to end five sessions than when there are none.
+/// Interstitial for `logout_others`; shows how many sessions will end.
 pub async fn confirm_logout_others(
     State(state): State<AppState>,
     auth_user: AuthUser,

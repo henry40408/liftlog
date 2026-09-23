@@ -107,23 +107,14 @@ pub fn create_router(state: AppState) -> Router {
             session_layer_state,
             sliding_session_middleware,
         ))
-        // First-line CSRF: reject provably cross-site state-changing requests
-        // (see `middleware::csrf`). Registered before HSTS below → runs before
-        // session validation, and after HSTS in request order (outer layers run
-        // first).
+        // Later `.layer` calls wrap earlier ones, so these run bottom-up:
+        // HSTS → baseline headers → CSRF logging → CSRF guard → session.
         .layer(CsrfLayer::new())
-        // Directly outside the guard: it reads the `ProtectionError` the guard
-        // attaches to its 403, which is the only way to log a rejection
-        // alongside the request that earned it.
+        // Reads the `ProtectionError` the guard attaches to its 403.
         .layer(from_fn_with_state(csrf_layer_state, log_csrf_rejection))
-        // Baseline security headers, outside the CSRF guard for the same
-        // reason HSTS is: the 403 that guard returns must carry them too.
+        // Outside the guard so its 403 carries these headers too.
         .layer(from_fn(baseline_headers_middleware))
-        // HSTS must be the outermost layer: it is registered last, after the
-        // CSRF guard, so it also stamps responses that short-circuit inside
-        // that guard (its 403) or inside session validation (the AuthRedirect
-        // 302) rather than only ones that reach a handler. Any layer inside
-        // this one that returns early would ship without the header.
+        // Outermost, so early returns (CSRF 403, auth redirect) get HSTS too.
         .layer(from_fn_with_state(
             HstsHeader::new(hsts_max_age, hsts_include_subdomains),
             hsts_middleware,

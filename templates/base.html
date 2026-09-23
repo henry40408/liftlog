@@ -377,9 +377,7 @@
         /* ============================================
            BUTTONS
            ============================================ */
-        /* `.btn` sets `display: inline-flex`, which outranks the user agent's
-           `[hidden] { display: none }` — without this, anything marked
-           `hidden` in the markup would still be painted. */
+        /* `.btn`'s `display: inline-flex` would otherwise outrank the UA rule. */
         [hidden] {
             display: none !important;
         }
@@ -740,10 +738,7 @@
             animation: prPulse 2s ease-in-out infinite;
         }
 
-        /* The 1-month PR. Silver to the all-time badge's gold — second place,
-           and legible on the dark surface without competing for attention: the
-           metallic gradient reads as a medal, but there's no pulse, so a set
-           that ties a rolling-window best never looks like an all-time record. */
+        /* 1-month PR: silver, no pulse, so it never reads as an all-time record. */
         .pr-badge-recent {
             background: linear-gradient(135deg, var(--silver), var(--silver-dark));
             color: var(--text-inverse);
@@ -870,8 +865,7 @@
             font-weight: 600;
         }
 
-        /* An actions row that leads the page, directly under the header, so the
-           primary action is reachable without scrolling. */
+        /* Actions row directly under the header. */
         .actions-lead {
             margin-bottom: var(--sp-6);
         }
@@ -895,9 +889,8 @@
             color: white;
         }
 
-        /* The share form pairs an expiry <select> with its submit button. The
-           global full-width input sizing would stretch the select to 400px and
-           wrap the button onto a second line, out of the actions row. */
+        /* Keep the expiry <select> and its button on one line despite the
+           global full-width input sizing. */
         .actions .share-form {
             display: flex;
             align-items: center;
@@ -1318,10 +1311,8 @@
         }
     </style>
     <script>
-        /* Timestamps are rendered server-side as UTC (the no-JS fallback) and
-           rewritten here into the browser's timezone. Formatting is done from
-           the Date getters rather than toLocaleString() so the output width is
-           constant regardless of locale. */
+        /* Rewrite server-rendered UTC timestamps into the browser's timezone.
+           Date getters, not toLocaleString(), keep the width constant. */
         (function () {
             function pad(n) {
                 return n < 10 ? '0' + n : '' + n;
@@ -1392,12 +1383,8 @@
             });
         })();
 
-        /* Controls that genuinely cannot work without scripts — the clipboard
-           button is the only one — ship as `hidden` and are revealed here.
-           A dead button that looks alive is worse than an absent one, and
-           `<noscript>` cannot express "show this only when scripts run". */
+        /* Reveal script-only controls, which ship `hidden`. */
         (function () {
-            /* This script is in <head>, so the body is not parsed yet. */
             document.addEventListener('DOMContentLoaded', function () {
                 var nodes = document.querySelectorAll('[data-requires-js]');
                 for (var i = 0; i < nodes.length; i++) {
@@ -1406,21 +1393,13 @@
             });
         })();
 
-        /* Destructive actions are links to a server-rendered confirmation
-           page, so they still ask when scripts are off. With scripts on,
-           short-circuit the extra page load: ask in a dialog and POST
-           straight to the same URL, which is what the page's own form does.
-
-           The dialog text is the short form of the question; the page stays
-           the authority on the detail (how many sets cascade, how many
-           devices sign out) because only the server knows those counts.
-           Delegated from the document so rows added later are covered. */
+        /* `a[data-confirm]` links go to a server confirmation page; with
+           scripts, ask in a dialog and POST to the same URL instead. */
         (function () {
             document.addEventListener('click', function (e) {
                 if (e.defaultPrevented || e.button !== 0 ||
                     e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-                    /* Let ctrl/cmd-click open the confirmation page in a new
-                       tab, exactly as it would for any other link. */
+                    /* Modified clicks open the page as a normal link. */
                     return;
                 }
                 var target = e.target;
@@ -1437,9 +1416,7 @@
                     return;
                 }
 
-                /* A real form POST, not fetch(): it navigates, so the
-                   redirect the handler returns lands the user where the
-                   no-JS path would have put them. */
+                /* A navigating form POST, so the redirect is followed. */
                 var form = document.createElement('form');
                 form.method = 'post';
                 form.action = link.getAttribute('href');

@@ -1,18 +1,5 @@
-//! Direct HTTP requests, for the two things a `WebDriver` cannot answer.
-//!
-//! **Status codes.** `page.goto()` handed the old steps a `Response` with a
-//! `status()`, so "returns a 404" and "returns a 403" were assertions about
-//! what the server actually said. WebDriver has no equivalent — it reports the
-//! rendered document and nothing about the exchange that produced it — and
-//! matching on the error page's wording would pass just as happily on a 200
-//! that happened to render it. [`status`] re-issues the request with the
-//! browser's own session cookie instead, so the assertion stays about the
-//! status line.
-//!
-//! **Guests.** The share scenarios need a visitor with no session. Playwright
-//! spun up a second browser context for that; here the request simply carries
-//! no cookie. The shared workout page is server-rendered with no scripts of its
-//! own, so the returned HTML is the whole of what a guest's browser would show.
+//! Direct HTTP requests for what WebDriver cannot see: status codes (re-issued
+//! with the browser's session cookie) and guests (no cookie).
 
 use anyhow::{Context, Result};
 
@@ -27,13 +14,11 @@ pub struct Response {
 
 /// Requests `path` as the holder of `session`, or as a guest when it is `None`.
 ///
-/// Redirects are followed, matching `page.goto()`: a route that 302s to the
-/// login page reports the login page's 200, which is what the old assertions
-/// compared against.
+/// Redirects are followed, so a 302 to the login page reports its 200.
 ///
 /// # Errors
 ///
-/// Fails when the request cannot be made or the body is not valid UTF-8.
+/// Fails when the request or reading the body fails.
 pub async fn get(path: &str, session: Option<&str>) -> Result<Response> {
     let client = reqwest::Client::builder()
         .build()

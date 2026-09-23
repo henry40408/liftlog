@@ -11,18 +11,14 @@ pub struct SessionRepository {
     pool: DbPool,
 }
 
-/// Returned by [`SessionRepository::validate_and_touch`]. Carries the full
-/// session+user identity so downstream extractors don't need a second
-/// `users` lookup per request.
+/// Returned by [`SessionRepository::validate_and_touch`], with the user's
+/// identity so extractors need no second lookup.
 pub struct ValidateAndTouchOutcome {
     pub user_id: String,
     pub username: String,
     pub role: UserRole,
-    /// `Some(new_expires)` iff this call slid `expires_at` forward.
-    /// `None` means the call did not extend the lifetime — either it landed
-    /// inside the throttle window, or `expires_at` is already pinned to
-    /// `absolute_cap(created_at)`. In both cases the session is still
-    /// valid; `None` here must never be read as "session invalid".
+    /// `Some` iff this call slid `expires_at` forward. `None` still means a
+    /// valid session (throttled, or pinned at the absolute cap).
     pub new_expires_at: Option<chrono::DateTime<Utc>>,
 }
 
@@ -33,22 +29,15 @@ pub struct SessionListRow {
     pub last_touched_at: chrono::DateTime<Utc>,
 }
 
-/// The result of validating a session token, with enough detail for the
-/// caller to emit a correct audit event. `Ok(None)` previously collapsed
-/// "no such token" and "expired" into one case, which made it impossible
-/// to distinguish a scanner probing random cookies from a real user whose
-/// session aged out.
+/// Distinguishes unknown tokens (probing) from expired ones for the audit log.
 pub enum ValidateOutcome {
-    /// Session is valid. Boxed because the payload is much larger than the
-    /// other variants (`clippy::large_enum_variant`).
+    /// Boxed for `clippy::large_enum_variant`.
     Valid(Box<ValidateAndTouchOutcome>),
-    /// `expires_at` had passed (idle timeout). The row has been deleted.
+    /// Idle timeout passed; row deleted.
     ExpiredIdle,
-    /// `created_at + SESSION_ABSOLUTE_TTL_SECS` had passed (absolute
-    /// timeout). The row has been deleted.
+    /// Absolute timeout passed; row deleted.
     ExpiredAbsolute,
-    /// The token is not in `sessions`, or its `user_id` no longer has a
-    /// matching `users` row (the INNER JOIN missed).
+    /// No such token, or its user is gone.
     Unknown,
 }
 
@@ -127,10 +116,6 @@ impl SessionRepository {
                 return Ok(ValidateOutcome::ExpiredIdle);
             }
 
-            // Checked second (not first) purely because `expires_at <= now` is
-            // the common expiry path and this check needs an extra
-            // computation; both branches delete-and-return, so the order
-            // doesn't affect correctness.
             if now >= crate::session::absolute_cap(created_at) {
                 conn.execute("DELETE FROM sessions WHERE token = ?", [&token])?;
                 return Ok(ValidateOutcome::ExpiredAbsolute);
@@ -159,11 +144,7 @@ impl SessionRepository {
                 }
             }
 
-            // `TouchAction::Nothing` and `TouchAction::TouchOnly` both fall
-            // through here: the session is still valid, it just isn't
-            // sliding `expires_at` this time (inside the throttle window, or
-            // already pinned to the absolute cap). Do NOT treat this as
-            // invalid.
+            // Nothing / TouchOnly: still valid, just not sliding.
             Ok(ValidateOutcome::Valid(Box::new(ValidateAndTouchOutcome {
                 user_id,
                 username,
@@ -207,13 +188,8 @@ impl SessionRepository {
         .await?
     }
 
-    /// Delete every session for a user. Used when an admin deletes the
-    /// account. `sessions.user_id` does have `ON DELETE CASCADE` and
-    /// enforcement is on for every pooled connection, so in the normal case
-    /// the cascade already removed these rows as part of the `users`
-    /// delete and this is a no-op; it exists as a backstop in case a
-    /// connection is ever handed out with `PRAGMA foreign_keys` off, since
-    /// without it those rows would be orphaned rather than cleaned up.
+    /// Delete every session for a user (admin delete, promotion). Returns the
+    /// count. After a user delete the FK cascade has usually done this already.
     pub async fn delete_all_for_user(&self, user_id: &str) -> Result<usize> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
@@ -228,12 +204,8 @@ impl SessionRepository {
 
     /// List all unexpired sessions for a user, newest-touched first.
     ///
-    /// `expires_at` alone stays correct under the absolute-cap rule since
-    /// `expires_at` is now always clamped to `created_at + 90d`. The extra
-    /// `created_at` filter exists only to hide over-age rows that were
-    /// written *before* this change shipped (their `expires_at` may still be
-    /// unclamped and in the future) until the hourly sweep in
-    /// `cleanup_expired` retires them.
+    /// The `created_at` filter hides legacy rows whose `expires_at` predates
+    /// the absolute-cap clamp, until `cleanup_expired` retires them.
     pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<SessionListRow>> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
@@ -266,13 +238,7 @@ impl SessionRepository {
     }
 
     /// Number of session rows a user currently has.
-    ///
-    /// Read before an admin deletes the account so the audit event can report
-    /// how many sessions that action destroyed. Deriving the number from the
-    /// subsequent `DELETE`'s row count instead would understate it whenever
-    /// `SQLite`'s per-connection `foreign_keys` enforcement is active: the
-    /// `ON DELETE CASCADE` on `sessions.user_id` removes the rows as part of
-    /// the `users` delete, leaving the explicit cleanup nothing to count.
+    /// Read before a user delete: the FK cascade leaves nothing to count after.
     pub async fn count_for_user(&self, user_id: &str) -> Result<usize> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
@@ -284,10 +250,7 @@ impl SessionRepository {
                 [&user_id],
                 |row| row.get(0),
             )?;
-            // COUNT(*) can never be negative, so try_from can never actually
-            // fail here; unwrap_or(0) just avoids an `as` cast (a sign-loss
-            // cast under this crate's pedantic lint config) without a panic
-            // path for a case that cannot occur.
+            // COUNT(*) is non-negative; avoids a sign-loss `as` cast.
             Ok(usize::try_from(count).unwrap_or(0))
         })
         .await?
@@ -295,14 +258,8 @@ impl SessionRepository {
 
     /// Batch delete all expired sessions.
     ///
-    /// The `created_at` arm exists because `validate_and_touch` slid
-    /// `expires_at` unclamped before this change shipped: a session
-    /// touched once a week could carry an `expires_at` far in the future
-    /// even though it is now over the 90-day absolute cap. This lets the
-    /// hourly background sweep (`sweep_handle` in `main.rs`) retire those
-    /// legacy rows without a data migration.
-    ///
-    /// Returns the number of rows retired so the caller can log it.
+    /// The `created_at` arm retires legacy rows whose `expires_at` was slid
+    /// past the 90-day absolute cap before it was clamped. Returns the count.
     pub async fn cleanup_expired(&self) -> Result<usize> {
         let pool = self.pool.clone();
         let now = Utc::now();
@@ -415,8 +372,7 @@ mod tests {
 
         let token = repo.create(&user_id).await.unwrap();
 
-        // Simulate an old session: last_touched_at 2 hours ago (> 1h throttle),
-        // expires_at still in the future.
+        // last_touched_at 2h ago (> 1h throttle), expires_at still future.
         {
             let conn = pool.get().unwrap();
             conn.execute(
@@ -470,9 +426,7 @@ mod tests {
 
         let token = repo.create(&user_id).await.unwrap();
 
-        // Over the 90-day absolute cap, even though expires_at is still in
-        // the future and last_touched_at is fresh. This is the core proof
-        // that age alone, not activity, terminates the session.
+        // Over the absolute cap with fresh activity: age alone terminates.
         {
             let conn = pool.get().unwrap();
             conn.execute(
@@ -550,9 +504,8 @@ mod tests {
 
         let token = repo.create(&user_id).await.unwrap();
 
-        // expires_at already pinned to the cap, last_touched_at stale (>1h
-        // throttle): this is the exact scenario that used to freeze
-        // last_touched_at forever once a session hit the cap.
+        // Pinned to the cap with a stale touch: regression guard for
+        // last_touched_at freezing once a session hits the cap.
         {
             let conn = pool.get().unwrap();
             conn.execute(
@@ -836,8 +789,7 @@ mod tests {
         let repo = SessionRepository::new(pool.clone());
 
         let live = repo.create(&user_id).await.unwrap();
-        // Legacy row: over-age but expires_at was slid unclamped before this
-        // change shipped, so it is still in the future.
+        // Legacy row: over-age, but expires_at still in the future.
         let over_age = repo.create(&user_id).await.unwrap();
         {
             let conn = pool.get().unwrap();
@@ -897,9 +849,7 @@ mod tests {
         let repo = SessionRepository::new(pool.clone());
 
         let token_valid = repo.create(&user_id).await.unwrap();
-        // Legacy row: over the absolute cap but expires_at is still in the
-        // future (as it could be for a session that was slid before this
-        // change shipped).
+        // Legacy row: over the absolute cap, expires_at still in the future.
         let token_over_age = repo.create(&user_id).await.unwrap();
 
         {

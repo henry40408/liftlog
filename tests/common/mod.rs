@@ -15,26 +15,16 @@ pub struct TestApp {
     pub router: Router,
 }
 
-/// A password that satisfies the policy in `models::user::password_policy_error`
-/// (length floor plus a `zxcvbn` score of at least 3). Used by every test whose
-/// subject is something *other* than password strength, so tightening the
-/// policy does not mean hunting through the suite for newly-invalid literals.
-///
-/// Contains no characters that form-encoding would alter, so it can be
-/// interpolated straight into a request body.
+/// Passes `password_policy_error`, for tests not about password strength.
+/// Form-encoding-safe.
 #[allow(dead_code)]
 pub const STRONG_PASSWORD: &str = "purple-monkey-dishwasher";
 
-/// Budget handed to whichever rate limiter a given helper is not there to
-/// exercise, so a test targeting one throttle can never be tripped by the
-/// other.
+/// Budget for whichever limiter a helper is not exercising.
 const GENEROUS_MAX_ATTEMPTS: u32 = 100;
 const GENEROUS_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Per-account backoff settings for tests that are not about the backoff. The
-/// base is zero, so the counter still runs and stays exercised but no test
-/// ever sleeps for it — a nonzero default here would add real wall-clock time
-/// to every failed-login test in the suite.
+/// Backoff for tests not about it: the counter runs, but a zero base never sleeps.
 const NO_BACKOFF_FREE_ATTEMPTS: u32 = 3;
 const NO_BACKOFF_BASE: std::time::Duration = std::time::Duration::ZERO;
 
@@ -44,16 +34,10 @@ pub fn create_test_app(pool: DbPool) -> Router {
 }
 
 pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
-    // A generous default so existing tests (which don't exercise rate
-    // limiting) can't trip it.
-    create_test_app_with_rate_limit(pool, 100, std::time::Duration::from_secs(60))
+    create_test_app_with_rate_limit(pool, GENEROUS_MAX_ATTEMPTS, GENEROUS_WINDOW)
 }
 
-/// Builds an app whose *password-change* throttle is tightened to
-/// `max_attempts` per `window`, leaving the login throttle generous. The two
-/// limiters are configured independently because they key on different
-/// things (client IP vs user id) and a test exercising one must not be able
-/// to trip the other by accident.
+/// Tightens only the password-change throttle.
 #[allow(dead_code)]
 pub fn create_test_app_with_password_change_limit(
     pool: DbPool,
@@ -116,10 +100,8 @@ pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> 
     )
 }
 
-/// Like [`create_test_app_with_rate_limit`], but also selects which
-/// forwarding header (if any) is trusted, and which peers may supply it —
-/// for tests exercising `crate::net::client_ip` end to end through the
-/// router.
+/// Like [`create_test_app_with_rate_limit`], plus the trusted forwarding
+/// header and the peers allowed to send it.
 #[allow(dead_code)]
 pub fn create_test_app_with_proxy_header(
     pool: DbPool,
@@ -144,9 +126,7 @@ pub fn create_test_app_with_proxy_header(
     )
 }
 
-/// Like [`create_test_app_with_rate_limit`], but also configures the HSTS
-/// header — for tests exercising `middleware::security_headers` end to end
-/// through the router.
+/// Like [`create_test_app_with_rate_limit`], plus HSTS.
 #[allow(dead_code)]
 pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains: bool) -> TestApp {
     build_test_app(
@@ -165,8 +145,7 @@ pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains:
     )
 }
 
-/// Builds an app whose per-account login backoff is active, so a test can
-/// observe the delay without every other test paying for it.
+/// Enables the per-account login backoff.
 #[allow(dead_code)]
 pub fn create_test_app_with_login_backoff(
     pool: DbPool,
@@ -189,8 +168,6 @@ pub fn create_test_app_with_login_backoff(
     )
 }
 
-/// Single place that actually builds `AppState`; every other
-/// `create_test_app_*` helper delegates here.
 #[allow(clippy::too_many_arguments)]
 fn build_test_app(
     pool: DbPool,
@@ -220,8 +197,7 @@ fn build_test_app(
         login_backoff: Arc::new(FailureBackoff::new(
             backoff_free_attempts,
             backoff_base,
-            // Cap and window mirror the base so a test never waits longer
-            // than it asked for; the schedule itself is unit-tested.
+            // Cap at 4x the base so no test waits long.
             backoff_base * 4,
             std::time::Duration::from_secs(60),
         )),
@@ -232,14 +208,9 @@ fn build_test_app(
         trusted_proxy_header,
         trusted_proxies: Arc::new(trusted_proxies),
         cookie_secure,
-        // Disabled by default so every existing test keeps observing
-        // current (no-HSTS) behaviour; only `create_test_app_with_hsts`
-        // opts in.
         hsts_max_age,
         hsts_include_subdomains,
-        // Fixed, deterministic salt (not random) so a test can assert a
-        // specific fingerprint if it ever needs to; nothing in this test
-        // suite currently relies on its exact value.
+        // Fixed salt, so fingerprints are deterministic.
         log_salt: Arc::new([7u8; 32]),
     };
 
@@ -248,7 +219,6 @@ fn build_test_app(
     TestApp { router }
 }
 
-// Shared test helper used by a subset of integration test binaries.
 #[allow(dead_code)]
 pub async fn create_test_user(
     pool: &DbPool,
@@ -281,9 +251,7 @@ pub async fn create_session_cookie(pool: &DbPool, user: &User) -> String {
     cookie_header(&create_session_token(pool, user).await)
 }
 
-/// Attach a `ConnectInfo` extension so `login_submit` sees a TCP peer, the way
-/// `into_make_service_with_connect_info` does in production. `oneshot` does not
-/// go through that layer.
+/// Attaches the `ConnectInfo` that `oneshot` skips, so handlers see a peer.
 #[allow(dead_code)]
 pub fn with_peer(
     mut request: axum::http::Request<axum::body::Body>,
