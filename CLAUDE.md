@@ -35,7 +35,7 @@ Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); the dr
 
 **Sessions.** `sliding_session_middleware` (`src/middleware/auth.rs`) runs on every route: it calls `SessionRepository::validate_and_touch` and injects a `ValidatedSession` extension. `AuthUser`/`AdminUser` extractors read that extension, never the DB. Routes that must not refresh the cookie (logout) insert `SuppressSessionRefresh`. A tokio task in `main.rs` sweeps expired sessions hourly.
 
-**CSRF.** `tower_http::csrf::CsrfLayer` is outermost (registered after the session layer, so it runs first) and 403s cross-site state-changing requests. `Sec-Fetch-Site` decides when present — only `same-origin`/`none` pass, **not** `same-site`. Otherwise `Origin`'s authority, **port included**, must match the request's. Safe methods and header-less clients (curl, tests) pass. With `SameSite=Lax` cookies this is the entire CSRF defence; there is no token.
+**CSRF.** `tower_http::csrf::CsrfLayer` runs before the session layer (order in `src/routes.rs`: HSTS → baseline headers → CSRF logging → CSRF guard → session) and 403s cross-site state-changing requests. `Sec-Fetch-Site` decides when present — only `same-origin`/`none` pass, **not** `same-site`. Otherwise `Origin`'s authority, **port included**, must match the request's. Safe methods and header-less clients (curl, tests) pass. With `SameSite=Lax` cookies this is the entire CSRF defence; there is no token.
 
 Keep the port check. Cookies ignore ports, so a port-blind check (#187, reverted) would treat any other service on the same host as same-origin. On plain HTTP there is no fetch metadata, so the `Origin` check is the only one running. Operators forward `Host` with its port (nginx `$http_host`), as the README says.
 
