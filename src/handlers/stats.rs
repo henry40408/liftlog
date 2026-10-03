@@ -127,7 +127,9 @@ impl ChartMetric {
     }
 }
 
-/// How many sessions the chart covers.
+/// How many sessions the chart covers. Defaults to the last 20 so early,
+/// light sessions don't compress the recent scale. The x axis is evenly
+/// spaced by session, not calendar time, so rest weeks don't stretch it.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ChartRange {
     #[default]

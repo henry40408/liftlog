@@ -33,7 +33,7 @@ Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); the dr
 
 **State.** `AppState` (`src/state.rs`) holds the four repositories (user, exercise, workout, session) over an `r2d2` SQLite pool, plus rate limiters and config. Handlers take `State<AppState>`.
 
-**Sessions.** `sliding_session_middleware` (`src/middleware/auth.rs`) runs on every route: it calls `SessionRepository::validate_and_touch` and injects a `ValidatedSession` extension. `AuthUser`/`AdminUser` extractors read that extension, never the DB. Routes that must not refresh the cookie (logout) insert `SuppressSessionRefresh`. A tokio task in `main.rs` sweeps expired sessions hourly.
+**Sessions.** `sliding_session_middleware` (`src/middleware/auth.rs`) runs on every route: it calls `SessionRepository::validate_and_touch` and injects a `ValidatedSession` extension. `AuthUser`/`AdminUser` extractors read that extension, never the DB. Routes that must not refresh the cookie (logout) insert `SuppressSessionRefresh`. A tokio task in `main.rs` sweeps expired sessions hourly. Tokens are opaque and DB-backed, so revocation is instant; JWT/refresh tokens were rejected as complexity without benefit. The active-session list stores no User-Agent or IP, by choice.
 
 **CSRF.** `tower_http::csrf::CsrfLayer` runs before the session layer (order in `src/routes.rs`: HSTS → baseline headers → CSRF logging → CSRF guard → session) and 403s cross-site state-changing requests. `Sec-Fetch-Site` decides when present — only `same-origin`/`none` pass, **not** `same-site`. Otherwise `Origin`'s authority, **port included**, must match the request's. Safe methods and header-less clients (curl, tests) pass. With `SameSite=Lax` cookies this is the entire CSRF defence; there is no token.
 
