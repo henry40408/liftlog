@@ -375,6 +375,9 @@ impl WorkoutRepository {
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
+            // SQLite bare-column rule: with a single MAX() aggregate, `weight`
+            // and `rpe` come from the MAX(created_at) row, i.e. the latest
+            // set. A second aggregate in this SELECT would break that.
             let mut stmt = conn.prepare(
                 "SELECT wl.exercise_id,
                         wl.weight as weight,
