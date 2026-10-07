@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(exercise.name, "Bench Press");
         assert_eq!(exercise.category, "chest");
         assert_eq!(exercise.user_id, "user1");
-        assert!(!exercise.id.is_empty());
+        assert_ne!(exercise.id, "");
     }
 
     #[tokio::test]

@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn weight_suggestions_are_empty_for_a_first_ever_workout() {
         // Nothing logged: no suggestions, so no empty `<datalist>`.
-        assert!(weight_suggestions(&[], &[]).is_empty());
+        assert_eq!(weight_suggestions(&[], &[]), [] as [f64; 0]);
     }
 
     #[test]

@@ -235,7 +235,7 @@ mod tests {
 
         assert_eq!(user.username, "testuser");
         assert_eq!(user.role, UserRole::User);
-        assert!(!user.id.is_empty());
+        assert_ne!(user.id, "");
     }
 
     #[tokio::test]

@@ -104,7 +104,7 @@ async fn login_emits_session_created_with_a_fingerprint_not_the_raw_token() {
         ))
         .expect("cookie should carry the session token")
         .to_string();
-    assert!(!raw_token.is_empty());
+    assert_ne!(raw_token, "");
 
     let log = writer.contents();
     assert!(

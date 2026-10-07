@@ -308,7 +308,7 @@ mod tests {
         let repo = SessionRepository::new(pool);
 
         let token = repo.create(&user_id).await.unwrap();
-        assert!(!token.is_empty());
+        assert_ne!(token, "");
 
         // Fresh session: last_touched_at is "now" so we are inside the throttle window.
         let outcome = repo.validate_and_touch(&token).await.unwrap();
