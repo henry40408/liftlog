@@ -26,5 +26,6 @@ Feature: Destructive actions without JavaScript
     Given I am logged in as "lifter"
     And I have a workout
     When I click Delete on the workout
-    And I confirm the action
+    Then I am asked to confirm
+    When I confirm the action
     Then the workout I deleted is not listed on the workouts page

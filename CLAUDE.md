@@ -76,7 +76,7 @@ Use `tests/common/mod.rs`: `setup_test_db()` (in-memory, migrated) and `create_t
 - **Concurrency** is `available_parallelism` capped at 4; `WAIT_TIMEOUT` is 30s — sized for a two-core CI runner.
 - **Wait for every submit's effect** (new URL, row appears/disappears). `click` may return before the redirect, and the next navigation cancels the in-flight POST, silently losing the fixture.
 - **Confirm dialogs** are auto-accepted via `unhandledPromptBehavior: accept`. Promote/delete-user steps fill the password page instead.
-- **No-JS paths are tested in Rust**, not here. When changing a destructive trigger, keep the Rust assertions on both `href` and `data-confirm`.
+- **`@no-js`** (on a feature or a scenario, checked by `tagged()`) runs the scenario with scripting off via CDP `Emulation.setScriptExecutionDisabled`, applied in the `before` hook. `features/no_js/` drives the destructive-action confirmation pages that way. The handler-level Rust tests still assert both `href` and `data-confirm` on every destructive trigger; keep those when changing one.
 - **Status codes and guest access go over HTTP** (`e2e/src/http.rs`), since WebDriver can't see responses — with the browser's cookie for 403/404, without for share links.
 - **`WebElement::text()` is rendered text** (affected by `text-transform`); compare user-chosen names with `pages::dom_text` (`textContent`).
 - **Set `noValidate` before submitting invalid passwords** (`SetupPage::submit`, `SettingsPage::change_password`), or `minlength`/`maxlength` blocks the request client-side.

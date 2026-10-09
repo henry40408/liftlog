@@ -1,7 +1,6 @@
 //! The Cucumber runner (`harness = false`). Two sequential passes over one
 //! server: `@bootstrap` first, on the empty database, then everything else.
 //! `@no-js` scenarios run with scripting disabled.
-//! `@no-js` scenarios run with scripting disabled.
 
 mod steps;
 
