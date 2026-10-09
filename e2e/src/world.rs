@@ -11,6 +11,7 @@ use thirtyfour::prelude::WebDriver;
 
 use crate::browser::Browser;
 use crate::pages::auth::{LoginPage, NavBar, SetupPage};
+use crate::pages::confirm::ConfirmPage;
 use crate::pages::dashboard::DashboardPage;
 use crate::pages::exercises::ExercisesPage;
 use crate::pages::settings::SettingsPage;
@@ -55,9 +56,13 @@ impl LiftLogWorld {
         }
     }
 
-    /// Opens the session for a scenario.
-    pub async fn open(&mut self) -> Result<()> {
-        self.browser = Some(Browser::open().await?);
+    /// Opens the session for a scenario; `scripts` off is the `@no-js` tag.
+    pub async fn open(&mut self, scripts: bool) -> Result<()> {
+        let browser = Browser::open().await?;
+        if !scripts {
+            browser.disable_scripts().await?;
+        }
+        self.browser = Some(browser);
         Ok(())
     }
 
@@ -183,6 +188,11 @@ impl LiftLogWorld {
     /// The re-authentication page a users row action opens.
     pub fn confirm_action_page(&self) -> Result<ConfirmActionPage<'_>> {
         Ok(ConfirmActionPage(self.driver()?))
+    }
+
+    /// The server-rendered confirmation page a Delete link opens without JS.
+    pub fn confirm_page(&self) -> Result<ConfirmPage<'_>> {
+        Ok(ConfirmPage(self.driver()?))
     }
 
     pub fn stats_page(&self) -> Result<StatsPage<'_>> {

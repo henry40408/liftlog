@@ -3,6 +3,7 @@
 //! control fails loudly instead of matching another.
 
 pub mod auth;
+pub mod confirm;
 pub mod dashboard;
 pub mod exercises;
 pub mod settings;

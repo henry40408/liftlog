@@ -864,6 +864,60 @@ async fn cannot_delete_myself(world: &mut LiftLogWorld) -> Result<()> {
     .await
 }
 
+// --- no-JS confirmation pages --------------------------------------------
+
+#[when("I click Delete on my exercise")]
+async fn click_delete_exercise(world: &mut LiftLogWorld) -> Result<()> {
+    world
+        .exercises_page()?
+        .click_delete(world.exercise()?)
+        .await
+}
+
+#[when("I click Delete on the workout")]
+async fn click_delete_workout(world: &mut LiftLogWorld) -> Result<()> {
+    let workout = world.workout()?;
+    workout.goto().await?;
+    workout.delete().await
+}
+
+#[then("I am asked to confirm")]
+async fn asked_to_confirm(world: &mut LiftLogWorld) -> Result<()> {
+    let path = world.confirm_page()?.path().await?;
+    ensure!(
+        path.ends_with("/delete"),
+        "expected a delete confirmation page, got {path}"
+    );
+    Ok(())
+}
+
+#[when("I confirm the action")]
+async fn confirm_action(world: &mut LiftLogWorld) -> Result<()> {
+    world.confirm_page()?.confirm().await
+}
+
+#[when("I cancel the action")]
+async fn cancel_action(world: &mut LiftLogWorld) -> Result<()> {
+    world.confirm_page()?.cancel().await
+}
+
+#[then("I am on the exercises page")]
+async fn on_exercises_page(world: &mut LiftLogWorld) -> Result<()> {
+    eventually_eq("the URL", "/exercises", || async { world.path().await }).await
+}
+
+#[then("my exercise is still listed on the exercises page")]
+async fn exercise_is_still_listed(world: &mut LiftLogWorld) -> Result<()> {
+    world.exercises_page()?.goto().await?;
+    eventually_eq("entries naming my exercise", 1usize, || async {
+        world
+            .exercises_page()?
+            .entries_named(world.exercise()?)
+            .await
+    })
+    .await
+}
+
 // --- helpers -------------------------------------------------------------
 
 /// Signs in through the UI and waits for the dashboard, creating the account
@@ -952,5 +1006,3 @@ fn matches_shape(value: &str, shape: &str) -> bool {
             }
         })
 }
-
-// The no-JS confirmation pages are covered by the Rust integration tests.

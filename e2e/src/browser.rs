@@ -83,6 +83,24 @@ impl Browser {
         Ok(())
     }
 
+    /// Turns scripting off for this session, so the page behaves as it would
+    /// for a visitor with JavaScript disabled. Takes effect for every later
+    /// navigation.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the CDP command is refused.
+    pub async fn disable_scripts(&self) -> Result<()> {
+        self.driver
+            .cdp()
+            .send_raw(
+                "Emulation.setScriptExecutionDisabled",
+                serde_json::json!({ "value": true }),
+            )
+            .await?;
+        Ok(())
+    }
+
     /// The session cookie the browser is holding, if it is signed in.
     ///
     /// Used by [`crate::http`] to assert status codes as this user.
