@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(session.user_id, "user1");
         assert_eq!(session.date, date);
         assert_eq!(session.notes, Some("Leg day".to_string()));
-        assert!(!session.id.is_empty());
+        assert_ne!(session.id, "");
     }
 
     #[tokio::test]
@@ -1389,7 +1389,7 @@ mod tests {
             .set_share_token(&session.id, "user1", None)
             .await
             .unwrap();
-        assert!(!token.is_empty());
+        assert_ne!(token, "");
 
         let found = repo.find_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(found.share_token, Some(token));
@@ -1422,7 +1422,7 @@ mod tests {
             .set_share_token(&session.id, "user1", None)
             .await
             .unwrap();
-        assert!(!token.is_empty());
+        assert_ne!(token, "");
 
         let revoked = repo.revoke_share_token(&session.id, "user1").await.unwrap();
         assert!(revoked);

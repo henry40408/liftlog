@@ -233,7 +233,7 @@ mod tests {
             !message.contains("characters"),
             "should be a strength message, not a length one: {message}"
         );
-        assert!(!message.is_empty());
+        assert_ne!(message, "");
     }
 
     #[test]
