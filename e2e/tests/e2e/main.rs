@@ -1,5 +1,7 @@
 //! The Cucumber runner (`harness = false`). Two sequential passes over one
 //! server: `@bootstrap` first, on the empty database, then everything else.
+//! `@no-js` scenarios run with scripting disabled.
+//! `@no-js` scenarios run with scripting disabled.
 
 mod steps;
 
@@ -45,10 +47,11 @@ where
     let writer = LiftLogWorld::cucumber()
         .max_concurrent_scenarios(max_concurrent_scenarios())
         .fail_on_skipped()
-        .before(|_feature, _rule, _scenario, world| {
+        .before(|feature, _rule, scenario, world| {
+            let scripts = !tagged(feature, scenario, "no-js");
             Box::pin(async move {
                 world
-                    .open()
+                    .open(scripts)
                     .await
                     .expect("could not open a browser session");
             })

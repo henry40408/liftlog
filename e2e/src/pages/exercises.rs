@@ -48,6 +48,14 @@ impl ExercisesPage<'_> {
         .await
     }
 
+    /// Clicks Delete without waiting for the outcome: with scripting off it
+    /// opens the confirmation page.
+    pub async fn click_delete(&self, name: &str) -> Result<()> {
+        self.goto().await?;
+        let row = self.row(name).await?;
+        click_link_in(&row, "Delete").await
+    }
+
     /// Waits for a form post to land back on the list, so the next navigation
     /// does not cancel it.
     async fn settle(&self) -> Result<()> {
