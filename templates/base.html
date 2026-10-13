@@ -1206,7 +1206,20 @@
             .set-row .set-cell-weight::before { content: "Weight"; }
             .set-row .set-cell-reps::before { content: "Reps"; }
             .set-row .set-cell-rpe::before { content: "RPE"; }
-            .set-row .set-cell-pr::before { content: "\00a0"; }
+
+            /* The badge always gets its own line, so wrapping never depends on
+               the exercise name or the screen width. */
+            .set-row .set-cell-pr {
+                flex-basis: 100%;
+            }
+
+            .set-row .set-cell-pr:empty {
+                display: none;
+            }
+
+            .set-row .set-cell-pr::before {
+                display: none;
+            }
 
             .set-row-actions {
                 width: 100%;
