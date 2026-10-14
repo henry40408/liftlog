@@ -16,6 +16,8 @@ cargo nextest run --test workout_test     # single integration file
 cargo nextest run -p liftlog session_repo # filter by name
 ```
 
+The root nextest run does not cover `e2e/`: it is a separate workspace whose test target sets `harness = false`, so it runs with `cargo test` from `e2e/` (below).
+
 E2E suite (cucumber + thirtyfour, in `e2e/`, its own workspace):
 
 ```bash
@@ -57,7 +59,7 @@ Keep the port check. Cookies ignore ports, so a port-blind check (#187, reverted
 
 **Add Set is server-prefillable.** Clone links to `/workouts/{id}?prefill=<log_id>`; `show` resolves it only against the workout's own logs. The script fills the form in place instead, so the trigger has both `href` and `data-clone-*`. The "last weight" hint is also rendered in `<noscript>`.
 
-**JS-only controls ship `hidden`.** The share page's clipboard button has `hidden data-requires-js`; `base.html` reveals it on `DOMContentLoaded`. `[hidden] { display: none !important }` exists because `.btn`'s `display: inline-flex` would otherwise win.
+**JS-only controls ship `hidden`.** The share-link clipboard button (`templates/workouts/show.html`, the owner's workout page; the public `shared.html` has none) has `hidden data-requires-js`; `base.html` reveals it on `DOMContentLoaded`. `[hidden] { display: none !important }` exists because `.btn`'s `display: inline-flex` would otherwise win.
 
 **`build.rs`** renders `apple-touch-icon.png` from `assets/favicon.svg` (resvg) and sets `GIT_VERSION` from `git describe` or the `GIT_VERSION` env var (Docker/CI).
 
@@ -86,5 +88,5 @@ Use `tests/common/mod.rs`: `setup_test_db()` (in-memory, migrated) and `create_t
 
 - Conventional commits with an area scope (`feat(stats):`, `fix(workouts):`, `chore(deps):`, `test(e2e):`); PR titles match.
 - GitHub Actions pinned by SHA with the tag as a trailing comment.
-- Don't bump `rust-version` (MSRV) along with the toolchain.
+- No `rust-version` is declared; the toolchain is pinned in `rust-toolchain.toml`. Don't add one on a toolchain bump.
 - Releases: `gh release create --generate-notes`; never edit `Cargo.toml` version or add `CHANGELOG.md`.
