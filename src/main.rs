@@ -75,10 +75,12 @@ fn init_tracing(format: LogFormat) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load `.env` first: clap's `env =`, `RUST_LOG` and `NO_COLOR` are all read
+    // below, before `Config::from_env`.
+    dotenvy::dotenv().ok();
+
     let args = Args::parse();
     init_tracing(args.log_format);
-
-    dotenvy::dotenv().ok();
 
     let config = Config::from_env()?;
 
