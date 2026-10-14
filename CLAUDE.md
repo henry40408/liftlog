@@ -13,10 +13,11 @@ cargo clippy --all-targets -- -D warnings
 cargo deny check
 cargo nextest run
 cargo nextest run --test workout_test     # single integration file
-cargo nextest run -p liftlog session_repo # filter by name
+cargo nextest run session_repo            # name substring
+cargo nextest run -E 'test(session_repo)' # filterset
 ```
 
-The root nextest run does not cover `e2e/`: it is a separate workspace whose test target sets `harness = false`, so it runs with `cargo test` from `e2e/` (below).
+The root fmt, clippy, nextest and coverage runs do not cover `e2e/`: it is a separate workspace whose test target sets `harness = false`, so it runs with `cargo test` from `e2e/` (below), and fmt/clippy must be run there too (CI does).
 
 E2E suite (cucumber + thirtyfour, in `e2e/`, its own workspace):
 
@@ -61,7 +62,7 @@ Keep the port check. Cookies ignore ports, so a port-blind check (#187, reverted
 
 **JS-only controls ship `hidden`.** The share-link clipboard button (`templates/workouts/show.html`, the owner's workout page; the public `shared.html` has none) has `hidden data-requires-js`; `base.html` reveals it on `DOMContentLoaded`. `[hidden] { display: none !important }` exists because `.btn`'s `display: inline-flex` would otherwise win.
 
-**`build.rs`** renders `apple-touch-icon.png` from `assets/favicon.svg` (resvg) and sets `GIT_VERSION` from `git describe` or the `GIT_VERSION` env var (Docker/CI).
+**`build.rs`** renders `apple-touch-icon.png` from `assets/favicon.svg` (resvg) and sets `GIT_VERSION` from the `GIT_VERSION` env var when set (Docker builds pass it as a build arg because `.dockerignore` excludes `.git`), else from `git describe`, else `dev`.
 
 ## Integration tests
 
