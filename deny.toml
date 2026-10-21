@@ -6,7 +6,11 @@ all-features = true
 version = 2
 # `ignore`: reviewed and accepted advisory IDs.
 yanked = "deny"
-ignore = []
+ignore = [
+    # basic-toml is unmaintained and has no patched version; askama_derive still
+    # depends on it. Remove once askama drops it. Tracked in #214.
+    "RUSTSEC-2026-0374",
+]
 
 [licenses]
 version = 2
