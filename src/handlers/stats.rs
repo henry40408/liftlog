@@ -160,6 +160,49 @@ pub struct ChartQuery {
     range: Option<String>,
 }
 
+/// Pads the y range so the line isn't flush against the edges.
+fn padded_y_range(values: &[f64]) -> (f64, f64) {
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if (max - min).abs() < 1e-9 {
+        return (min - 1.0, max + 1.0);
+    }
+    let pad = (max - min) * 0.1;
+    (min - pad, max + pad)
+}
+
+fn y_axis_ticks(y_min: f64, y_max: f64, plot_h: f64) -> Vec<(f64, String)> {
+    (0..4)
+        .map(|i| {
+            let frac = f64::from(i) / 3.0;
+            let y = PAD_T + frac * plot_h;
+            let value = y_max - frac * (y_max - y_min);
+            (y, format!("{value:.0}"))
+        })
+        .collect()
+}
+
+fn x_axis_ticks(slice: &[&ChartPoint], rendered_points: &[RenderedPoint]) -> Vec<(f64, String)> {
+    let n = slice.len();
+    let label_count = n.min(5);
+    if label_count < 2 {
+        return rendered_points
+            .first()
+            .map(|p| (p.x, slice[0].date.format("%m-%d").to_string()))
+            .into_iter()
+            .collect();
+    }
+    (0..label_count)
+        .map(|i| {
+            let idx = i * (n - 1) / (label_count - 1);
+            (
+                rendered_points[idx].x,
+                slice[idx].date.format("%m-%d").to_string(),
+            )
+        })
+        .collect()
+}
+
 fn render_chart(
     points: &[ChartPoint],
     metric: ChartMetric,
@@ -178,15 +221,7 @@ fn render_chart(
     }
 
     let values: Vec<f64> = slice.iter().map(|p| metric.value(p)).collect();
-    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Pad the y range so the line isn't flush against the edges.
-    let (y_min, y_max) = if (max - min).abs() < 1e-9 {
-        (min - 1.0, max + 1.0)
-    } else {
-        let pad = (max - min) * 0.1;
-        (min - pad, max + pad)
-    };
+    let (y_min, y_max) = padded_y_range(&values);
 
     let plot_w = CHART_W - PAD_L - PAD_R;
     let plot_h = CHART_H - PAD_T - PAD_B;
@@ -234,26 +269,8 @@ fn render_chart(
         });
     }
 
-    let mut y_ticks = Vec::with_capacity(4);
-    for i in 0..4 {
-        let frac = i as f64 / 3.0;
-        let y = PAD_T + frac * plot_h;
-        let value = y_max - frac * (y_max - y_min);
-        y_ticks.push((y, format!("{value:.0}")));
-    }
-
-    let label_count = n.min(5);
-    let mut x_ticks = Vec::with_capacity(label_count);
-    if label_count >= 2 {
-        for i in 0..label_count {
-            let idx = i * (n - 1) / (label_count - 1);
-            let p = &rendered_points[idx];
-            let label = slice[idx].date.format("%m-%d").to_string();
-            x_ticks.push((p.x, label));
-        }
-    } else if let Some(p) = rendered_points.first() {
-        x_ticks.push((p.x, slice[0].date.format("%m-%d").to_string()));
-    }
+    let y_ticks = y_axis_ticks(y_min, y_max, plot_h);
+    let x_ticks = x_axis_ticks(&slice, &rendered_points);
 
     Some(RenderedChart {
         width: CHART_W,
