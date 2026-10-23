@@ -13,22 +13,7 @@ use crate::middleware::{
 };
 use crate::state::AppState;
 
-pub fn create_router(state: AppState) -> Router {
-    let session_layer_state = SessionLayerState {
-        session_repo: state.session_repo.clone(),
-        cookie_secure: state.cookie_secure,
-        log_salt: state.log_salt.clone(),
-        trusted_proxy_header: state.trusted_proxy_header,
-        trusted_proxies: state.trusted_proxies.clone(),
-    };
-    let csrf_layer_state = CsrfLayerState {
-        trusted_proxy_header: state.trusted_proxy_header,
-        trusted_proxies: state.trusted_proxies.clone(),
-    };
-    // Read off `state` before `.with_state(state)` moves it below.
-    let hsts_max_age = state.hsts_max_age;
-    let hsts_include_subdomains = state.hsts_include_subdomains;
-
+fn routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health::health_check))
         .route("/favicon.svg", get(favicon::favicon_svg))
@@ -102,6 +87,25 @@ pub fn create_router(state: AppState) -> Router {
             "/settings/logout-others",
             get(settings::confirm_logout_others).post(settings::logout_others),
         )
+}
+
+pub fn create_router(state: AppState) -> Router {
+    let session_layer_state = SessionLayerState {
+        session_repo: state.session_repo.clone(),
+        cookie_secure: state.cookie_secure,
+        log_salt: state.log_salt.clone(),
+        trusted_proxy_header: state.trusted_proxy_header,
+        trusted_proxies: state.trusted_proxies.clone(),
+    };
+    let csrf_layer_state = CsrfLayerState {
+        trusted_proxy_header: state.trusted_proxy_header,
+        trusted_proxies: state.trusted_proxies.clone(),
+    };
+    // Read off `state` before `.with_state(state)` moves it below.
+    let hsts_max_age = state.hsts_max_age;
+    let hsts_include_subdomains = state.hsts_include_subdomains;
+
+    routes()
         .with_state(state)
         .layer(from_fn_with_state(
             session_layer_state,
