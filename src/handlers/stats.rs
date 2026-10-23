@@ -182,16 +182,10 @@ fn y_axis_ticks(y_min: f64, y_max: f64, plot_h: f64) -> Vec<(f64, String)> {
         .collect()
 }
 
+/// `render_chart` returns early below two points, so `slice` has at least two.
 fn x_axis_ticks(slice: &[&ChartPoint], rendered_points: &[RenderedPoint]) -> Vec<(f64, String)> {
     let n = slice.len();
     let label_count = n.min(5);
-    if label_count < 2 {
-        return rendered_points
-            .first()
-            .map(|p| (p.x, slice[0].date.format("%m-%d").to_string()))
-            .into_iter()
-            .collect();
-    }
     (0..label_count)
         .map(|i| {
             let idx = i * (n - 1) / (label_count - 1);
