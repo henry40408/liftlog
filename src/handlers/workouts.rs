@@ -16,6 +16,7 @@ use crate::models::{
     CreateWorkoutLog, CreateWorkoutSession, Exercise, LastExerciseWeight, UpdateWorkoutLog,
     WorkoutLog, WorkoutLogWithExercise, WorkoutSession, recent_pr_window_start,
 };
+use crate::repositories::{NewWorkoutLog, WorkoutLogEdit};
 use crate::state::AppState;
 
 #[derive(Template)]
@@ -364,14 +365,14 @@ pub async fn add_log(
 
     state
         .workout_repo
-        .create_log(
-            &session_id,
-            &form.exercise_id,
+        .create_log(NewWorkoutLog {
+            session_id: &session_id,
+            exercise_id: &form.exercise_id,
             set_number,
-            form.reps,
-            form.weight,
-            form.rpe,
-        )
+            reps: form.reps,
+            weight: form.weight,
+            rpe: form.rpe,
+        })
         .await?;
 
     Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())
@@ -477,7 +478,13 @@ pub async fn update_log(
 
     state
         .workout_repo
-        .update_log(&log_id, &session_id, form.reps, form.weight, form.rpe)
+        .update_log(WorkoutLogEdit {
+            id: &log_id,
+            session_id: &session_id,
+            reps: form.reps,
+            weight: form.weight,
+            rpe: form.rpe,
+        })
         .await?;
 
     Ok(Redirect::to(&format!("/workouts/{session_id}")).into_response())

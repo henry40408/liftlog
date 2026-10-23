@@ -6,7 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
-use liftlog::repositories::WorkoutRepository;
+use liftlog::repositories::{NewWorkoutLog, WorkoutRepository};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -74,7 +74,18 @@ async fn test_view_shared_workout_public() {
         Some("Shared workout test"),
     )
     .await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, Some(8)).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: Some(8),
+        },
+    )
+    .await;
 
     let workout_repo = WorkoutRepository::new(pool.clone());
     let share_token = workout_repo

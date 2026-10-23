@@ -6,7 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
-use liftlog::repositories::ExerciseRepository;
+use liftlog::repositories::{ExerciseRepository, NewWorkoutLog};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -502,7 +502,18 @@ async fn test_delete_exercise_referenced_by_log_returns_bad_request() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, 100.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
