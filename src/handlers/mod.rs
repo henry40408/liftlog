@@ -4,6 +4,7 @@ pub mod dashboard;
 pub mod exercises;
 pub mod favicon;
 pub mod health;
+pub mod reauth;
 pub mod settings;
 pub mod stats;
 pub mod workouts;

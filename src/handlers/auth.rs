@@ -8,6 +8,7 @@ use axum_extra::extract::CookieJar;
 
 use crate::audit::{self, AuditContext};
 use crate::error::{AppError, Result};
+use crate::handlers::reauth::{self, ReauthAttempt, ReauthOutcome};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
 use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole, password_policy_error};
@@ -349,14 +350,23 @@ impl SensitiveAction {
     }
 }
 
+struct ConfirmPage<'a> {
+    action: SensitiveAction,
+    target_id: &'a str,
+    error: Option<String>,
+}
+
 /// Renders the re-auth confirmation page; a nonexistent target is a 404.
 async fn render_confirm_page(
     state: &AppState,
     admin_user: AuthUser,
-    action: SensitiveAction,
-    target_id: &str,
-    error: Option<String>,
+    page: ConfirmPage<'_>,
 ) -> Result<Response> {
+    let ConfirmPage {
+        action,
+        target_id,
+        error,
+    } = page;
     let target = state
         .user_repo
         .find_by_id(target_id)
@@ -373,6 +383,12 @@ async fn render_confirm_page(
     Ok(Html(template.render()?).into_response())
 }
 
+struct SensitiveRequest<'a> {
+    action: SensitiveAction,
+    target_id: &'a str,
+    password: &'a str,
+}
+
 /// Re-checks the admin's password before a sensitive action (OWASP
 /// re-authentication), turning "has the cookie" into "knows the password".
 /// Returns the confirmation page with an error on failure, `None` to proceed.
@@ -381,54 +397,36 @@ async fn require_reauth(
     state: &AppState,
     admin_user: &AuthUser,
     audit_ctx: &AuditContext,
-    action: SensitiveAction,
-    target_id: &str,
-    password: &str,
+    request: SensitiveRequest<'_>,
 ) -> Result<Option<Response>> {
-    let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
+    let attempt = ReauthAttempt {
+        password: request.password,
+        action: request.action.audit_name(),
+    };
+    let (status, message) =
+        match reauth::check_password(state, admin_user, audit_ctx, attempt).await? {
+            ReauthOutcome::Verified => {
+                // Only a proven password hands the attempt back, so failures
+                // stay charged.
+                state
+                    .sensitive_action_rate_limiter
+                    .release(admin_user.id.clone());
+                return Ok(None);
+            }
+            ReauthOutcome::Throttled => (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "Too many attempts. Please try again later.",
+            ),
+            ReauthOutcome::WrongPassword => (axum::http::StatusCode::OK, "Password is incorrect"),
+        };
 
-    if !state
-        .sensitive_action_rate_limiter
-        .try_acquire(admin_user.id.clone())
-    {
-        audit::reauth_throttled(audit_ctx, &actor_fp, &admin_user.id, action.audit_name());
-        let page = render_confirm_page(
-            state,
-            admin_user.clone(),
-            action,
-            target_id,
-            Some("Too many attempts. Please try again later.".to_string()),
-        )
-        .await?;
-        return Ok(Some(
-            (axum::http::StatusCode::TOO_MANY_REQUESTS, page).into_response(),
-        ));
-    }
-
-    let verified = state
-        .user_repo
-        .verify_password(&admin_user.username, password)
-        .await?;
-
-    if verified.is_none() {
-        audit::reauth_failed(audit_ctx, &actor_fp, &admin_user.id, action.audit_name());
-        return Ok(Some(
-            render_confirm_page(
-                state,
-                admin_user.clone(),
-                action,
-                target_id,
-                Some("Password is incorrect".to_string()),
-            )
-            .await?,
-        ));
-    }
-
-    // Only a proven password hands the attempt back, so failures stay charged.
-    state
-        .sensitive_action_rate_limiter
-        .release(admin_user.id.clone());
-    Ok(None)
+    let page = ConfirmPage {
+        action: request.action,
+        target_id: request.target_id,
+        error: Some(message.to_string()),
+    };
+    let rendered = render_confirm_page(state, admin_user.clone(), page).await?;
+    Ok(Some((status, rendered).into_response()))
 }
 
 pub async fn confirm_promote_page(
@@ -436,14 +434,12 @@ pub async fn confirm_promote_page(
     admin_user: AdminUser,
     Path(user_id): Path<String>,
 ) -> Result<Response> {
-    render_confirm_page(
-        &state,
-        admin_user.0,
-        SensitiveAction::PromoteUser,
-        &user_id,
-        None,
-    )
-    .await
+    let page = ConfirmPage {
+        action: SensitiveAction::PromoteUser,
+        target_id: &user_id,
+        error: None,
+    };
+    render_confirm_page(&state, admin_user.0, page).await
 }
 
 pub async fn confirm_delete_page(
@@ -456,14 +452,12 @@ pub async fn confirm_delete_page(
             "Cannot delete your own account".to_string(),
         ));
     }
-    render_confirm_page(
-        &state,
-        admin_user.0,
-        SensitiveAction::DeleteUser,
-        &user_id,
-        None,
-    )
-    .await
+    let page = ConfirmPage {
+        action: SensitiveAction::DeleteUser,
+        target_id: &user_id,
+        error: None,
+    };
+    render_confirm_page(&state, admin_user.0, page).await
 }
 
 pub async fn delete_user(
@@ -479,16 +473,12 @@ pub async fn delete_user(
         ));
     }
 
-    if let Some(rejection) = require_reauth(
-        &state,
-        &admin_user.0,
-        &audit_ctx,
-        SensitiveAction::DeleteUser,
-        &user_id,
-        &form.current_password,
-    )
-    .await?
-    {
+    let request = SensitiveRequest {
+        action: SensitiveAction::DeleteUser,
+        target_id: &user_id,
+        password: &form.current_password,
+    };
+    if let Some(rejection) = require_reauth(&state, &admin_user.0, &audit_ctx, request).await? {
         return Ok(rejection);
     }
 
@@ -524,16 +514,12 @@ pub async fn promote_user(
     Path(user_id): Path<String>,
     Form(form): Form<ConfirmActionForm>,
 ) -> Result<Response> {
-    if let Some(rejection) = require_reauth(
-        &state,
-        &admin_user.0,
-        &audit_ctx,
-        SensitiveAction::PromoteUser,
-        &user_id,
-        &form.current_password,
-    )
-    .await?
-    {
+    let request = SensitiveRequest {
+        action: SensitiveAction::PromoteUser,
+        target_id: &user_id,
+        password: &form.current_password,
+    };
+    if let Some(rejection) = require_reauth(&state, &admin_user.0, &audit_ctx, request).await? {
         return Ok(rejection);
     }
 
