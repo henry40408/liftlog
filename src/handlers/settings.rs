@@ -151,17 +151,21 @@ pub async fn change_password(
     // `count` includes the rotated-away session.
     audit::sessions_destroyed_bulk(
         &audit_ctx,
-        &actor_fp,
-        &auth_user.id,
-        deleted_sessions,
-        "password_change",
+        audit::BulkSessionsDestroyed {
+            actor_session_fp: &actor_fp,
+            user_id: &auth_user.id,
+            count: deleted_sessions,
+            reason: "password_change",
+        },
     );
     audit::session_created(
         &audit_ctx,
-        &new_fp,
-        &auth_user.id,
-        &auth_user.username,
-        "password_change_rotation",
+        audit::SessionCreated {
+            session_fp: &new_fp,
+            user_id: &auth_user.id,
+            username: &auth_user.username,
+            reason: "password_change_rotation",
+        },
     );
 
     // The page marks "This device" by token, so render with the new one.
@@ -234,10 +238,12 @@ pub async fn logout_others(
     let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
     audit::sessions_destroyed_bulk(
         &audit_ctx,
-        &actor_fp,
-        &auth_user.id,
-        deleted_sessions,
-        "logout_others",
+        audit::BulkSessionsDestroyed {
+            actor_session_fp: &actor_fp,
+            user_id: &auth_user.id,
+            count: deleted_sessions,
+            reason: "logout_others",
+        },
     );
 
     render_page(

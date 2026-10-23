@@ -6,7 +6,7 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 
-use crate::audit::{self, AuditContext};
+use crate::audit::{self, AuditContext, RequestPieces};
 use crate::models::UserRole;
 use crate::repositories::{SessionRepository, ValidateOutcome};
 use crate::session::{create_session_cookie, get_session_token};
@@ -85,13 +85,13 @@ pub async fn sliding_session_middleware(
     let mut authenticated = false;
 
     if let Some(tok) = token.as_deref() {
-        let ctx = AuditContext::from_request_pieces(
-            request.extensions(),
-            request.headers(),
-            request.uri().path(),
-            layer.trusted_proxy_header,
-            &layer.trusted_proxies,
-        );
+        let ctx = AuditContext::from_request_pieces(RequestPieces {
+            extensions: request.extensions(),
+            headers: request.headers(),
+            path: request.uri().path(),
+            trusted_proxy_header: layer.trusted_proxy_header,
+            trusted_proxies: &layer.trusted_proxies,
+        });
         let fp = crate::session::token_fingerprint(tok, layer.log_salt.as_ref());
 
         match layer.session_repo.validate_and_touch(tok).await {
