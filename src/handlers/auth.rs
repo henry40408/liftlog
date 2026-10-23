@@ -82,6 +82,29 @@ pub async fn login_page(State(state): State<AppState>, request: Request) -> Resu
     Ok(Html(template.render()?).into_response())
 }
 
+fn login_error_page(status: axum::http::StatusCode, message: &str) -> Result<Response> {
+    let template = LoginTemplate {
+        error: Some(message.to_string()),
+    };
+    Ok((status, Html(template.render()?)).into_response())
+}
+
+fn login_success_response(jar: CookieJar, token: &str, cookie_secure: bool) -> Response {
+    let jar = jar.add(create_session_cookie(token, cookie_secure));
+    let mut response = (jar, Redirect::to("/")).into_response();
+    // The middleware only sets Cache-Control for requests that already
+    // had a session; this one sets the session cookie, so do it here.
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::PRAGMA,
+        axum::http::HeaderValue::from_static("no-cache"),
+    );
+    response
+}
+
 pub async fn login_submit(
     State(state): State<AppState>,
     connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
@@ -100,14 +123,10 @@ pub async fn login_submit(
 
     if !state.login_rate_limiter.try_acquire(ip) {
         audit::login_throttled(&audit_ctx, &credentials.username);
-        let template = LoginTemplate {
-            error: Some("Too many login attempts. Please try again later.".to_string()),
-        };
-        return Ok((
+        return login_error_page(
             axum::http::StatusCode::TOO_MANY_REQUESTS,
-            Html(template.render()?),
-        )
-            .into_response());
+            "Too many login attempts. Please try again later.",
+        );
     }
 
     // Delay applies to any submitted username, real or not, so it can't
@@ -122,35 +141,7 @@ pub async fn login_submit(
         .verify_password(&credentials.username, &credentials.password)
         .await?;
 
-    if let Some(user) = user {
-        state.login_backoff.reset(&credentials.username);
-        // Create the session before releasing the reservation, so a failed
-        // create stays charged.
-        let token = state.session_repo.create(&user.id).await?;
-        state.login_rate_limiter.release(ip);
-        audit::session_created(
-            &audit_ctx,
-            audit::SessionCreated {
-                session_fp: &token_fingerprint(&token, state.log_salt.as_ref()),
-                user_id: &user.id,
-                username: &user.username,
-                reason: "login",
-            },
-        );
-        let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
-        let mut response = (jar, Redirect::to("/")).into_response();
-        // The middleware only sets Cache-Control for requests that already
-        // had a session; this one sets the session cookie, so do it here.
-        response.headers_mut().insert(
-            axum::http::header::CACHE_CONTROL,
-            axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
-        );
-        response.headers_mut().insert(
-            axum::http::header::PRAGMA,
-            axum::http::HeaderValue::from_static("no-cache"),
-        );
-        Ok(response)
-    } else {
+    let Some(user) = user else {
         // One event for unknown user and wrong password alike, so the log
         // is not an enumeration oracle.
         state
@@ -162,11 +153,24 @@ pub async fn login_submit(
             &credentials.username,
             u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX),
         );
-        let template = LoginTemplate {
-            error: Some("Invalid username or password".to_string()),
-        };
-        Ok(Html(template.render()?).into_response())
-    }
+        return login_error_page(axum::http::StatusCode::OK, "Invalid username or password");
+    };
+
+    state.login_backoff.reset(&credentials.username);
+    // Create the session before releasing the reservation, so a failed
+    // create stays charged.
+    let token = state.session_repo.create(&user.id).await?;
+    state.login_rate_limiter.release(ip);
+    audit::session_created(
+        &audit_ctx,
+        audit::SessionCreated {
+            session_fp: &token_fingerprint(&token, state.log_salt.as_ref()),
+            user_id: &user.id,
+            username: &user.username,
+            reason: "login",
+        },
+    );
+    Ok(login_success_response(jar, &token, state.cookie_secure))
 }
 
 pub async fn setup_page(State(state): State<AppState>) -> Result<Response> {

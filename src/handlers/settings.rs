@@ -72,29 +72,74 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
     render_page(&state, auth_user, None, None).await
 }
 
+async fn new_password_error(form: &ChangePasswordForm, username: &str) -> Result<Option<String>> {
+    if form.new_password != form.confirm_password {
+        return Ok(Some("New passwords do not match".to_string()));
+    }
+    if form.new_password == form.current_password {
+        // Otherwise a no-op "change" would report success and drop sessions.
+        return Ok(Some(
+            "New password must be different from the current password".to_string(),
+        ));
+    }
+    // Shared policy (`password_policy_error`); the length cap also bounds
+    // Argon2 work. `spawn_blocking`: CPU work on attacker input.
+    let new_password = form.new_password.clone();
+    let username = username.to_string();
+    let error = tokio::task::spawn_blocking(move || {
+        password_policy_error(&new_password, "New password", &[username.as_str()])
+    })
+    .await?;
+    Ok(error)
+}
+
+/// Rotates the current token too (OWASP: renew after risk events), so a token
+/// captured before the change stops working. Create first: if it fails the
+/// user keeps their old session. Excluding only the new token retires the old
+/// one with every other device in one statement. Returns the new token.
+async fn rotate_session_after_password_change(
+    state: &AppState,
+    audit_ctx: &AuditContext,
+    auth_user: &AuthUser,
+) -> Result<String> {
+    let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
+
+    let new_token = state.session_repo.create(&auth_user.id).await?;
+    let new_fp = token_fingerprint(&new_token, state.log_salt.as_ref());
+    let deleted_sessions = state
+        .session_repo
+        .delete_all_for_user_except(&auth_user.id, &new_token)
+        .await?;
+
+    // `count` includes the rotated-away session.
+    audit::sessions_destroyed_bulk(
+        audit_ctx,
+        audit::BulkSessionsDestroyed {
+            actor_session_fp: &actor_fp,
+            user_id: &auth_user.id,
+            count: deleted_sessions,
+            reason: "password_change",
+        },
+    );
+    audit::session_created(
+        audit_ctx,
+        audit::SessionCreated {
+            session_fp: &new_fp,
+            user_id: &auth_user.id,
+            username: &auth_user.username,
+            reason: "password_change_rotation",
+        },
+    );
+    Ok(new_token)
+}
+
 pub async fn change_password(
     State(state): State<AppState>,
     auth_user: AuthUser,
     audit_ctx: AuditContext,
     Form(form): Form<ChangePasswordForm>,
 ) -> Result<Response> {
-    let validation_error = if form.new_password != form.confirm_password {
-        Some("New passwords do not match".to_string())
-    } else if form.new_password == form.current_password {
-        // Otherwise a no-op "change" would report success and drop sessions.
-        Some("New password must be different from the current password".to_string())
-    } else {
-        // Shared policy (`password_policy_error`); the length cap also bounds
-        // Argon2 work. `spawn_blocking`: CPU work on attacker input.
-        let new_password = form.new_password.clone();
-        let username = auth_user.username.clone();
-        tokio::task::spawn_blocking(move || {
-            password_policy_error(&new_password, "New password", &[username.as_str()])
-        })
-        .await?
-    };
-
-    if let Some(message) = validation_error {
+    if let Some(message) = new_password_error(&form, &auth_user.username).await? {
         return render_page(&state, auth_user, Some(message), None).await;
     }
 
@@ -139,38 +184,7 @@ pub async fn change_password(
         .sensitive_action_rate_limiter
         .release(auth_user.id.clone());
 
-    let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
-
-    // Rotate the current token too (OWASP: renew after risk events), so a
-    // token captured before the change stops working. Create first: if it
-    // fails the user keeps their old session. Excluding only the new token
-    // retires the old one with every other device in one statement.
-    let new_token = state.session_repo.create(&auth_user.id).await?;
-    let new_fp = token_fingerprint(&new_token, state.log_salt.as_ref());
-    let deleted_sessions = state
-        .session_repo
-        .delete_all_for_user_except(&auth_user.id, &new_token)
-        .await?;
-
-    // `count` includes the rotated-away session.
-    audit::sessions_destroyed_bulk(
-        &audit_ctx,
-        audit::BulkSessionsDestroyed {
-            actor_session_fp: &actor_fp,
-            user_id: &auth_user.id,
-            count: deleted_sessions,
-            reason: "password_change",
-        },
-    );
-    audit::session_created(
-        &audit_ctx,
-        audit::SessionCreated {
-            session_fp: &new_fp,
-            user_id: &auth_user.id,
-            username: &auth_user.username,
-            reason: "password_change_rotation",
-        },
-    );
+    let new_token = rotate_session_after_password_change(&state, &audit_ctx, &auth_user).await?;
 
     // The page marks "This device" by token, so render with the new one.
     let mut auth_user = auth_user;
