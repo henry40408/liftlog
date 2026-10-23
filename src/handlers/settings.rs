@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::audit::{self, AuditContext};
 use crate::error::Result;
 use crate::handlers::confirm;
+use crate::handlers::reauth::{self, ReauthAttempt, ReauthOutcome};
 use crate::middleware::{AuthUser, SuppressSessionRefresh};
 use crate::models::password_policy_error;
 use crate::repositories::SessionListRow;
@@ -34,29 +35,34 @@ struct SettingsTemplate {
     sessions: Vec<SessionListRow>,
 }
 
+struct PageNotice {
+    error: Option<String>,
+    success: Option<String>,
+}
+
 async fn render_page(
     state: &AppState,
     auth_user: AuthUser,
     error: Option<String>,
     success: Option<String>,
 ) -> Result<Response> {
-    render_page_with_status(state, auth_user, error, success, StatusCode::OK).await
+    let notice = PageNotice { error, success };
+    render_page_with_status(state, auth_user, notice, StatusCode::OK).await
 }
 
 /// `render_page` with a non-200 status, so a throttled change reads as refused.
 async fn render_page_with_status(
     state: &AppState,
     auth_user: AuthUser,
-    error: Option<String>,
-    success: Option<String>,
+    notice: PageNotice,
     status: StatusCode,
 ) -> Result<Response> {
     let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
     let template = SettingsTemplate {
         user: auth_user,
         git_version: GIT_VERSION,
-        error,
-        success,
+        error: notice.error,
+        success: notice.success,
         sessions,
     };
     Ok((status, Html(template.render()?)).into_response())
@@ -92,40 +98,36 @@ pub async fn change_password(
         return render_page(&state, auth_user, Some(message), None).await;
     }
 
-    let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
-
-    // Throttle current-password guessing with a stolen cookie. Keyed by user
-    // id so new IPs don't buy fresh budget; charged before verifying and
-    // refunded only on success.
-    if !state
-        .sensitive_action_rate_limiter
-        .try_acquire(auth_user.id.clone())
-    {
-        audit::reauth_throttled(&audit_ctx, &actor_fp, &auth_user.id, "password_change");
-        return render_page_with_status(
-            &state,
-            auth_user,
-            Some("Too many password change attempts. Please try again later.".to_string()),
-            None,
-            StatusCode::TOO_MANY_REQUESTS,
-        )
-        .await;
-    }
-
-    let verified = state
-        .user_repo
-        .verify_password(&auth_user.username, &form.current_password)
-        .await?;
-
-    if verified.is_none() {
-        audit::reauth_failed(&audit_ctx, &actor_fp, &auth_user.id, "password_change");
-        return render_page(
-            &state,
-            auth_user,
-            Some("Current password is incorrect".to_string()),
-            None,
-        )
-        .await;
+    let attempt = ReauthAttempt {
+        password: &form.current_password,
+        action: "password_change",
+    };
+    match reauth::check_password(&state, &auth_user, &audit_ctx, attempt).await? {
+        ReauthOutcome::Verified => {}
+        ReauthOutcome::Throttled => {
+            let notice = PageNotice {
+                error: Some(
+                    "Too many password change attempts. Please try again later.".to_string(),
+                ),
+                success: None,
+            };
+            return render_page_with_status(
+                &state,
+                auth_user,
+                notice,
+                StatusCode::TOO_MANY_REQUESTS,
+            )
+            .await;
+        }
+        ReauthOutcome::WrongPassword => {
+            return render_page(
+                &state,
+                auth_user,
+                Some("Current password is incorrect".to_string()),
+                None,
+            )
+            .await;
+        }
     }
 
     state
@@ -136,6 +138,8 @@ pub async fn change_password(
     state
         .sensitive_action_rate_limiter
         .release(auth_user.id.clone());
+
+    let actor_fp = token_fingerprint(&auth_user.session_token, state.log_salt.as_ref());
 
     // Rotate the current token too (OWASP: renew after risk events), so a
     // token captured before the change stops working. Create first: if it
