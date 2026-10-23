@@ -250,3 +250,142 @@ async fn shutdown_signal() {
         () = terminate => { tracing::info!("Received SIGTERM, shutting down..."); }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::UserRole;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    fn test_pool() -> db::DbPool {
+        let pool = db::create_memory_pool().expect("memory pool");
+        migrations::run_migrations_for_tests(&pool).expect("migrations");
+        pool
+    }
+
+    fn test_config() -> Config {
+        Config {
+            database_url: "sqlite::memory:".to_string(),
+            bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+            trusted_proxy_header: config::TrustedProxyHeader::XRealIp,
+            trusted_proxies: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+            cookie_secure: false,
+            hsts_max_age: 3600,
+            hsts_include_subdomains: true,
+        }
+    }
+
+    #[test]
+    fn build_app_state_copies_config() {
+        let config = test_config();
+        let state = build_app_state(&config, &test_pool());
+
+        assert_eq!(state.trusted_proxy_header, config.trusted_proxy_header);
+        assert_eq!(*state.trusted_proxies, config.trusted_proxies);
+        assert!(!state.cookie_secure);
+        assert_eq!(state.hsts_max_age, 3600);
+        assert!(state.hsts_include_subdomains);
+    }
+
+    #[test]
+    fn build_app_state_draws_a_fresh_salt_each_time() {
+        let config = test_config();
+        let pool = test_pool();
+        let first = build_app_state(&config, &pool);
+        let second = build_app_state(&config, &pool);
+
+        assert_ne!(*first.log_salt, [0u8; 32]);
+        assert_ne!(*first.log_salt, *second.log_salt);
+    }
+
+    #[test]
+    fn build_app_state_limits_login_to_five_attempts() {
+        let state = build_app_state(&test_config(), &test_pool());
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        assert!((0..5).all(|_| state.login_rate_limiter.try_acquire(ip)));
+        assert!(!state.login_rate_limiter.try_acquire(ip));
+    }
+
+    #[test]
+    fn build_app_state_limits_sensitive_actions_to_five_attempts() {
+        let state = build_app_state(&test_config(), &test_pool());
+        let user_id = "user".to_string();
+
+        assert!((0..5).all(|_| {
+            state
+                .sensitive_action_rate_limiter
+                .try_acquire(user_id.clone())
+        }));
+        assert!(
+            !state
+                .sensitive_action_rate_limiter
+                .try_acquire(user_id.clone())
+        );
+    }
+
+    fn count_rows(pool: &db::DbPool, sql: &str) -> i64 {
+        pool.get()
+            .unwrap()
+            .query_row(sql, [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn sweep_expired_removes_expired_sessions_and_share_tokens() {
+        let pool = test_pool();
+        let state = build_app_state(&test_config(), &pool);
+        let user = state
+            .user_repo
+            .create("sweeper", "password", UserRole::User)
+            .await
+            .unwrap();
+
+        state.session_repo.create(&user.id).await.unwrap();
+        let expired_token = state.session_repo.create(&user.id).await.unwrap();
+        pool.get()
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET expires_at = datetime('now', '-1 hour') WHERE token = ?",
+                [&expired_token],
+            )
+            .unwrap();
+
+        let today = chrono::Utc::now().date_naive();
+        let live_workout = state
+            .workout_repo
+            .create_session(&user.id, today, None)
+            .await
+            .unwrap();
+        let expired_workout = state
+            .workout_repo
+            .create_session(&user.id, today, None)
+            .await
+            .unwrap();
+        state
+            .workout_repo
+            .set_share_token(&live_workout.id, &user.id, Some(chrono::Duration::hours(1)))
+            .await
+            .unwrap();
+        state
+            .workout_repo
+            .set_share_token(
+                &expired_workout.id,
+                &user.id,
+                Some(chrono::Duration::hours(-1)),
+            )
+            .await
+            .unwrap();
+
+        sweep_expired(&state.session_repo, &state.workout_repo).await;
+
+        assert_eq!(count_rows(&pool, "SELECT COUNT(*) FROM sessions"), 1);
+        assert_eq!(
+            count_rows(
+                &pool,
+                "SELECT COUNT(*) FROM workout_sessions WHERE share_token IS NOT NULL"
+            ),
+            1
+        );
+    }
+}
