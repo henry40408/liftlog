@@ -6,7 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use liftlog::models::{UserRole, recent_pr_window_start};
-use liftlog::repositories::WorkoutRepository;
+use liftlog::repositories::{NewWorkoutLog, WorkoutRepository};
 use tower::ServiceExt;
 
 /// The raw `<input ...>` tag with `id="{id}"`, so a test can check one
@@ -403,8 +403,18 @@ async fn test_workout_page_badges_a_one_month_pr_below_the_all_time_best() {
         None,
     )
     .await;
-    let old_log =
-        common::create_test_log(&pool, &old_workout.id, &exercise.id, 1, 3, 140.0, None).await;
+    let old_log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &old_workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 3,
+            weight: 140.0,
+            rpe: None,
+        },
+    )
+    .await;
     {
         let conn = pool.get().unwrap();
         conn.execute(
@@ -422,7 +432,18 @@ async fn test_workout_page_badges_a_one_month_pr_below_the_all_time_best() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 8, 110.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -776,7 +797,18 @@ async fn test_delete_log_success() {
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -817,7 +849,18 @@ async fn test_delete_log_requires_ownership() {
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -859,8 +902,18 @@ async fn test_edit_log_page_renders() {
         None,
     )
     .await;
-    let log =
-        common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, Some(8)).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: Some(8),
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -901,7 +954,18 @@ async fn test_update_log_success() {
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -944,7 +1008,18 @@ async fn test_update_log_accepts_fractional_weight() {
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -984,7 +1059,18 @@ async fn test_update_log_requires_ownership() {
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let session_cookie = common::create_session_cookie(&pool, &user1).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
@@ -1076,8 +1162,30 @@ async fn test_delete_workout_confirmation_page_names_the_cascade_without_acting(
     )
     .await;
     let exercise = common::create_test_exercise(&pool, &user.id, "Squat", "Legs").await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, 100.0, None).await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 2, 5, 105.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 2,
+            reps: 5,
+            weight: 105.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -1135,7 +1243,18 @@ async fn test_show_workout_prefills_the_add_set_form_from_a_log() {
     )
     .await;
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 1, 8, 82.5, Some(7)).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 8,
+            weight: 82.5,
+            rpe: Some(7),
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -1210,12 +1329,14 @@ async fn test_show_workout_ignores_a_prefill_from_another_users_log() {
     let owner_exercise = common::create_test_exercise(&pool, &owner.id, "Squat", "legs").await;
     let owner_log = common::create_test_log(
         &pool,
-        &owner_workout.id,
-        &owner_exercise.id,
-        1,
-        5,
-        222.5,
-        None,
+        NewWorkoutLog {
+            session_id: &owner_workout.id,
+            exercise_id: &owner_exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 222.5,
+            rpe: None,
+        },
     )
     .await;
 
@@ -1278,7 +1399,18 @@ async fn test_show_workout_lists_last_weights_for_scriptless_browsers() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &past.id, &exercise.id, 1, 5, 47.5, Some(8)).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &past.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 47.5,
+            rpe: Some(8),
+        },
+    )
+    .await;
 
     let today = common::create_test_workout(
         &pool,
@@ -1395,8 +1527,18 @@ async fn test_delete_workout_confirmation_page_phrases_the_set_count() {
         )
         .await;
         for set_number in 1..=sets {
-            common::create_test_log(&pool, &workout.id, &exercise.id, set_number, 5, 100.0, None)
-                .await;
+            common::create_test_log(
+                &pool,
+                NewWorkoutLog {
+                    session_id: &workout.id,
+                    exercise_id: &exercise.id,
+                    set_number,
+                    reps: 5,
+                    weight: 100.0,
+                    rpe: None,
+                },
+            )
+            .await;
         }
 
         let response = test_app
@@ -1474,7 +1616,18 @@ async fn test_delete_set_confirmation_page_names_the_set_without_acting() {
     )
     .await;
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "Chest").await;
-    let log = common::create_test_log(&pool, &workout.id, &exercise.id, 3, 8, 80.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 3,
+            reps: 8,
+            weight: 80.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -1535,7 +1688,18 @@ async fn test_delete_set_confirmation_page_rejects_a_log_from_another_session() 
         None,
     )
     .await;
-    let log = common::create_test_log(&pool, &second.id, &exercise.id, 1, 5, 100.0, None).await;
+    let log = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &second.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -1574,7 +1738,18 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &past.id, &curl.id, 1, 10, 20.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &past.id,
+            exercise_id: &curl.id,
+            set_number: 1,
+            reps: 10,
+            weight: 20.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let workout = common::create_test_workout(
         &pool,
@@ -1583,9 +1758,42 @@ async fn test_add_set_fields_offer_weight_and_rep_suggestions() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &workout.id, &bench.id, 1, 5, 100.0, None).await;
-    common::create_test_log(&pool, &workout.id, &bench.id, 2, 5, 100.0, None).await;
-    common::create_test_log(&pool, &workout.id, &bench.id, 3, 3, 82.5, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &bench.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &bench.id,
+            set_number: 2,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &bench.id,
+            set_number: 3,
+            reps: 3,
+            weight: 82.5,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -1703,7 +1911,18 @@ async fn test_add_set_suggestions_exclude_another_users_weights() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &other_workout.id, &other_ex.id, 1, 5, 187.5, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &other_workout.id,
+            exercise_id: &other_ex.id,
+            set_number: 1,
+            reps: 5,
+            weight: 187.5,
+            rpe: None,
+        },
+    )
+    .await;
 
     let mine = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let workout = common::create_test_workout(
@@ -1713,7 +1932,18 @@ async fn test_add_set_suggestions_exclude_another_users_weights() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &workout.id, &mine.id, 1, 5, 60.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &mine.id,
+            set_number: 1,
+            reps: 5,
+            weight: 60.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router

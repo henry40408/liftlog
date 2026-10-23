@@ -6,6 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use liftlog::models::UserRole;
+use liftlog::repositories::NewWorkoutLog;
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -98,7 +99,18 @@ async fn test_stats_index_calculates_volume() {
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let workout = common::create_test_workout(&pool, &user.id, today, None).await;
 
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, 100.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -137,7 +149,18 @@ async fn test_stats_index_shows_prs() {
         None,
     )
     .await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, 120.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 120.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -184,8 +207,30 @@ async fn test_exercise_stats_shows_history() {
     )
     .await;
 
-    common::create_test_log(&pool, &workout1.id, &exercise.id, 1, 10, 100.0, None).await;
-    common::create_test_log(&pool, &workout2.id, &exercise.id, 1, 8, 110.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout1.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout2.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -251,8 +296,30 @@ async fn test_prs_list_shows_all_prs() {
     )
     .await;
 
-    common::create_test_log(&pool, &workout.id, &exercise1.id, 1, 5, 100.0, None).await;
-    common::create_test_log(&pool, &workout.id, &exercise2.id, 1, 5, 150.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise1.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise2.id,
+            set_number: 1,
+            reps: 5,
+            weight: 150.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -296,8 +363,30 @@ async fn test_prs_list_separates_all_time_and_recent_windows() {
     .await;
 
     // Squat only outside the 1-month window.
-    common::create_test_log(&pool, &workout.id, &bench.id, 1, 5, 100.0, None).await;
-    let old_squat = common::create_test_log(&pool, &workout.id, &squat.id, 1, 5, 150.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &bench.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
+    let old_squat = common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &squat.id,
+            set_number: 1,
+            reps: 5,
+            weight: 150.0,
+            rpe: None,
+        },
+    )
+    .await;
     {
         let conn = pool.get().unwrap();
         conn.execute(
@@ -361,7 +450,18 @@ async fn test_exercise_stats_chart_renders_with_two_or_more_sessions() {
     for (i, weight) in [100.0_f64, 105.0, 110.0].iter().enumerate() {
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32 * 2).unwrap();
         let workout = common::create_test_workout(&pool, &user.id, date, None).await;
-        common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, *weight, None).await;
+        common::create_test_log(
+            &pool,
+            NewWorkoutLog {
+                session_id: &workout.id,
+                exercise_id: &exercise.id,
+                set_number: 1,
+                reps: 5,
+                weight: *weight,
+                rpe: None,
+            },
+        )
+        .await;
     }
 
     let response = test_app
@@ -416,7 +516,18 @@ async fn test_exercise_stats_chart_renders_sparse_state_with_one_session() {
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
     let workout = common::create_test_workout(&pool, &user.id, date, None).await;
-    common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, 100.0, None).await;
+    common::create_test_log(
+        &pool,
+        NewWorkoutLog {
+            session_id: &workout.id,
+            exercise_id: &exercise.id,
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        },
+    )
+    .await;
 
     let response = test_app
         .router
@@ -488,7 +599,18 @@ async fn test_exercise_stats_chart_pr_dots_match_expected_indices() {
     for (i, w) in weights.iter().enumerate() {
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32).unwrap();
         let workout = common::create_test_workout(&pool, &user.id, date, None).await;
-        common::create_test_log(&pool, &workout.id, &exercise.id, 1, 5, *w, None).await;
+        common::create_test_log(
+            &pool,
+            NewWorkoutLog {
+                session_id: &workout.id,
+                exercise_id: &exercise.id,
+                set_number: 1,
+                reps: 5,
+                weight: *w,
+                rpe: None,
+            },
+        )
+        .await;
     }
 
     let response = test_app
@@ -562,7 +684,18 @@ async fn seed_three_sessions(
     for (i, weight) in [100.0_f64, 105.0, 110.0].iter().enumerate() {
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32 * 2).unwrap();
         let workout = common::create_test_workout(pool, user_id, date, None).await;
-        common::create_test_log(pool, &workout.id, &exercise.id, 1, 5, *weight, None).await;
+        common::create_test_log(
+            pool,
+            NewWorkoutLog {
+                session_id: &workout.id,
+                exercise_id: &exercise.id,
+                set_number: 1,
+                reps: 5,
+                weight: *weight,
+                rpe: None,
+            },
+        )
+        .await;
     }
     exercise
 }
@@ -645,7 +778,18 @@ async fn test_exercise_stats_chart_plots_e1rm() {
     for (i, weight) in [100.0_f64, 110.0, 120.0].iter().enumerate() {
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 10 + i as u32 * 2).unwrap();
         let workout = common::create_test_workout(&pool, &user.id, date, None).await;
-        common::create_test_log(&pool, &workout.id, &exercise.id, 1, 10, *weight, None).await;
+        common::create_test_log(
+            &pool,
+            NewWorkoutLog {
+                session_id: &workout.id,
+                exercise_id: &exercise.id,
+                set_number: 1,
+                reps: 10,
+                weight: *weight,
+                rpe: None,
+            },
+        )
+        .await;
     }
 
     let response = test_app
@@ -748,12 +892,14 @@ async fn test_exercise_stats_chart_range_controls_the_window() {
         let workout = common::create_test_workout(&pool, &user.id, date, None).await;
         common::create_test_log(
             &pool,
-            &workout.id,
-            &exercise.id,
-            1,
-            5,
-            100.0 + f64::from(day),
-            None,
+            NewWorkoutLog {
+                session_id: &workout.id,
+                exercise_id: &exercise.id,
+                set_number: 1,
+                reps: 5,
+                weight: 100.0 + f64::from(day),
+                rpe: None,
+            },
         )
         .await;
     }

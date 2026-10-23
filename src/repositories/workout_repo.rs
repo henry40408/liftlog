@@ -9,6 +9,23 @@ use crate::models::{
     WorkoutLogWithExercise, WorkoutSession,
 };
 
+pub struct NewWorkoutLog<'a> {
+    pub session_id: &'a str,
+    pub exercise_id: &'a str,
+    pub set_number: i32,
+    pub reps: i32,
+    pub weight: f64,
+    pub rpe: Option<i32>,
+}
+
+pub struct WorkoutLogEdit<'a> {
+    pub id: &'a str,
+    pub session_id: &'a str,
+    pub reps: i32,
+    pub weight: f64,
+    pub rpe: Option<i32>,
+}
+
 #[derive(Clone)]
 pub struct WorkoutRepository {
     pool: DbPool,
@@ -163,25 +180,17 @@ impl WorkoutRepository {
         .await?
     }
 
-    pub async fn create_log(
-        &self,
-        session_id: &str,
-        exercise_id: &str,
-        set_number: i32,
-        reps: i32,
-        weight: f64,
-        rpe: Option<i32>,
-    ) -> Result<WorkoutLog> {
+    pub async fn create_log(&self, new_log: NewWorkoutLog<'_>) -> Result<WorkoutLog> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let log = WorkoutLog {
             id: id.clone(),
-            session_id: session_id.to_string(),
-            exercise_id: exercise_id.to_string(),
-            set_number,
-            reps,
-            weight,
-            rpe,
+            session_id: new_log.session_id.to_string(),
+            exercise_id: new_log.exercise_id.to_string(),
+            set_number: new_log.set_number,
+            reps: new_log.reps,
+            weight: new_log.weight,
+            rpe: new_log.rpe,
             created_at: now,
         };
         let log_clone = log.clone();
@@ -280,15 +289,15 @@ impl WorkoutRepository {
         .await?
     }
 
-    pub async fn update_log(
-        &self,
-        id: &str,
-        session_id: &str,
-        reps: i32,
-        weight: f64,
-        rpe: Option<i32>,
-    ) -> Result<bool> {
+    pub async fn update_log(&self, edit: WorkoutLogEdit<'_>) -> Result<bool> {
         let pool = self.pool.clone();
+        let WorkoutLogEdit {
+            id,
+            session_id,
+            reps,
+            weight,
+            rpe,
+        } = edit;
         let id = id.to_string();
         let session_id = session_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -828,7 +837,14 @@ mod tests {
         let session = repo.create_session("user1", date, None).await.unwrap();
 
         let log = repo
-            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, Some(8))
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 1,
+                reps: 10,
+                weight: 100.0,
+                rpe: Some(8),
+            })
             .await
             .unwrap();
 
@@ -851,15 +867,36 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 105.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-squat", 1, 5, 120.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 105.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-squat",
+            set_number: 1,
+            reps: 5,
+            weight: 120.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let logs = repo
             .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
@@ -890,15 +927,29 @@ mod tests {
 
         // An all-time best set from well outside the window.
         let old_log = repo
-            .create_log(&old_session.id, "ex-bench-press", 1, 3, 140.0, None)
+            .create_log(NewWorkoutLog {
+                session_id: &old_session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 1,
+                reps: 3,
+                weight: 140.0,
+                rpe: None,
+            })
             .await
             .unwrap();
         backdate_log(&pool, &old_log.id, Utc::now() - chrono::Duration::days(90));
 
         // Lighter set today: best within the window only.
-        repo.create_log(&recent_session.id, "ex-bench-press", 1, 8, 110.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &recent_session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let recent_logs = repo
             .find_logs_by_session_with_pr(&recent_session.id, "user1", recent_pr_window_start())
@@ -928,7 +979,14 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
         let log = repo
-            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 1,
+                reps: 10,
+                weight: 100.0,
+                rpe: None,
+            })
             .await
             .unwrap();
 
@@ -950,12 +1008,25 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
         let log = repo
-            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, Some(7))
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 1,
+                reps: 10,
+                weight: 100.0,
+                rpe: Some(7),
+            })
             .await
             .unwrap();
 
         let updated = repo
-            .update_log(&log.id, &session.id, 12, 110.0, Some(8))
+            .update_log(WorkoutLogEdit {
+                id: &log.id,
+                session_id: &session.id,
+                reps: 12,
+                weight: 110.0,
+                rpe: Some(8),
+            })
             .await
             .unwrap();
 
@@ -977,12 +1048,25 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
         let log = repo
-            .create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 1,
+                reps: 10,
+                weight: 100.0,
+                rpe: None,
+            })
             .await
             .unwrap();
 
         let updated = repo
-            .update_log(&log.id, "wrong-session", 12, 110.0, Some(8))
+            .update_log(WorkoutLogEdit {
+                id: &log.id,
+                session_id: "wrong-session",
+                reps: 12,
+                weight: 110.0,
+                rpe: Some(8),
+            })
             .await
             .unwrap();
 
@@ -1008,9 +1092,16 @@ mod tests {
             .unwrap();
         assert_eq!(next, 1);
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
         let next = repo
             .get_next_set_number(&session.id, "ex-bench-press")
             .await
@@ -1042,15 +1133,36 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-squat",
+            set_number: 1,
+            reps: 5,
+            weight: 150.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let since = Utc::now() - chrono::Duration::days(30);
         let prs = repo.get_pr_summaries_by_user("user1", since).await.unwrap();
@@ -1081,7 +1193,14 @@ mod tests {
 
         // Bench: the all-time best is old, a lighter set is inside the window.
         let old_bench = repo
-            .create_log(&session.id, "ex-bench-press", 1, 3, 140.0, None)
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 1,
+                reps: 3,
+                weight: 140.0,
+                rpe: None,
+            })
             .await
             .unwrap();
         backdate_log(
@@ -1089,13 +1208,27 @@ mod tests {
             &old_bench.id,
             Utc::now() - chrono::Duration::days(90),
         );
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         // Squat: only trained outside the window at all.
         let old_squat = repo
-            .create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-squat",
+                set_number: 1,
+                reps: 5,
+                weight: 150.0,
+                rpe: None,
+            })
             .await
             .unwrap();
         backdate_log(
@@ -1134,15 +1267,36 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 3,
+            reps: 5,
+            weight: 105.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let pr = repo
             .get_max_weight_for_exercise("user1", "ex-bench-press")
@@ -1163,9 +1317,16 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let logs = repo
             .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
@@ -1173,9 +1334,16 @@ mod tests {
             .unwrap();
         assert!(logs[0].is_pr); // 100.0 is the only set, so it's PR
 
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let logs = repo
             .find_logs_by_session_with_pr(&session.id, "user1", recent_pr_window_start())
@@ -1196,11 +1364,25 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
         let heavy_log = repo
-            .create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
+            .create_log(NewWorkoutLog {
+                session_id: &session.id,
+                exercise_id: "ex-bench-press",
+                set_number: 2,
+                reps: 8,
+                weight: 110.0,
+                rpe: None,
+            })
             .await
             .unwrap();
 
@@ -1325,19 +1507,47 @@ mod tests {
         let session = repo.create_session("user1", date, None).await.unwrap();
 
         // Bench press: latest set (105) is lower than max (110)
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, Some(8))
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 3,
+            reps: 5,
+            weight: 105.0,
+            rpe: Some(8),
+        })
+        .await
+        .unwrap();
         // Squat: single set, no RPE recorded
-        repo.create_log(&session.id, "ex-squat", 1, 5, 150.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-squat",
+            set_number: 1,
+            reps: 5,
+            weight: 150.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let entries = repo
             .get_last_weight_per_exercise_by_user("user1")
@@ -1494,9 +1704,16 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let session = repo.create_session("user1", date, None).await.unwrap();
 
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let logs = repo
             .find_logs_by_session_for_share(&session.id)
@@ -1556,15 +1773,36 @@ mod tests {
         let session = repo.create_session("user1", date, None).await.unwrap();
 
         // Three sets: 100x10, 110x8, 105x5 — top weight 110 with 8 reps; volume = 1000+880+525 = 2405
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 110.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 3, 5, 105.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 3,
+            reps: 5,
+            weight: 105.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let metrics = repo
             .get_session_metrics_for_exercise("user1", "ex-bench-press")
@@ -1595,15 +1833,36 @@ mod tests {
         let s_old = repo.create_session("user1", d_old, None).await.unwrap();
         let s_new = repo.create_session("user1", d_new, None).await.unwrap();
 
-        repo.create_log(&s_mid.id, "ex-bench-press", 1, 5, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&s_old.id, "ex-bench-press", 1, 5, 90.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&s_new.id, "ex-bench-press", 1, 5, 110.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &s_mid.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &s_old.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 5,
+            weight: 90.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &s_new.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 5,
+            weight: 110.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let metrics = repo
             .get_session_metrics_for_exercise("user1", "ex-bench-press")
@@ -1628,12 +1887,26 @@ mod tests {
         let session = repo.create_session("user1", date, None).await.unwrap();
 
         // Bench: 100x10 (volume 1000), Squat: 200x5 (volume 1000) — same session.
-        repo.create_log(&session.id, "ex-bench-press", 1, 10, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-squat", 1, 5, 200.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 10,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-squat",
+            set_number: 1,
+            reps: 5,
+            weight: 200.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let metrics = repo
             .get_session_metrics_for_exercise("user1", "ex-bench-press")
@@ -1659,12 +1932,26 @@ mod tests {
         let s1 = repo.create_session("user1", date, None).await.unwrap();
         let s2 = repo.create_session("user2", date, None).await.unwrap();
 
-        repo.create_log(&s1.id, "ex-bench-press", 1, 5, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&s2.id, "ex-bench-press", 1, 5, 200.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &s1.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &s2.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 5,
+            weight: 200.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let metrics = repo
             .get_session_metrics_for_exercise("user1", "ex-bench-press")
@@ -1686,15 +1973,36 @@ mod tests {
         let session = repo.create_session("user1", date, None).await.unwrap();
 
         // Same max weight 100, two different rep counts. Tie-break must select 8 reps.
-        repo.create_log(&session.id, "ex-bench-press", 1, 5, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 2, 8, 100.0, None)
-            .await
-            .unwrap();
-        repo.create_log(&session.id, "ex-bench-press", 3, 6, 100.0, None)
-            .await
-            .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 1,
+            reps: 5,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 2,
+            reps: 8,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
+        repo.create_log(NewWorkoutLog {
+            session_id: &session.id,
+            exercise_id: "ex-bench-press",
+            set_number: 3,
+            reps: 6,
+            weight: 100.0,
+            rpe: None,
+        })
+        .await
+        .unwrap();
 
         let metrics = repo
             .get_session_metrics_for_exercise("user1", "ex-bench-press")

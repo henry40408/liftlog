@@ -325,16 +325,8 @@ pub async fn create_test_workout(
 #[allow(dead_code)]
 pub async fn create_test_log(
     pool: &DbPool,
-    session_id: &str,
-    exercise_id: &str,
-    set_number: i32,
-    reps: i32,
-    weight: f64,
-    rpe: Option<i32>,
+    new_log: liftlog::repositories::NewWorkoutLog<'_>,
 ) -> liftlog::models::WorkoutLog {
     let workout_repo = liftlog::repositories::WorkoutRepository::new(pool.clone());
-    workout_repo
-        .create_log(session_id, exercise_id, set_number, reps, weight, rpe)
-        .await
-        .unwrap()
+    workout_repo.create_log(new_log).await.unwrap()
 }
