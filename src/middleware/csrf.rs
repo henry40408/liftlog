@@ -11,7 +11,7 @@ use axum::{
 };
 use tower_http::csrf::{ProtectionError, ProtectionErrorKind};
 
-use crate::audit::AuditContext;
+use crate::audit::{AuditContext, RequestPieces};
 
 /// Client-IP attribution inputs; not `SessionLayerState`, as this runs outside
 /// session validation.
@@ -50,13 +50,13 @@ pub async fn log_csrf_rejection(
     let (Some(err), Some(pending)) = (res.extensions().get::<ProtectionError>(), pending) else {
         return res;
     };
-    let ctx = AuditContext::from_request_pieces(
-        &pending.extensions,
-        &pending.headers,
-        &pending.path,
-        layer.trusted_proxy_header,
-        &layer.trusted_proxies,
-    );
+    let ctx = AuditContext::from_request_pieces(RequestPieces {
+        extensions: &pending.extensions,
+        headers: &pending.headers,
+        path: &pending.path,
+        trusted_proxy_header: layer.trusted_proxy_header,
+        trusted_proxies: &layer.trusted_proxies,
+    });
     let origin = header_str(pending.headers.get(header::ORIGIN));
     crate::audit::csrf_rejected(
         &ctx,

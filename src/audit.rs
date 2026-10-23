@@ -25,20 +25,31 @@ const MAX_USER_AGENT_LEN: usize = 256;
 const MAX_USERNAME_LEN: usize = 256;
 const MAX_ORIGIN_LEN: usize = 256;
 
+/// Borrowed parts of a request, for building an [`AuditContext`] without
+/// `AppState`.
+pub struct RequestPieces<'a> {
+    pub extensions: &'a axum::http::Extensions,
+    pub headers: &'a axum::http::HeaderMap,
+    pub path: &'a str,
+    pub trusted_proxy_header: TrustedProxyHeader,
+    pub trusted_proxies: &'a [IpAddr],
+}
+
 impl AuditContext {
     /// For callers holding a `Request` rather than `AppState`
     /// (`sliding_session_middleware`).
-    pub fn from_request_pieces(
-        extensions: &axum::http::Extensions,
-        headers: &axum::http::HeaderMap,
-        path: &str,
-        header: TrustedProxyHeader,
-        trusted_proxies: &[IpAddr],
-    ) -> Self {
+    pub fn from_request_pieces(pieces: RequestPieces<'_>) -> Self {
+        let RequestPieces {
+            extensions,
+            headers,
+            path,
+            trusted_proxy_header,
+            trusted_proxies,
+        } = pieces;
         let peer = extensions
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
             .map(|ci| ci.0.ip());
-        let client_ip = crate::net::client_ip(peer, headers, header, trusted_proxies);
+        let client_ip = crate::net::client_ip(peer, headers, trusted_proxy_header, trusted_proxies);
 
         let user_agent = headers
             .get(axum::http::header::USER_AGENT)
@@ -72,13 +83,13 @@ impl FromRequestParts<AppState> for AuditContext {
         // have none, so fall back to building one.
         let ctx = match parts.extensions.get::<Self>() {
             Some(ctx) => ctx.clone(),
-            None => Self::from_request_pieces(
-                &parts.extensions,
-                &parts.headers,
-                parts.uri.path(),
-                state.trusted_proxy_header,
-                &state.trusted_proxies,
-            ),
+            None => Self::from_request_pieces(RequestPieces {
+                extensions: &parts.extensions,
+                headers: &parts.headers,
+                path: parts.uri.path(),
+                trusted_proxy_header: state.trusted_proxy_header,
+                trusted_proxies: &state.trusted_proxies,
+            }),
         };
 
         std::future::ready(Ok(ctx))
@@ -153,13 +164,20 @@ pub fn reauth_throttled(ctx: &AuditContext, actor_session_fp: &str, user_id: &st
     );
 }
 
-pub fn session_created(
-    ctx: &AuditContext,
-    session_fp: &str,
-    user_id: &str,
-    username: &str,
-    reason: &str,
-) {
+pub struct SessionCreated<'a> {
+    pub session_fp: &'a str,
+    pub user_id: &'a str,
+    pub username: &'a str,
+    pub reason: &'a str,
+}
+
+pub fn session_created(ctx: &AuditContext, created: SessionCreated<'_>) {
+    let SessionCreated {
+        session_fp,
+        user_id,
+        username,
+        reason,
+    } = created;
     tracing::info!(
         target: "liftlog::audit",
         event = "session.created",
@@ -202,15 +220,22 @@ pub fn session_destroyed(ctx: &AuditContext, session_fp: &str, user_id: &str, re
     );
 }
 
+pub struct BulkSessionsDestroyed<'a> {
+    pub actor_session_fp: &'a str,
+    pub user_id: &'a str,
+    pub count: usize,
+    pub reason: &'a str,
+}
+
 /// Bulk delete. No `session_fp`: `actor_session_fp` is who acted, not a
 /// session that died.
-pub fn sessions_destroyed_bulk(
-    ctx: &AuditContext,
-    actor_session_fp: &str,
-    user_id: &str,
-    count: usize,
-    reason: &str,
-) {
+pub fn sessions_destroyed_bulk(ctx: &AuditContext, destroyed: BulkSessionsDestroyed<'_>) {
+    let BulkSessionsDestroyed {
+        actor_session_fp,
+        user_id,
+        count,
+        reason,
+    } = destroyed;
     tracing::info!(
         target: "liftlog::audit",
         event = "session.destroyed",
@@ -294,13 +319,13 @@ mod tests {
         headers.insert(axum::http::header::USER_AGENT, ua.parse().unwrap());
         let extensions = axum::http::Extensions::new();
 
-        let ctx = AuditContext::from_request_pieces(
-            &extensions,
-            &headers,
-            "/",
-            TrustedProxyHeader::None,
-            &[],
-        );
+        let ctx = AuditContext::from_request_pieces(RequestPieces {
+            extensions: &extensions,
+            headers: &headers,
+            path: "/",
+            trusted_proxy_header: TrustedProxyHeader::None,
+            trusted_proxies: &[],
+        });
 
         let got = ctx.user_agent.expect("user agent should be present");
         assert!(got.chars().count() <= MAX_USER_AGENT_LEN);
@@ -372,13 +397,13 @@ mod tests {
         let headers = axum::http::HeaderMap::new();
         let extensions = axum::http::Extensions::new();
 
-        let ctx = AuditContext::from_request_pieces(
-            &extensions,
-            &headers,
-            "/",
-            TrustedProxyHeader::None,
-            &[],
-        );
+        let ctx = AuditContext::from_request_pieces(RequestPieces {
+            extensions: &extensions,
+            headers: &headers,
+            path: "/",
+            trusted_proxy_header: TrustedProxyHeader::None,
+            trusted_proxies: &[],
+        });
 
         assert!(ctx.user_agent.is_none());
     }
@@ -388,13 +413,13 @@ mod tests {
         let headers = axum::http::HeaderMap::new();
         let extensions = axum::http::Extensions::new();
 
-        let ctx = AuditContext::from_request_pieces(
-            &extensions,
-            &headers,
-            "/",
-            TrustedProxyHeader::None,
-            &[],
-        );
+        let ctx = AuditContext::from_request_pieces(RequestPieces {
+            extensions: &extensions,
+            headers: &headers,
+            path: "/",
+            trusted_proxy_header: TrustedProxyHeader::None,
+            trusted_proxies: &[],
+        });
 
         assert_eq!(ctx.client_ip, "127.0.0.1".parse::<IpAddr>().unwrap());
     }
@@ -406,13 +431,13 @@ mod tests {
         let peer: std::net::SocketAddr = "203.0.113.9:1234".parse().unwrap();
         extensions.insert(axum::extract::ConnectInfo(peer));
 
-        let ctx = AuditContext::from_request_pieces(
-            &extensions,
-            &headers,
-            "/",
-            TrustedProxyHeader::None,
-            &[],
-        );
+        let ctx = AuditContext::from_request_pieces(RequestPieces {
+            extensions: &extensions,
+            headers: &headers,
+            path: "/",
+            trusted_proxy_header: TrustedProxyHeader::None,
+            trusted_proxies: &[],
+        });
 
         assert_eq!(ctx.client_ip, "203.0.113.9".parse::<IpAddr>().unwrap());
     }

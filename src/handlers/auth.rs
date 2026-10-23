@@ -129,10 +129,12 @@ pub async fn login_submit(
         state.login_rate_limiter.release(ip);
         audit::session_created(
             &audit_ctx,
-            &token_fingerprint(&token, state.log_salt.as_ref()),
-            &user.id,
-            &user.username,
-            "login",
+            audit::SessionCreated {
+                session_fp: &token_fingerprint(&token, state.log_salt.as_ref()),
+                user_id: &user.id,
+                username: &user.username,
+                reason: "login",
+            },
         );
         let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
         let mut response = (jar, Redirect::to("/")).into_response();
@@ -202,10 +204,12 @@ pub async fn setup_submit(
     let token = state.session_repo.create(&user.id).await?;
     audit::session_created(
         &audit_ctx,
-        &token_fingerprint(&token, state.log_salt.as_ref()),
-        &user.id,
-        &user.username,
-        "setup",
+        audit::SessionCreated {
+            session_fp: &token_fingerprint(&token, state.log_salt.as_ref()),
+            user_id: &user.id,
+            username: &user.username,
+            reason: "setup",
+        },
     );
     let jar = jar.add(create_session_cookie(&token, state.cookie_secure));
 
@@ -501,10 +505,12 @@ pub async fn delete_user(
         let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
         audit::sessions_destroyed_bulk(
             &audit_ctx,
-            &actor_fp,
-            &user_id,
-            sessions_destroyed,
-            "admin_user_delete",
+            audit::BulkSessionsDestroyed {
+                actor_session_fp: &actor_fp,
+                user_id: &user_id,
+                count: sessions_destroyed,
+                reason: "admin_user_delete",
+            },
         );
     }
 
@@ -542,7 +548,15 @@ pub async fn promote_user(
     if promoted {
         let destroyed = state.session_repo.delete_all_for_user(&user_id).await?;
         let actor_fp = token_fingerprint(&admin_user.session_token, state.log_salt.as_ref());
-        audit::sessions_destroyed_bulk(&audit_ctx, &actor_fp, &user_id, destroyed, "role_change");
+        audit::sessions_destroyed_bulk(
+            &audit_ctx,
+            audit::BulkSessionsDestroyed {
+                actor_session_fp: &actor_fp,
+                user_id: &user_id,
+                count: destroyed,
+                reason: "role_change",
+            },
+        );
     }
 
     Ok(Redirect::to("/users").into_response())
