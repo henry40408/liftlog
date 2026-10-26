@@ -12,7 +12,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # `e2e` is a separate workspace and must be named to be cached.
+          workspaces: |
+            .
+            e2e
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Outside `cargo deny`: none of the browser stack ships.
+      - name: Check E2E formatting
+        working-directory: e2e
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy on E2E
+        working-directory: e2e
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,23 +60,16 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
       - name: Build
         run: cargo build --verbose
 
       - uses: taiki-e/install-action@8c6986fc38d22c217606a7ad4f1d438eced263e0 # nextest
-        if: runner.os != 'Linux'
 
       - name: Run tests
-        if: runner.os != 'Linux'
         run: cargo nextest run
 
   deny:
+    name: deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,6 +80,7 @@ jobs:
         run: cargo deny check
 
   e2e:
+    name: e2e
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -76,22 +103,13 @@ jobs:
       - name: Build server
         run: cargo build
 
-      # Linted here to share this job's build. Outside `cargo deny`: none of
-      # the browser stack ships.
-      - name: Check E2E formatting
-        working-directory: e2e
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy on E2E
-        working-directory: e2e
-        run: cargo clippy --all-targets -- -D warnings
-
       # The runner ships Chrome; thirtyfour downloads chromedriver.
       - name: Run E2E tests
         working-directory: e2e
         run: cargo test --test e2e
 
   coverage:
+    name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -115,3 +133,23 @@ jobs:
           slug: henry40408/liftlog
           files: lcov.info
           fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
+
+  lint-workflow:
+    name: lint-workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # install-action has no actionlint manifest, so download the release and
+      # verify its checksum.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$archive" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "$archive" actionlint
+      - run: ./actionlint
