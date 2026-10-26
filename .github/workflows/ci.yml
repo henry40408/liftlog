@@ -12,7 +12,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # `e2e` is a separate workspace and must be named to be cached.
+          workspaces: |
+            .
+            e2e
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Outside `cargo deny`: none of the browser stack ships.
+      - name: Check E2E formatting
+        working-directory: e2e
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy on E2E
+        working-directory: e2e
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,12 +60,6 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
       - name: Build
         run: cargo build --verbose
 
@@ -44,6 +71,7 @@ jobs:
         run: cargo nextest run
 
   deny:
+    name: deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,6 +82,7 @@ jobs:
         run: cargo deny check
 
   e2e:
+    name: e2e
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -76,22 +105,13 @@ jobs:
       - name: Build server
         run: cargo build
 
-      # Linted here to share this job's build. Outside `cargo deny`: none of
-      # the browser stack ships.
-      - name: Check E2E formatting
-        working-directory: e2e
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy on E2E
-        working-directory: e2e
-        run: cargo clippy --all-targets -- -D warnings
-
       # The runner ships Chrome; thirtyfour downloads chromedriver.
       - name: Run E2E tests
         working-directory: e2e
         run: cargo test --test e2e
 
   coverage:
+    name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
