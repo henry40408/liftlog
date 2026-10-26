@@ -64,10 +64,8 @@ jobs:
         run: cargo build --verbose
 
       - uses: taiki-e/install-action@8c6986fc38d22c217606a7ad4f1d438eced263e0 # nextest
-        if: runner.os != 'Linux'
 
       - name: Run tests
-        if: runner.os != 'Linux'
         run: cargo nextest run
 
   deny:
