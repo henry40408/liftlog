@@ -16,7 +16,7 @@ cucumber = "0.23.0"
 # Plain HTTP to 127.0.0.1 only, so no TLS.
 reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "form"] }
 serde_json = "1.0.145"
-thirtyfour = "0.37.5"
+thirtyfour = "0.38.1"
 tokio = { version = "1.53.1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
 
 [[test]]
