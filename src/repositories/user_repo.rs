@@ -82,6 +82,7 @@ impl UserRepository {
                 password_hash,
                 role,
                 created_at: now,
+                timezone: None,
             };
 
             let conn = pool.get()?;
@@ -164,6 +165,40 @@ impl UserRepository {
             let rows = conn.execute(
                 "UPDATE users SET role = ? WHERE id = ?",
                 rusqlite::params![role.as_str(), id],
+            )?;
+            Ok(rows > 0)
+        })
+        .await?
+    }
+
+    /// `None` when the user is missing or has not chosen a timezone.
+    pub async fn find_timezone(&self, user_id: &str) -> Result<Option<String>> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let timezone: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT timezone FROM users WHERE id = ?",
+                    [&user_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(timezone.flatten())
+        })
+        .await?
+    }
+
+    /// The caller must validate `timezone` (see `crate::timezone::parse`).
+    pub async fn set_timezone(&self, user_id: &str, timezone: &str) -> Result<bool> {
+        let pool = self.pool.clone();
+        let user_id = user_id.to_string();
+        let timezone = timezone.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let rows = conn.execute(
+                "UPDATE users SET timezone = ? WHERE id = ?",
+                rusqlite::params![timezone, user_id],
             )?;
             Ok(rows > 0)
         })

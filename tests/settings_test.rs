@@ -938,3 +938,98 @@ async fn test_change_password_rejects_reusing_the_current_password() {
         "other sessions must survive a refused change"
     );
 }
+
+async fn post_timezone(
+    test_app: common::TestApp,
+    cookie_header: &str,
+    timezone: &str,
+) -> axum::response::Response {
+    test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/timezone")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, cookie_header)
+                .body(Body::from(format!("timezone={timezone}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_change_timezone_saves_name() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = post_timezone(test_app, &cookie_header, "Asia/Taipei").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = UserRepository::new(pool)
+        .find_timezone(&user.id)
+        .await
+        .unwrap();
+    assert_eq!(stored.as_deref(), Some("Asia/Taipei"));
+}
+
+#[tokio::test]
+async fn test_change_timezone_rejects_unknown_name() {
+    let pool = common::setup_test_db();
+    let test_app = common::create_test_app_with_session(pool.clone());
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let response = post_timezone(test_app, &cookie_header, "Not/AZone").await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let stored = UserRepository::new(pool)
+        .find_timezone(&user.id)
+        .await
+        .unwrap();
+    assert_eq!(stored, None);
+}
+
+async fn dashboard_body(test_app: common::TestApp, cookie_header: &str) -> String {
+    let response = test_app
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, cookie_header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    String::from_utf8_lossy(&body).into_owned()
+}
+
+#[tokio::test]
+async fn test_dashboard_prompts_for_timezone_until_one_is_saved() {
+    let pool = common::setup_test_db();
+    let user = common::create_test_user(&pool, "testuser", "password123", UserRole::User).await;
+    let session_cookie = common::create_session_cookie(&pool, &user).await;
+    let cookie_header = common::extract_cookie_header(&session_cookie);
+
+    let before = dashboard_body(
+        common::create_test_app_with_session(pool.clone()),
+        &cookie_header,
+    )
+    .await;
+    assert!(before.contains("Your timezone is not set"));
+
+    UserRepository::new(pool.clone())
+        .set_timezone(&user.id, "Asia/Taipei")
+        .await
+        .unwrap();
+    let after = dashboard_body(common::create_test_app_with_session(pool), &cookie_header).await;
+    assert!(!after.contains("Your timezone is not set"));
+}

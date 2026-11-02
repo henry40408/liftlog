@@ -475,15 +475,15 @@ impl WorkoutRepository {
         .await?
     }
 
-    pub async fn count_workouts_this_week(&self, user_id: &str) -> Result<i64> {
+    pub async fn count_workouts_this_week(&self, user_id: &str, since: NaiveDate) -> Result<i64> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM workout_sessions
-                 WHERE user_id = ? AND date >= date('now', '-7 days')",
-                [&user_id],
+                 WHERE user_id = ? AND date >= ?",
+                rusqlite::params![user_id, since],
                 |row| row.get(0),
             )?;
             Ok(count)
@@ -491,15 +491,15 @@ impl WorkoutRepository {
         .await?
     }
 
-    pub async fn count_workouts_this_month(&self, user_id: &str) -> Result<i64> {
+    pub async fn count_workouts_this_month(&self, user_id: &str, since: NaiveDate) -> Result<i64> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
             let count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM workout_sessions
-                 WHERE user_id = ? AND date >= date('now', '-30 days')",
-                [&user_id],
+                 WHERE user_id = ? AND date >= ?",
+                rusqlite::params![user_id, since],
                 |row| row.get(0),
             )?;
             Ok(count)
@@ -507,7 +507,7 @@ impl WorkoutRepository {
         .await?
     }
 
-    pub async fn get_total_volume_this_week(&self, user_id: &str) -> Result<f64> {
+    pub async fn get_total_volume_this_week(&self, user_id: &str, since: NaiveDate) -> Result<f64> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -517,8 +517,8 @@ impl WorkoutRepository {
                     "SELECT SUM(wl.weight * wl.reps)
                      FROM workout_logs wl
                      JOIN workout_sessions ws ON wl.session_id = ws.id
-                     WHERE ws.user_id = ? AND ws.date >= date('now', '-7 days')",
-                    [&user_id],
+                     WHERE ws.user_id = ? AND ws.date >= ?",
+                    rusqlite::params![user_id, since],
                     |row| row.get(0),
                 )
                 .optional()?
@@ -1454,9 +1454,36 @@ mod tests {
         create_test_user(&pool, "user1");
         let repo = WorkoutRepository::new(pool);
 
-        let count = repo.count_workouts_this_week("user1").await.unwrap();
+        let count = repo
+            .count_workouts_this_week("user1", NaiveDate::from_ymd_opt(2026, 11, 3).unwrap())
+            .await
+            .unwrap();
 
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn window_counts_sessions_by_calendar_date_not_utc_now() {
+        let pool = setup_test_db();
+        create_test_user(&pool, "user1");
+        let repo = WorkoutRepository::new(pool);
+        let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
+        for d in [2, 3, 9] {
+            repo.create_session("user1", day(d), None).await.unwrap();
+        }
+
+        // The window start is inclusive and supplied by the caller.
+        let count = repo
+            .count_workouts_this_week("user1", day(3))
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let count = repo
+            .count_workouts_this_month("user1", day(2))
+            .await
+            .unwrap();
+        assert_eq!(count, 3);
     }
 
     #[tokio::test]
@@ -1465,7 +1492,10 @@ mod tests {
         create_test_user(&pool, "user1");
         let repo = WorkoutRepository::new(pool);
 
-        let count = repo.count_workouts_this_month("user1").await.unwrap();
+        let count = repo
+            .count_workouts_this_month("user1", NaiveDate::from_ymd_opt(2026, 10, 11).unwrap())
+            .await
+            .unwrap();
 
         assert_eq!(count, 0);
     }
@@ -1477,7 +1507,10 @@ mod tests {
         create_test_user(&pool, "user1");
         let repo = WorkoutRepository::new(pool);
 
-        let volume = repo.get_total_volume_this_week("user1").await.unwrap();
+        let volume = repo
+            .get_total_volume_this_week("user1", NaiveDate::from_ymd_opt(2026, 11, 3).unwrap())
+            .await
+            .unwrap();
 
         assert_eq!(volume, 0.0);
     }
