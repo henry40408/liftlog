@@ -824,6 +824,31 @@
             letter-spacing: 0.04em;
         }
 
+        .alert-warning {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--sp-3);
+            padding: var(--sp-4) var(--sp-5);
+            font-size: var(--font-base);
+            background: var(--gold-muted);
+            border-left: 4px solid var(--gold);
+            color: var(--text-primary);
+        }
+
+        .alert-warning .alert-text::before {
+            content: "TIMEZONE // ";
+            font-family: var(--font-display);
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            color: var(--gold);
+        }
+
+        .alert-warning .btn {
+            flex-shrink: 0;
+        }
+
         .alert-success {
             background: var(--success-muted);
             border-left: 3px solid var(--success);
