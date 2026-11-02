@@ -10,8 +10,6 @@
         <h1>Settings</h1>
     </div>
 
-    <h2>Change Password</h2>
-
     {% if let Some(msg) = success %}
     <div class="alert alert-success" style="margin-bottom: var(--sp-5);">{{ msg }}</div>
     {% endif %}
@@ -19,6 +17,33 @@
     {% if let Some(err) = error %}
     <div class="error">{{ err }}</div>
     {% endif %}
+
+    <h2 id="timezone">Timezone</h2>
+    <p class="muted">Workout dates and the "This Week" / "This Month" stats follow this timezone.</p>
+    <form method="post" action="/settings/timezone">
+        <div class="form-group">
+            <label for="timezone-input">Timezone (IANA name)</label>
+            <input type="text" id="timezone-input" name="timezone" list="timezone-names" required
+                   autocomplete="off" value="{% if let Some(tz) = timezone %}{{ tz }}{% endif %}"
+                   placeholder="Asia/Taipei">
+            <datalist id="timezone-names">
+                {% for name in timezone_names %}<option value="{{ name }}">{% endfor %}
+            </datalist>
+        </div>
+        <button type="submit">Save Timezone</button>
+    </form>
+    <script>
+        /* Prefill with the browser's zone only when none is saved yet. */
+        (function () {
+            var input = document.getElementById('timezone-input');
+            if (!input || input.value) return;
+            try {
+                input.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            } catch (e) { /* leave empty */ }
+        })();
+    </script>
+
+    <h2>Change Password</h2>
 
     <form method="post" action="/settings/password">
         <div class="form-group">

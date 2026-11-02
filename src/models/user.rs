@@ -46,6 +46,8 @@ pub struct User {
     pub password_hash: String,
     pub role: UserRole,
     pub created_at: DateTime<Utc>,
+    /// IANA name; `None` until the user picks one (treated as UTC).
+    pub timezone: Option<String>,
 }
 
 impl FromSqliteRow for User {
@@ -57,6 +59,7 @@ impl FromSqliteRow for User {
             password_hash: row.get("password_hash")?,
             role: UserRole::parse(&role_str),
             created_at: row.get("created_at")?,
+            timezone: row.get("timezone")?,
         })
     }
 }

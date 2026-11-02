@@ -18,6 +18,7 @@ mod repositories;
 mod routes;
 mod session;
 mod state;
+mod timezone;
 mod version;
 
 use config::Config;

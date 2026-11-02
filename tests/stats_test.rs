@@ -55,7 +55,7 @@ async fn test_stats_index_shows_workout_counts() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
     common::create_test_workout(&pool, &user.id, today, Some("Today's workout")).await;
     common::create_test_workout(
         &pool,
@@ -95,7 +95,7 @@ async fn test_stats_index_calculates_volume() {
     let session_cookie = common::create_session_cookie(&pool, &user).await;
     let cookie_header = common::extract_cookie_header(&session_cookie);
 
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
     let exercise = common::create_test_exercise(&pool, &user.id, "Bench Press", "chest").await;
     let workout = common::create_test_workout(&pool, &user.id, today, None).await;
 

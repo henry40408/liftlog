@@ -29,9 +29,10 @@
     <a href="/workouts" class="back-link">&larr; Back to Workouts</a>
 </main>
 
+{% if use_browser_today %}
 <script>
-/* Swap the server's "today" for the browser's, unless the user changed it
-   (e.g. a bfcache restore). */
+/* No saved timezone: swap the server's UTC "today" for the browser's, unless
+   the user changed it (e.g. a bfcache restore). */
 (function () {
     var dateEl = document.getElementById('date');
     if (dateEl.value !== dateEl.dataset.serverToday) {
@@ -43,4 +44,5 @@
     }
 })();
 </script>
+{% endif %}
 {% endblock %}

@@ -12,4 +12,5 @@ pub mod repositories;
 pub mod routes;
 pub mod session;
 pub mod state;
+pub mod timezone;
 pub mod version;

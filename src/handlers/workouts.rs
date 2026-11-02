@@ -33,6 +33,9 @@ struct WorkoutsListTemplate {
 struct NewWorkoutTemplate {
     user: AuthUser,
     today: NaiveDate,
+    /// Without a saved timezone the server only knows UTC, so the page falls
+    /// back to the browser's date.
+    use_browser_today: bool,
     error: Option<String>,
 }
 
@@ -138,12 +141,13 @@ pub async fn list(
     Ok(Html(template.render()?).into_response())
 }
 
-pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
-    let today = chrono::Local::now().date_naive();
+pub async fn new_page(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
+    let timezone = state.user_repo.find_timezone(&auth_user.id).await?;
 
     let template = NewWorkoutTemplate {
         user: auth_user,
-        today,
+        today: crate::timezone::today_in(timezone.as_deref()),
+        use_browser_today: timezone.is_none(),
         error: None,
     };
 

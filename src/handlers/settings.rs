@@ -16,6 +16,7 @@ use crate::models::password_policy_error;
 use crate::repositories::SessionListRow;
 use crate::session::{create_session_cookie, token_fingerprint};
 use crate::state::AppState;
+use crate::timezone;
 use crate::version::GIT_VERSION;
 
 #[derive(Deserialize)]
@@ -25,10 +26,17 @@ pub struct ChangePasswordForm {
     pub confirm_password: String,
 }
 
+#[derive(Deserialize)]
+pub struct TimezoneForm {
+    pub timezone: String,
+}
+
 #[derive(Template)]
 #[template(path = "settings/index.html")]
 struct SettingsTemplate {
     user: AuthUser,
+    timezone: Option<String>,
+    timezone_names: Vec<&'static str>,
     git_version: &'static str,
     error: Option<String>,
     success: Option<String>,
@@ -58,8 +66,11 @@ async fn render_page_with_status(
     status: StatusCode,
 ) -> Result<Response> {
     let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
+    let timezone = state.user_repo.find_timezone(&auth_user.id).await?;
     let template = SettingsTemplate {
         user: auth_user,
+        timezone,
+        timezone_names: chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name()).collect(),
         git_version: GIT_VERSION,
         error: notice.error,
         success: notice.success,
@@ -70,6 +81,34 @@ async fn render_page_with_status(
 
 pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     render_page(&state, auth_user, None, None).await
+}
+
+pub async fn change_timezone(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Form(form): Form<TimezoneForm>,
+) -> Result<Response> {
+    let name = form.timezone.trim();
+    let Some(tz) = timezone::parse(name) else {
+        let message = "Unknown timezone. Pick a name such as Asia/Taipei.".to_string();
+        let notice = PageNotice {
+            error: Some(message),
+            success: None,
+        };
+        return render_page_with_status(&state, auth_user, notice, StatusCode::BAD_REQUEST).await;
+    };
+
+    state
+        .user_repo
+        .set_timezone(&auth_user.id, tz.name())
+        .await?;
+    render_page(
+        &state,
+        auth_user,
+        None,
+        Some("Timezone updated.".to_string()),
+    )
+    .await
 }
 
 async fn new_password_error(form: &ChangePasswordForm, username: &str) -> Result<Option<String>> {

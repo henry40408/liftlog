@@ -44,6 +44,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "012_add_workout_share_expires_at.sql",
         include_str!("../migrations/012_add_workout_share_expires_at.sql"),
     ),
+    (
+        "013_add_user_timezone.sql",
+        include_str!("../migrations/013_add_user_timezone.sql"),
+    ),
 ];
 
 /// Applies migrations not yet recorded in `_migrations`.

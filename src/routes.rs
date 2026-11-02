@@ -83,6 +83,7 @@ fn routes() -> Router<AppState> {
         .route("/stats/prs", get(stats::prs_list))
         .route("/settings", get(settings::index))
         .route("/settings/password", post(settings::change_password))
+        .route("/settings/timezone", post(settings::change_timezone))
         .route(
             "/settings/logout-others",
             get(settings::confirm_logout_others).post(settings::logout_others),

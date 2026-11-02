@@ -16,6 +16,13 @@
         <a href="/stats/prs" class="btn btn-ghost">View PRs</a>
     </div>
 
+    {% if timezone_unset %}
+    <div class="alert alert-warning" role="status">
+        <span class="alert-text">Your timezone is not set, so weekly and monthly stats use UTC dates.</span>
+        <a href="/settings#timezone" class="btn btn-primary btn-sm">Set timezone</a>
+    </div>
+    {% endif %}
+
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-value">{{ workouts_this_week }}</div>
