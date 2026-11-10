@@ -330,3 +330,31 @@ pub async fn create_test_log(
     let workout_repo = liftlog::repositories::WorkoutRepository::new(pool.clone());
     workout_repo.create_log(new_log).await.unwrap()
 }
+
+/// File-backed DB with the production pool (size 10), unlike the
+/// `max_size(1)` memory pool, so concurrent requests really overlap.
+/// Deletes the DB file (and WAL/SHM siblings) on drop.
+#[allow(dead_code)]
+pub struct FileTestDb {
+    pub pool: DbPool,
+    path: std::path::PathBuf,
+}
+
+#[allow(dead_code)]
+impl FileTestDb {
+    pub fn new() -> Self {
+        let path =
+            std::env::temp_dir().join(format!("liftlog-it-{}.sqlite3", uuid::Uuid::new_v4()));
+        let pool = liftlog::db::create_pool(path.to_str().unwrap()).expect("file pool");
+        run_migrations_for_tests(&pool).expect("Failed to run migrations");
+        Self { pool, path }
+    }
+}
+
+impl Drop for FileTestDb {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(format!("{}-wal", self.path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", self.path.display()));
+    }
+}

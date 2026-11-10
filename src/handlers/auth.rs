@@ -201,10 +201,14 @@ pub async fn setup_submit(
         return Ok(Html(template.render()?).into_response());
     }
 
-    let user = state
+    // The count check above is only a fast path; this INSERT is the real gate.
+    let Some(user) = state
         .user_repo
-        .create(&form.username, &form.password, UserRole::Admin)
-        .await?;
+        .create_first_admin(&form.username, &form.password)
+        .await?
+    else {
+        return Ok(Redirect::to("/auth/login").into_response());
+    };
 
     let token = state.session_repo.create(&user.id).await?;
     audit::session_created(

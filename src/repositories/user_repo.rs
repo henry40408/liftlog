@@ -101,6 +101,44 @@ impl UserRepository {
         .await?
     }
 
+    /// Creates the admin only if the users table is empty. Returns `None` when
+    /// another request got there first. The check and the INSERT are one
+    /// statement, so concurrent setups cannot both succeed.
+    pub async fn create_first_admin(&self, username: &str, password: &str) -> Result<Option<User>> {
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let password = password.to_string();
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+
+        tokio::task::spawn_blocking(move || {
+            let password_hash = hash_password(&password)?;
+            let user = User {
+                id,
+                username,
+                password_hash,
+                role: UserRole::Admin,
+                created_at: now,
+                timezone: None,
+            };
+
+            let conn = pool.get()?;
+            let inserted = conn.execute(
+                "INSERT INTO users (id, username, password_hash, role, created_at) \
+                 SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)",
+                rusqlite::params![
+                    user.id,
+                    user.username,
+                    user.password_hash,
+                    user.role.as_str(),
+                    user.created_at
+                ],
+            )?;
+            Ok((inserted == 1).then_some(user))
+        })
+        .await?
+    }
+
     pub async fn change_password(&self, user_id: &str, new_password: &str) -> Result<bool> {
         let pool = self.pool.clone();
         let user_id = user_id.to_string();
