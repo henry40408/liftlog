@@ -10,6 +10,9 @@ ignore = [
     # basic-toml is unmaintained and has no patched version; askama_derive still
     # depends on it. Remove once askama drops it. Tracked in #214.
     "RUSTSEC-2026-0374",
+    # pin-utils is unmaintained with no safe upgrade; pulled in by hyper 1.8.1.
+    # Remove once hyper drops it. Tracked in #232.
+    "RUSTSEC-2026-0441",
 ]
 
 [licenses]
