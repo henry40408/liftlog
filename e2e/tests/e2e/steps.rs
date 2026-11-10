@@ -112,6 +112,20 @@ async fn submit_setup(world: &mut LiftLogWorld, username: String, password: Stri
     world.setup_page()?.submit(&username, &password).await
 }
 
+#[when(
+    expr = "I submit the setup form with username {string} and password {string} and a wrong token"
+)]
+async fn submit_setup_wrong_token(
+    world: &mut LiftLogWorld,
+    username: String,
+    password: String,
+) -> Result<()> {
+    world
+        .setup_page()?
+        .submit_with_token(&username, &password, "ZZZZZ-ZZZZZ")
+        .await
+}
+
 #[then(expr = "I see the setup error {string}")]
 async fn see_setup_error(world: &mut LiftLogWorld, message: String) -> Result<()> {
     eventually_eq("the URL", "/auth/setup", || async { world.path().await }).await?;

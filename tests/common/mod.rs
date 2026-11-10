@@ -5,6 +5,7 @@ use liftlog::migrations::run_migrations_for_tests;
 use liftlog::models::{User, UserRole};
 use liftlog::repositories::{SessionRepository, UserRepository};
 
+#[allow(dead_code)]
 pub fn setup_test_db() -> DbPool {
     let pool = create_memory_pool().expect("Failed to create test database");
     run_migrations_for_tests(&pool).expect("Failed to run migrations");
@@ -13,12 +14,19 @@ pub fn setup_test_db() -> DbPool {
 
 pub struct TestApp {
     pub router: Router,
+    #[allow(dead_code)]
+    pub setup_token: std::sync::Arc<liftlog::setup_token::SetupToken>,
 }
 
 /// Passes `password_policy_error`, for tests not about password strength.
 /// Form-encoding-safe.
 #[allow(dead_code)]
 pub const STRONG_PASSWORD: &str = "purple-monkey-dishwasher";
+
+/// The setup token every test app starts with; there is deliberately no way to
+/// set it in production.
+#[allow(dead_code)]
+pub const TEST_SETUP_TOKEN: &str = "ABCDE-FGHJK";
 
 /// Budget for whichever limiter a helper is not exercising.
 const GENEROUS_MAX_ATTEMPTS: u32 = 100;
@@ -57,6 +65,7 @@ pub fn create_test_app_with_password_change_limit(
         Vec::new(),
         0,
         false,
+        GENEROUS_MAX_ATTEMPTS,
     )
 }
 
@@ -79,6 +88,7 @@ pub fn create_test_app_with_rate_limit(
         Vec::new(),
         0,
         false,
+        GENEROUS_MAX_ATTEMPTS,
     )
 }
 
@@ -97,6 +107,7 @@ pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> 
         Vec::new(),
         0,
         false,
+        GENEROUS_MAX_ATTEMPTS,
     )
 }
 
@@ -123,6 +134,7 @@ pub fn create_test_app_with_proxy_header(
         trusted_proxies,
         0,
         false,
+        GENEROUS_MAX_ATTEMPTS,
     )
 }
 
@@ -142,6 +154,27 @@ pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains:
         Vec::new(),
         max_age,
         include_subdomains,
+        GENEROUS_MAX_ATTEMPTS,
+    )
+}
+
+/// Tightens only the setup throttle.
+#[allow(dead_code)]
+pub fn create_test_app_with_setup_limit(pool: DbPool, max_attempts: u32) -> TestApp {
+    build_test_app(
+        pool,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
+        GENEROUS_MAX_ATTEMPTS,
+        GENEROUS_WINDOW,
+        NO_BACKOFF_FREE_ATTEMPTS,
+        NO_BACKOFF_BASE,
+        false,
+        liftlog::config::TrustedProxyHeader::None,
+        Vec::new(),
+        0,
+        false,
+        max_attempts,
     )
 }
 
@@ -165,6 +198,7 @@ pub fn create_test_app_with_login_backoff(
         Vec::new(),
         0,
         false,
+        GENEROUS_MAX_ATTEMPTS,
     )
 }
 
@@ -182,18 +216,24 @@ fn build_test_app(
     trusted_proxies: Vec<std::net::IpAddr>,
     hsts_max_age: u64,
     hsts_include_subdomains: bool,
+    setup_max_attempts: u32,
 ) -> TestApp {
     use liftlog::rate_limit::{FailureBackoff, RateLimiter};
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
     use liftlog::state::AppState;
     use std::sync::Arc;
 
+    let setup_token = Arc::new(liftlog::setup_token::SetupToken::with_value(
+        TEST_SETUP_TOKEN,
+    ));
     let app_state = AppState {
         user_repo: UserRepository::new(pool.clone()),
         exercise_repo: ExerciseRepository::new(pool.clone()),
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
         login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
+        setup_rate_limiter: Arc::new(RateLimiter::new(setup_max_attempts, GENEROUS_WINDOW)),
+        setup_token: setup_token.clone(),
         login_backoff: Arc::new(FailureBackoff::new(
             backoff_free_attempts,
             backoff_base,
@@ -216,7 +256,10 @@ fn build_test_app(
 
     let router = liftlog::routes::create_router(app_state);
 
-    TestApp { router }
+    TestApp {
+        router,
+        setup_token,
+    }
 }
 
 #[allow(dead_code)]

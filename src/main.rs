@@ -17,6 +17,7 @@ mod rate_limit;
 mod repositories;
 mod routes;
 mod session;
+mod setup_token;
 mod state;
 mod timezone;
 mod version;
@@ -26,6 +27,7 @@ use migrations::run_migrations;
 use rand_core::RngCore;
 use rate_limit::{FailureBackoff, RateLimiter};
 use repositories::{ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository};
+use setup_token::SetupToken;
 use state::AppState;
 use std::sync::Arc;
 use std::time::Duration;
@@ -86,6 +88,9 @@ fn build_app_state(config: &Config, pool: &db::DbPool) -> AppState {
         login_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(60))),
         login_backoff: Arc::new(FailureBackoff::for_login()),
         sensitive_action_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
+        setup_rate_limiter: Arc::new(RateLimiter::new(5, Duration::from_secs(15 * 60))),
+        // `announce_setup_token` replaces this once the user count is known.
+        setup_token: Arc::new(SetupToken::default()),
         trusted_proxy_header: config.trusted_proxy_header,
         trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         cookie_secure: config.cookie_secure,
@@ -93,6 +98,18 @@ fn build_app_state(config: &Config, pool: &db::DbPool) -> AppState {
         hsts_include_subdomains: config.hsts_include_subdomains,
         log_salt: Arc::new(log_salt),
     }
+}
+
+/// Issues the setup token on an empty install and prints it on stderr only.
+/// The token must never reach `tracing`: log pipelines are often shipped
+/// elsewhere, and the token is the only thing guarding first-run setup.
+async fn announce_setup_token(user_repo: &UserRepository) -> anyhow::Result<SetupToken> {
+    let token = SetupToken::for_user_count(user_repo.count().await?);
+    if let Some(value) = token.current() {
+        eprintln!("Setup token: {value}");
+        tracing::info!("Setup token issued: see the line starting with \"Setup token\" on stderr");
+    }
+    Ok(token)
 }
 
 /// Hourly sweep for sessions never revisited (`validate_and_touch` only
@@ -192,7 +209,8 @@ async fn main() -> anyhow::Result<()> {
 
     run_migrations(&pool)?;
 
-    let app_state = build_app_state(&config, &pool);
+    let mut app_state = build_app_state(&config, &pool);
+    app_state.setup_token = Arc::new(announce_setup_token(&app_state.user_repo).await?);
 
     // Stops the sweep before the WAL checkpoint.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -297,6 +315,48 @@ mod tests {
 
         assert_ne!(*first.log_salt, [0u8; 32]);
         assert_ne!(*first.log_salt, *second.log_salt);
+    }
+
+    /// Writer that collects everything `tracing` emits.
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+        type Writer = LogBuffer;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn announce_setup_token_keeps_the_token_out_of_the_log() {
+        let logs = LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(logs.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let user_repo = UserRepository::new(test_pool());
+
+        let token = announce_setup_token(&user_repo).await.unwrap();
+
+        let value = token.current().expect("empty install issues a token");
+        let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert!(logged.contains("Setup token issued"), "got: {logged}");
+        assert!(
+            !logged.contains(&value),
+            "token leaked into the log: {logged}"
+        );
     }
 
     #[test]

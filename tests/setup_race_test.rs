@@ -20,8 +20,9 @@ async fn concurrent_setup_creates_exactly_one_admin() {
                     .uri("/auth/setup")
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(format!(
-                        "username=admin{i}&password={}",
-                        common::STRONG_PASSWORD
+                        "username=admin{i}&password={}&setup_token={}",
+                        common::STRONG_PASSWORD,
+                        common::TEST_SETUP_TOKEN
                     )))
                     .unwrap();
                 let response = router.oneshot(request).await.unwrap();

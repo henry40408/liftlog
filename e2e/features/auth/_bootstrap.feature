@@ -17,3 +17,7 @@ Feature: First-time setup
   Scenario: Setup rejects a long-enough but easily guessed password
     When I submit the setup form with username "tiny" and password "MyPassword12"
     Then I see the setup error "similar to a commonly used password"
+
+  Scenario: Setup rejects a wrong setup token
+    When I submit the setup form with username "tiny" and password "barbell-club-2026" and a wrong token
+    Then I see the setup error "Invalid setup token"

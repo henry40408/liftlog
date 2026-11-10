@@ -6,6 +6,7 @@ use crate::rate_limit::{FailureBackoff, RateLimiter};
 use crate::repositories::{
     ExerciseRepository, SessionRepository, UserRepository, WorkoutRepository,
 };
+use crate::setup_token::SetupToken;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +23,11 @@ pub struct AppState {
     /// user id so a stolen session can't rotate IPs. One budget shared across
     /// routes; 5 per 15 min in `main` (~480/day).
     pub sensitive_action_rate_limiter: Arc<RateLimiter<String>>,
+    /// `POST /auth/setup`, keyed by client IP. Wrong-token attempts are never
+    /// refunded: the setup token can be guessed only online.
+    pub setup_rate_limiter: Arc<RateLimiter<IpAddr>>,
+    /// First-run token; empty once an account exists.
+    pub setup_token: Arc<SetupToken>,
     pub trusted_proxy_header: TrustedProxyHeader,
     pub trusted_proxies: Arc<Vec<IpAddr>>,
     pub cookie_secure: bool,

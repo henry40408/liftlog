@@ -451,7 +451,7 @@ async fn test_setup_creates_admin_user() {
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(format!(
-                    "username=admin&password={}",
+                    "username=admin&password={}&setup_token=ABCDE-FGHJK",
                     common::STRONG_PASSWORD
                 )))
                 .unwrap(),
@@ -481,7 +481,7 @@ async fn test_setup_rejects_empty_username() {
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(format!(
-                    "username=&password={}",
+                    "username=&password={}&setup_token=ABCDE-FGHJK",
                     common::STRONG_PASSWORD
                 )))
                 .unwrap(),
@@ -511,7 +511,9 @@ async fn test_setup_rejects_short_password() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("username=admin&password=short"))
+                .body(Body::from(
+                    "username=admin&password=short&setup_token=ABCDE-FGHJK",
+                ))
                 .unwrap(),
         )
         .await
@@ -541,7 +543,9 @@ async fn test_setup_password_length_boundary() {
                     .method("POST")
                     .uri("/auth/setup")
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .body(Body::from(format!("username=admin&password={password}")))
+                    .body(Body::from(format!(
+                        "username=admin&password={password}&setup_token=ABCDE-FGHJK"
+                    )))
                     .unwrap(),
             )
             .await
@@ -1541,7 +1545,7 @@ async fn test_setup_success_response_is_not_cacheable() {
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(format!(
-                    "username=admin&password={}",
+                    "username=admin&password={}&setup_token=ABCDE-FGHJK",
                     common::STRONG_PASSWORD
                 )))
                 .unwrap(),
@@ -1758,7 +1762,9 @@ async fn test_setup_rejects_over_long_password() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(format!("username=admin&password={too_long}")))
+                .body(Body::from(format!(
+                    "username=admin&password={too_long}&setup_token=ABCDE-FGHJK"
+                )))
                 .unwrap(),
         )
         .await
@@ -1794,7 +1800,9 @@ async fn test_setup_rejects_a_guessable_password() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("username=admin&password=MyPassword12"))
+                .body(Body::from(
+                    "username=admin&password=MyPassword12&setup_token=ABCDE-FGHJK",
+                ))
                 .unwrap(),
         )
         .await
@@ -1826,7 +1834,9 @@ async fn test_setup_rejects_a_password_derived_from_the_username() {
                 .method("POST")
                 .uri("/auth/setup")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("username=henrylifts&password=henrylifts.42x"))
+                .body(Body::from(
+                    "username=henrylifts&password=henrylifts.42x&setup_token=ABCDE-FGHJK",
+                ))
                 .unwrap(),
         )
         .await

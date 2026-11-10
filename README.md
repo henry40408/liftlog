@@ -34,7 +34,7 @@ docker run -d \
   ghcr.io/henry40408/liftlog:latest
 ```
 
-Visit `http://localhost:8080` and create your account.
+Visit `http://localhost:8080` and create your account. The form asks for a **setup token**, which the server prints once at startup while no account exists, on stderr only (never through the structured log), as `Setup token: XXXXX-XXXXX`. Read it with `docker logs liftlog` (which captures stderr) (or the terminal running `./target/release/liftlog`). Dashes, case and spaces do not matter. The token lives in memory only: a restart before the first account issues a new one, and none is issued once any user exists.
 
 ### From source
 
@@ -82,6 +82,7 @@ All configuration is via environment variables:
 - **Per IP:** `POST /auth/login` allows 5 attempts per 60 seconds.
 - **Per account** (keyed by the submitted username): 3 free failures, then each attempt is delayed 1s, 2s, 4s … up to 30s; forgotten after an hour of quiet, cleared by a correct password. Deliberately a delay, **not a lockout** — with no email, no password reset, and a single admin, a lockout would let anyone permanently lock the owner out. Unknown usernames accumulate the same penalty, so the delay reveals nothing.
 - Failed logins cost the same for unknown and existing usernames (an Argon2 check against a dummy hash), so response time doesn't reveal which accounts exist.
+- **First-run setup** (`POST /auth/setup`) needs the setup token from the server's stderr and allows 5 attempts per 15 minutes per IP. A wrong token is never refunded, because the token can only be guessed online; an attempt with the right token that fails the username or password check is refunded. A wrong token answers `403`; an exhausted budget answers `429`. Both are audited.
 - **Password change** (`POST /settings/password`) allows 5 attempts per 15 minutes, keyed by **user id** so a stolen session can't get a fresh budget from new IPs. A successful change refunds its attempt.
 
 ### Passwords
@@ -113,6 +114,8 @@ Security events are structured `tracing` events under the `liftlog::audit` targe
 | `session.rejected` | debug | Unknown session token presented; `debug` so cookie-probing scanners don't drown other events |
 | `auth.login.failed` | warn | Login rejected; carries `username` (≤256 chars) and `backoff_ms`. Identical for unknown users and wrong passwords. A password typed into the username field ends up here. |
 | `auth.login.throttled` | warn | Login refused by the rate limiter |
+| `auth.setup.token_rejected` | warn | First-run setup refused: setup token missing or wrong |
+| `auth.setup.throttled` | warn | First-run setup refused by the per-IP limiter before the token was checked |
 | `auth.reauth.failed` | warn | Wrong password on a re-auth check; carries `user_id`, `actor_session_fp`, `action` (`password_change`, `promote_user`, `delete_user`) |
 | `auth.reauth.throttled` | warn | Re-auth refused by the per-user limiter; same `action` |
 | `csrf.rejected` | warn | State-changing request refused as cross-site; carries `method`, `origin` (≤256 chars), and `reason`: `sec_fetch_site` (browser reported cross-site, `same-site` included) or `origin_fallback` (no `Sec-Fetch-Site`, `Origin` didn't match host and port) |

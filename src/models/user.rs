@@ -150,6 +150,15 @@ pub struct CreateUser {
     pub password: String,
 }
 
+/// The first-run form: a `CreateUser` plus the token from the server's stderr.
+#[derive(Debug, Deserialize)]
+pub struct SetupForm {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub setup_token: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LoginCredentials {
     pub username: String,
