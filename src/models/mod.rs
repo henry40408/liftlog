@@ -16,6 +16,7 @@ pub use personal_record::{
 // `password_policy_error`, so there's one enforcement point.
 pub use user::{
     CreateUser, LoginCredentials, SetupForm, User, UserListItem, UserRole, password_policy_error,
+    username_error,
 };
 pub use workout_log::{CreateWorkoutLog, UpdateWorkoutLog, WorkoutLog, WorkoutLogWithExercise};
 pub use workout_session::{CreateWorkoutSession, WorkoutSession};

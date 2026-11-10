@@ -13,6 +13,7 @@ use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
 use crate::models::{
     CreateUser, LoginCredentials, SetupForm, UserListItem, UserRole, password_policy_error,
+    username_error,
 };
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
@@ -59,11 +60,11 @@ struct UsersListTemplate {
 /// one policy. `spawn_blocking` because the strength check on an
 /// attacker-chosen password can take milliseconds.
 async fn validate_credentials(form: &CreateUser) -> Result<Option<String>> {
-    if form.username.trim().is_empty() {
-        return Ok(Some("Username is required".to_string()));
+    if let Some(message) = username_error(&form.username) {
+        return Ok(Some(message));
     }
     let password = form.password.clone();
-    let username = form.username.clone();
+    let username = form.username.trim().to_string();
     Ok(tokio::task::spawn_blocking(move || {
         password_policy_error(&password, "Password", &[username.as_str()])
     })
@@ -123,6 +124,8 @@ pub async fn login_submit(
         &state.trusted_proxies,
     );
 
+    // The username is deliberately not trimmed here: accounts created before
+    // creation trimmed names may carry spaces and must keep logging in.
     if !state.login_rate_limiter.try_acquire(ip) {
         audit::login_throttled(&audit_ctx, &credentials.username);
         return login_error_page(
@@ -231,7 +234,7 @@ pub async fn setup_submit(
     }
 
     let credentials = CreateUser {
-        username: form.username,
+        username: form.username.trim().to_string(),
         password: form.password,
     };
     if let Some(message) = validate_credentials(&credentials).await? {
@@ -324,12 +327,8 @@ pub async fn new_user_submit(
         return Ok(Html(template.render()?).into_response());
     }
 
-    if state
-        .user_repo
-        .find_by_username(&form.username)
-        .await?
-        .is_some()
-    {
+    let username = form.username.trim();
+    if state.user_repo.find_by_username(username).await?.is_some() {
         let template = NewUserTemplate {
             user: admin_user.0,
             error: Some("Username already exists".to_string()),
@@ -339,7 +338,7 @@ pub async fn new_user_submit(
 
     state
         .user_repo
-        .create(&form.username, &form.password, UserRole::User)
+        .create(username, &form.password, UserRole::User)
         .await?;
 
     Ok(Redirect::to("/users").into_response())
