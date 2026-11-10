@@ -150,6 +150,37 @@ pub struct CreateUser {
     pub password: String,
 }
 
+pub const MAX_USERNAME_LEN: usize = 64;
+
+/// Returns the validation error message, or `None` if `username` is acceptable.
+///
+/// Judges the trimmed value, which is what gets stored. Length is counted in
+/// characters, not bytes.
+pub fn username_error(username: &str) -> Option<String> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Some("Username is required".to_string());
+    }
+    if username.chars().count() > MAX_USERNAME_LEN {
+        return Some(format!(
+            "Username must be at most {MAX_USERNAME_LEN} characters"
+        ));
+    }
+    if username.chars().any(char::is_control) {
+        return Some("Username must not contain control characters".to_string());
+    }
+    None
+}
+
+/// The first-run form: a `CreateUser` plus the token from the server's stderr.
+#[derive(Debug, Deserialize)]
+pub struct SetupForm {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub setup_token: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LoginCredentials {
     pub username: String,
@@ -184,6 +215,44 @@ mod tests {
     fn test_user_role_default() {
         let default_role: UserRole = UserRole::default();
         assert_eq!(default_role, UserRole::User);
+    }
+
+    #[test]
+    fn username_accepts_ordinary_names() {
+        assert_eq!(username_error("henry"), None);
+        assert_eq!(username_error("Lifter 王小明"), None);
+        assert_eq!(username_error(&"a".repeat(MAX_USERNAME_LEN)), None);
+    }
+
+    #[test]
+    fn username_rejects_empty_and_blank() {
+        for blank in ["", "   ", "\u{3000}"] {
+            let message = username_error(blank).expect("blank must be rejected");
+            assert!(message.contains("required"), "got: {message}");
+        }
+    }
+
+    #[test]
+    fn username_is_judged_after_trimming() {
+        assert_eq!(username_error("  henry  "), None);
+        let padded = format!("  {}  ", "a".repeat(MAX_USERNAME_LEN));
+        assert_eq!(username_error(&padded), None);
+    }
+
+    #[test]
+    fn username_rejects_too_long_counting_characters() {
+        let message = username_error(&"a".repeat(MAX_USERNAME_LEN + 1)).expect("65 chars");
+        assert!(message.contains("at most 64"), "got: {message}");
+        // 64 multi-byte characters are over 64 bytes but still allowed.
+        assert_eq!(username_error(&"王".repeat(MAX_USERNAME_LEN)), None);
+    }
+
+    #[test]
+    fn username_rejects_control_characters() {
+        for name in ["a\nb", "a\tb", "a\0b", "a\u{7f}b", "a\u{85}b"] {
+            let message = username_error(name).expect("control chars must be rejected");
+            assert!(message.contains("control"), "{name:?} got: {message}");
+        }
     }
 
     /// Clears the score gate, so the other gate is what fires.

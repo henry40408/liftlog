@@ -4,6 +4,7 @@ use anyhow::Result;
 use thirtyfour::prelude::*;
 
 use super::{click_button, disable_validation, displayed, fill, goto, optional, path, text};
+use crate::server::setup_token;
 use crate::wait::eventually_eq;
 
 /// The login form (`/auth/login`).
@@ -48,8 +49,20 @@ impl SetupPage<'_> {
     /// Fills and submits the form with client-side validation off, so short
     /// passwords reach the server-side check.
     pub async fn submit(&self, username: &str, password: &str) -> Result<()> {
+        self.submit_with_token(username, password, setup_token())
+            .await
+    }
+
+    /// Like [`Self::submit`], with an explicit setup token.
+    pub async fn submit_with_token(
+        &self,
+        username: &str,
+        password: &str,
+        token: &str,
+    ) -> Result<()> {
         self.goto().await?;
         disable_validation(self.0, "form").await?;
+        fill(self.0, "setup_token", token).await?;
         fill(self.0, "username", username).await?;
         fill(self.0, "password", password).await?;
         click_button(self.0, "Create Account").await

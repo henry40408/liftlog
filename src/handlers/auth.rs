@@ -11,7 +11,10 @@ use crate::error::{AppError, Result};
 use crate::handlers::reauth::{self, ReauthAttempt, ReauthOutcome};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
-use crate::models::{CreateUser, LoginCredentials, UserListItem, UserRole, password_policy_error};
+use crate::models::{
+    CreateUser, LoginCredentials, SetupForm, UserListItem, UserRole, password_policy_error,
+    username_error,
+};
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
 
@@ -57,11 +60,11 @@ struct UsersListTemplate {
 /// one policy. `spawn_blocking` because the strength check on an
 /// attacker-chosen password can take milliseconds.
 async fn validate_credentials(form: &CreateUser) -> Result<Option<String>> {
-    if form.username.trim().is_empty() {
-        return Ok(Some("Username is required".to_string()));
+    if let Some(message) = username_error(&form.username) {
+        return Ok(Some(message));
     }
     let password = form.password.clone();
-    let username = form.username.clone();
+    let username = form.username.trim().to_string();
     Ok(tokio::task::spawn_blocking(move || {
         password_policy_error(&password, "Password", &[username.as_str()])
     })
@@ -121,6 +124,8 @@ pub async fn login_submit(
         &state.trusted_proxies,
     );
 
+    // The username is deliberately not trimmed here: accounts created before
+    // creation trimmed names may carry spaces and must keep logging in.
     if !state.login_rate_limiter.try_acquire(ip) {
         audit::login_throttled(&audit_ctx, &credentials.username);
         return login_error_page(
@@ -183,28 +188,74 @@ pub async fn setup_page(State(state): State<AppState>) -> Result<Response> {
     Ok(Html(template.render()?).into_response())
 }
 
+fn setup_error_page(status: axum::http::StatusCode, message: &str) -> Result<Response> {
+    let template = SetupTemplate {
+        error: Some(message.to_string()),
+    };
+    Ok((status, Html(template.render()?)).into_response())
+}
+
 pub async fn setup_submit(
     State(state): State<AppState>,
+    connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    headers: axum::http::HeaderMap,
     jar: CookieJar,
     audit_ctx: AuditContext,
-    Form(form): Form<CreateUser>,
+    Form(form): Form<SetupForm>,
 ) -> Result<Response> {
     let user_count = state.user_repo.count().await?;
     if user_count > 0 {
         return Ok(Redirect::to("/auth/login").into_response());
     }
 
-    if let Some(message) = validate_credentials(&form).await? {
+    let peer_addr = connect.map(|axum::Extension(axum::extract::ConnectInfo(addr))| addr.ip());
+    let ip = crate::net::client_ip(
+        peer_addr,
+        &headers,
+        state.trusted_proxy_header,
+        &state.trusted_proxies,
+    );
+    // Refunded only after the token checked out (see below): the token is
+    // guessable only online, so a wrong guess always stays charged.
+    if !state.setup_rate_limiter.try_acquire(ip) {
+        audit::setup_throttled(&audit_ctx);
+        return setup_error_page(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "Too many setup attempts. Please try again later.",
+        );
+    }
+
+    if !state.setup_token.verify(&form.setup_token) {
+        audit::setup_token_rejected(&audit_ctx);
+        return setup_error_page(
+            axum::http::StatusCode::FORBIDDEN,
+            "Invalid setup token. Find it on the server's stderr.",
+        );
+    }
+
+    let credentials = CreateUser {
+        username: form.username.trim().to_string(),
+        password: form.password,
+    };
+    if let Some(message) = validate_credentials(&credentials).await? {
+        // The token was right, so this attempt guessed nothing; refund it so a
+        // typo in the username or password does not burn the budget.
+        state.setup_rate_limiter.release(ip);
         let template = SetupTemplate {
             error: Some(message),
         };
         return Ok(Html(template.render()?).into_response());
     }
 
-    let user = state
+    // The count check above is only a fast path; this INSERT is the real gate.
+    let Some(user) = state
         .user_repo
-        .create(&form.username, &form.password, UserRole::Admin)
-        .await?;
+        .create_first_admin(&credentials.username, &credentials.password)
+        .await?
+    else {
+        return Ok(Redirect::to("/auth/login").into_response());
+    };
+    state.setup_token.clear();
 
     let token = state.session_repo.create(&user.id).await?;
     audit::session_created(
@@ -276,12 +327,8 @@ pub async fn new_user_submit(
         return Ok(Html(template.render()?).into_response());
     }
 
-    if state
-        .user_repo
-        .find_by_username(&form.username)
-        .await?
-        .is_some()
-    {
+    let username = form.username.trim();
+    if state.user_repo.find_by_username(username).await?.is_some() {
         let template = NewUserTemplate {
             user: admin_user.0,
             error: Some("Username already exists".to_string()),
@@ -291,7 +338,7 @@ pub async fn new_user_submit(
 
     state
         .user_repo
-        .create(&form.username, &form.password, UserRole::User)
+        .create(username, &form.password, UserRole::User)
         .await?;
 
     Ok(Redirect::to("/users").into_response())

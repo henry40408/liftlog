@@ -2,6 +2,7 @@
 //! against a fresh SQLite file, killed on drop. One server serves every
 //! scenario; the database is never reused, so `@bootstrap` sees no users.
 
+use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -23,6 +24,23 @@ const STARTUP_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Set at startup: the OS picks the port, so parallel checkouts don't collide.
 static BASE_URL: OnceLock<String> = OnceLock::new();
+
+/// Set at startup: the token the server printed on its stderr.
+static SETUP_TOKEN: OnceLock<String> = OnceLock::new();
+
+/// Prefix of the stderr line that carries the first-run setup token.
+const SETUP_TOKEN_PREFIX: &str = "Setup token: ";
+
+/// The first-run setup token read from the server's stderr.
+///
+/// # Panics
+///
+/// Panics when no [`Server`] has been started.
+pub fn setup_token() -> &'static str {
+    SETUP_TOKEN
+        .get()
+        .expect("no server started: `Server::start` runs before any scenario")
+}
 
 /// The base URL of the server under test.
 ///
@@ -67,18 +85,38 @@ impl Server {
             .env("RUST_LOG", "liftlog=warn")
             // Inherited so startup failures show in the test output.
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            // Piped to read the setup token; `forward_stderr` echoes the rest.
+            .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("spawning the liftlog server at {}", binary.display()))?;
 
         // Bound before the wait so a server that never answers is still killed.
-        let server = Self { child };
+        let mut server = Self { child };
+        let stderr = server.child.stderr.take().context("server stderr")?;
+        let (token_tx, token_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || forward_stderr(stderr, &token_tx));
         let base = format!("http://127.0.0.1:{port}");
         wait_until_healthy(&base).await?;
+        let token = token_rx
+            .recv_timeout(Duration::from_secs(5))
+            .context("the server printed no setup token on stderr")?;
+        SETUP_TOKEN
+            .set(token)
+            .map_err(|_| anyhow::anyhow!("a server was already started"))?;
         BASE_URL
             .set(base)
             .map_err(|_| anyhow::anyhow!("a server was already started"))?;
         Ok(server)
+    }
+}
+
+/// Echoes the server's stderr and reports the setup token once.
+fn forward_stderr(stderr: std::process::ChildStderr, token_tx: &std::sync::mpsc::Sender<String>) {
+    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+        eprintln!("{line}");
+        if let Some(token) = line.strip_prefix(SETUP_TOKEN_PREFIX) {
+            let _ = token_tx.send(token.trim().to_string());
+        }
     }
 }
 

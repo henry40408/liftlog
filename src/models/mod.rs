@@ -14,6 +14,9 @@ pub use personal_record::{
 };
 // Length bounds aren't re-exported: callers go through
 // `password_policy_error`, so there's one enforcement point.
-pub use user::{CreateUser, LoginCredentials, User, UserListItem, UserRole, password_policy_error};
+pub use user::{
+    CreateUser, LoginCredentials, SetupForm, User, UserListItem, UserRole, password_policy_error,
+    username_error,
+};
 pub use workout_log::{CreateWorkoutLog, UpdateWorkoutLog, WorkoutLog, WorkoutLogWithExercise};
 pub use workout_session::{CreateWorkoutSession, WorkoutSession};

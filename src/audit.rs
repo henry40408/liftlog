@@ -130,6 +130,32 @@ pub fn login_throttled(ctx: &AuditContext, username: &str) {
     );
 }
 
+/// Refused by the setup limiter before the token was checked.
+pub fn setup_throttled(ctx: &AuditContext) {
+    let user_agent = ctx.user_agent.as_deref();
+    tracing::warn!(
+        target: "liftlog::audit",
+        event = "auth.setup.throttled",
+        client_ip = %ctx.client_ip,
+        user_agent,
+        path = %ctx.path,
+        "setup throttled"
+    );
+}
+
+/// Wrong or missing first-run setup token.
+pub fn setup_token_rejected(ctx: &AuditContext) {
+    let user_agent = ctx.user_agent.as_deref();
+    tracing::warn!(
+        target: "liftlog::audit",
+        event = "auth.setup.token_rejected",
+        client_ip = %ctx.client_ip,
+        user_agent,
+        path = %ctx.path,
+        "setup token rejected"
+    );
+}
+
 /// Wrong password on an authenticated re-check (password change, admin
 /// promote/delete) — where a stolen-cookie holder would guess. `action` names
 /// the route; one event family so alerting sees one signal.
@@ -353,6 +379,11 @@ mod tests {
             sensitive_action_rate_limiter: std::sync::Arc::new(
                 crate::rate_limit::RateLimiter::new(5, std::time::Duration::from_secs(900)),
             ),
+            setup_rate_limiter: std::sync::Arc::new(crate::rate_limit::RateLimiter::new(
+                5,
+                std::time::Duration::from_secs(900),
+            )),
+            setup_token: std::sync::Arc::new(crate::setup_token::SetupToken::default()),
             trusted_proxy_header: TrustedProxyHeader::None,
             trusted_proxies: std::sync::Arc::new(vec![]),
             cookie_secure: false,

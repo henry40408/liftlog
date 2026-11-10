@@ -11,6 +11,7 @@ pub mod rate_limit;
 pub mod repositories;
 pub mod routes;
 pub mod session;
+pub mod setup_token;
 pub mod state;
 pub mod timezone;
 pub mod version;

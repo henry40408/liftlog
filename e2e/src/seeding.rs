@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use tokio::sync::Mutex;
 
-use crate::server::{ADMIN, PASSWORD, url};
+use crate::server::{ADMIN, PASSWORD, setup_token, url};
 
 /// Serialises account creation across concurrently running scenarios.
 static SEEDING: Mutex<()> = Mutex::const_new(());
@@ -65,7 +65,11 @@ pub async fn open_second_session(username: &str, password: &str) -> Result<()> {
 async fn call_setup() -> Result<()> {
     let response = client()?
         .post(url("/auth/setup"))
-        .form(&[("username", ADMIN), ("password", PASSWORD)])
+        .form(&[
+            ("username", ADMIN),
+            ("password", PASSWORD),
+            ("setup_token", setup_token()),
+        ])
         .send()
         .await
         .context("calling /auth/setup")?;
