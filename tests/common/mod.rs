@@ -36,13 +36,50 @@ const GENEROUS_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 const NO_BACKOFF_FREE_ATTEMPTS: u32 = 3;
 const NO_BACKOFF_BASE: std::time::Duration = std::time::Duration::ZERO;
 
+/// Settings for [`build_test_app`]. The default leaves every throttle generous,
+/// the backoff inert, and cookies, proxy header and HSTS off, so a helper
+/// lists only the fields it exercises.
+struct TestAppOptions {
+    login_max_attempts: u32,
+    login_window: std::time::Duration,
+    password_change_max_attempts: u32,
+    password_change_window: std::time::Duration,
+    backoff_free_attempts: u32,
+    backoff_base: std::time::Duration,
+    cookie_secure: bool,
+    trusted_proxy_header: liftlog::config::TrustedProxyHeader,
+    trusted_proxies: Vec<std::net::IpAddr>,
+    hsts_max_age: u64,
+    hsts_include_subdomains: bool,
+    setup_max_attempts: u32,
+}
+
+impl Default for TestAppOptions {
+    fn default() -> Self {
+        Self {
+            login_max_attempts: GENEROUS_MAX_ATTEMPTS,
+            login_window: GENEROUS_WINDOW,
+            password_change_max_attempts: GENEROUS_MAX_ATTEMPTS,
+            password_change_window: GENEROUS_WINDOW,
+            backoff_free_attempts: NO_BACKOFF_FREE_ATTEMPTS,
+            backoff_base: NO_BACKOFF_BASE,
+            cookie_secure: false,
+            trusted_proxy_header: liftlog::config::TrustedProxyHeader::None,
+            trusted_proxies: Vec::new(),
+            hsts_max_age: 0,
+            hsts_include_subdomains: false,
+            setup_max_attempts: GENEROUS_MAX_ATTEMPTS,
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub fn create_test_app(pool: DbPool) -> Router {
     create_test_app_with_session(pool).router
 }
 
 pub fn create_test_app_with_session(pool: DbPool) -> TestApp {
-    create_test_app_with_rate_limit(pool, GENEROUS_MAX_ATTEMPTS, GENEROUS_WINDOW)
+    build_test_app(pool, TestAppOptions::default())
 }
 
 /// Tightens only the password-change throttle.
@@ -54,18 +91,11 @@ pub fn create_test_app_with_password_change_limit(
 ) -> TestApp {
     build_test_app(
         pool,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        max_attempts,
-        window,
-        NO_BACKOFF_FREE_ATTEMPTS,
-        NO_BACKOFF_BASE,
-        false,
-        liftlog::config::TrustedProxyHeader::None,
-        Vec::new(),
-        0,
-        false,
-        GENEROUS_MAX_ATTEMPTS,
+        TestAppOptions {
+            password_change_max_attempts: max_attempts,
+            password_change_window: window,
+            ..Default::default()
+        },
     )
 }
 
@@ -77,18 +107,11 @@ pub fn create_test_app_with_rate_limit(
 ) -> TestApp {
     build_test_app(
         pool,
-        max_attempts,
-        window,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        NO_BACKOFF_FREE_ATTEMPTS,
-        NO_BACKOFF_BASE,
-        false,
-        liftlog::config::TrustedProxyHeader::None,
-        Vec::new(),
-        0,
-        false,
-        GENEROUS_MAX_ATTEMPTS,
+        TestAppOptions {
+            login_max_attempts: max_attempts,
+            login_window: window,
+            ..Default::default()
+        },
     )
 }
 
@@ -96,18 +119,10 @@ pub fn create_test_app_with_rate_limit(
 pub fn create_test_app_with_cookie_secure(pool: DbPool, cookie_secure: bool) -> TestApp {
     build_test_app(
         pool,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        NO_BACKOFF_FREE_ATTEMPTS,
-        NO_BACKOFF_BASE,
-        cookie_secure,
-        liftlog::config::TrustedProxyHeader::None,
-        Vec::new(),
-        0,
-        false,
-        GENEROUS_MAX_ATTEMPTS,
+        TestAppOptions {
+            cookie_secure,
+            ..Default::default()
+        },
     )
 }
 
@@ -123,18 +138,13 @@ pub fn create_test_app_with_proxy_header(
 ) -> TestApp {
     build_test_app(
         pool,
-        max_attempts,
-        window,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        NO_BACKOFF_FREE_ATTEMPTS,
-        NO_BACKOFF_BASE,
-        false,
-        header,
-        trusted_proxies,
-        0,
-        false,
-        GENEROUS_MAX_ATTEMPTS,
+        TestAppOptions {
+            login_max_attempts: max_attempts,
+            login_window: window,
+            trusted_proxy_header: header,
+            trusted_proxies,
+            ..Default::default()
+        },
     )
 }
 
@@ -143,18 +153,11 @@ pub fn create_test_app_with_proxy_header(
 pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains: bool) -> TestApp {
     build_test_app(
         pool,
-        100,
-        std::time::Duration::from_secs(60),
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        NO_BACKOFF_FREE_ATTEMPTS,
-        NO_BACKOFF_BASE,
-        false,
-        liftlog::config::TrustedProxyHeader::None,
-        Vec::new(),
-        max_age,
-        include_subdomains,
-        GENEROUS_MAX_ATTEMPTS,
+        TestAppOptions {
+            hsts_max_age: max_age,
+            hsts_include_subdomains: include_subdomains,
+            ..Default::default()
+        },
     )
 }
 
@@ -163,18 +166,10 @@ pub fn create_test_app_with_hsts(pool: DbPool, max_age: u64, include_subdomains:
 pub fn create_test_app_with_setup_limit(pool: DbPool, max_attempts: u32) -> TestApp {
     build_test_app(
         pool,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        NO_BACKOFF_FREE_ATTEMPTS,
-        NO_BACKOFF_BASE,
-        false,
-        liftlog::config::TrustedProxyHeader::None,
-        Vec::new(),
-        0,
-        false,
-        max_attempts,
+        TestAppOptions {
+            setup_max_attempts: max_attempts,
+            ..Default::default()
+        },
     )
 }
 
@@ -187,37 +182,15 @@ pub fn create_test_app_with_login_backoff(
 ) -> TestApp {
     build_test_app(
         pool,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        GENEROUS_MAX_ATTEMPTS,
-        GENEROUS_WINDOW,
-        free_attempts,
-        base,
-        false,
-        liftlog::config::TrustedProxyHeader::None,
-        Vec::new(),
-        0,
-        false,
-        GENEROUS_MAX_ATTEMPTS,
+        TestAppOptions {
+            backoff_free_attempts: free_attempts,
+            backoff_base: base,
+            ..Default::default()
+        },
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_test_app(
-    pool: DbPool,
-    max_attempts: u32,
-    window: std::time::Duration,
-    password_change_max_attempts: u32,
-    password_change_window: std::time::Duration,
-    backoff_free_attempts: u32,
-    backoff_base: std::time::Duration,
-    cookie_secure: bool,
-    trusted_proxy_header: liftlog::config::TrustedProxyHeader,
-    trusted_proxies: Vec<std::net::IpAddr>,
-    hsts_max_age: u64,
-    hsts_include_subdomains: bool,
-    setup_max_attempts: u32,
-) -> TestApp {
+fn build_test_app(pool: DbPool, options: TestAppOptions) -> TestApp {
     use liftlog::rate_limit::{FailureBackoff, RateLimiter};
     use liftlog::repositories::{ExerciseRepository, WorkoutRepository};
     use liftlog::state::AppState;
@@ -231,25 +204,31 @@ fn build_test_app(
         exercise_repo: ExerciseRepository::new(pool.clone()),
         workout_repo: WorkoutRepository::new(pool.clone()),
         session_repo: SessionRepository::new(pool.clone()),
-        login_rate_limiter: Arc::new(RateLimiter::new(max_attempts, window)),
-        setup_rate_limiter: Arc::new(RateLimiter::new(setup_max_attempts, GENEROUS_WINDOW)),
+        login_rate_limiter: Arc::new(RateLimiter::new(
+            options.login_max_attempts,
+            options.login_window,
+        )),
+        setup_rate_limiter: Arc::new(RateLimiter::new(
+            options.setup_max_attempts,
+            GENEROUS_WINDOW,
+        )),
         setup_token: setup_token.clone(),
         login_backoff: Arc::new(FailureBackoff::new(
-            backoff_free_attempts,
-            backoff_base,
+            options.backoff_free_attempts,
+            options.backoff_base,
             // Cap at 4x the base so no test waits long.
-            backoff_base * 4,
+            options.backoff_base * 4,
             std::time::Duration::from_secs(60),
         )),
         sensitive_action_rate_limiter: Arc::new(RateLimiter::new(
-            password_change_max_attempts,
-            password_change_window,
+            options.password_change_max_attempts,
+            options.password_change_window,
         )),
-        trusted_proxy_header,
-        trusted_proxies: Arc::new(trusted_proxies),
-        cookie_secure,
-        hsts_max_age,
-        hsts_include_subdomains,
+        trusted_proxy_header: options.trusted_proxy_header,
+        trusted_proxies: Arc::new(options.trusted_proxies),
+        cookie_secure: options.cookie_secure,
+        hsts_max_age: options.hsts_max_age,
+        hsts_include_subdomains: options.hsts_include_subdomains,
         // Fixed salt, so fingerprints are deterministic.
         log_salt: Arc::new([7u8; 32]),
     };
