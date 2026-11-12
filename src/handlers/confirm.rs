@@ -5,10 +5,7 @@
 use axum::response::{IntoResponse, Response};
 
 use crate::middleware::AuthUser;
-use crate::views::{
-    confirm::{ConfirmView, confirm},
-    layout::html_page,
-};
+use crate::views::confirm::{ConfirmView, confirm};
 
 /// `form_action` is the URL this page was served from: GET confirms, POST acts.
 /// `consequence` should say what will be lost.
@@ -26,5 +23,5 @@ pub fn page(
         form_action: &form_action,
         cancel_url: &cancel_url,
     };
-    html_page(confirm(&view)).into_response()
+    confirm(&view).into_response()
 }

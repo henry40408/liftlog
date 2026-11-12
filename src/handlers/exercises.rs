@@ -10,7 +10,7 @@ use crate::middleware::AuthUser;
 use crate::models::exercise::CATEGORIES;
 use crate::models::{CreateExercise, UpdateExercise};
 use crate::state::AppState;
-use crate::views::{exercises, layout::html_page};
+use crate::views::exercises;
 
 pub async fn list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let exercises = state
@@ -18,11 +18,11 @@ pub async fn list(State(state): State<AppState>, auth_user: AuthUser) -> Result<
         .find_available_for_user(&auth_user.id)
         .await?;
 
-    Ok(html_page(exercises::list(&auth_user, &exercises, CATEGORIES)).into_response())
+    Ok(exercises::list(&auth_user, &exercises, CATEGORIES).into_response())
 }
 
 pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
-    Ok(html_page(exercises::new(&auth_user, CATEGORIES, None)).into_response())
+    Ok(exercises::new(&auth_user, CATEGORIES, None).into_response())
 }
 
 pub async fn create(
@@ -32,7 +32,7 @@ pub async fn create(
 ) -> Result<Response> {
     if form.name.trim().is_empty() {
         let page = exercises::new(&auth_user, CATEGORIES, Some("Exercise name is required"));
-        return Ok(html_page(page).into_response());
+        return Ok(page.into_response());
     }
 
     state
@@ -50,7 +50,7 @@ pub async fn edit_page(
 ) -> Result<Response> {
     let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
-    Ok(html_page(exercises::edit(&auth_user, &exercise, CATEGORIES, None)).into_response())
+    Ok(exercises::edit(&auth_user, &exercise, CATEGORIES, None).into_response())
 }
 
 pub async fn update(
@@ -68,7 +68,7 @@ pub async fn update(
             CATEGORIES,
             Some("Exercise name is required"),
         );
-        return Ok(html_page(page).into_response());
+        return Ok(page.into_response());
     }
 
     state

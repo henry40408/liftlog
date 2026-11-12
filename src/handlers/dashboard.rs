@@ -7,10 +7,7 @@ use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::state::AppState;
 use crate::timezone;
-use crate::views::{
-    dashboard::{DashboardView, dashboard},
-    layout::html_page,
-};
+use crate::views::dashboard::{DashboardView, dashboard};
 
 pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let timezone = state.user_repo.find_timezone(&auth_user.id).await?;
@@ -44,5 +41,5 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
         timezone_unset: timezone.is_none(),
     };
 
-    Ok(html_page(dashboard(&view)).into_response())
+    Ok(dashboard(&view).into_response())
 }

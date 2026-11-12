@@ -15,7 +15,7 @@ use crate::models::{
 };
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
-use crate::views::{self, layout::html_page};
+use crate::views;
 
 /// Returns the validation error message, or `None` if the form is valid.
 ///
@@ -44,11 +44,11 @@ pub async fn login_page(State(state): State<AppState>, request: Request) -> Resu
         return Ok(Redirect::to("/auth/setup").into_response());
     }
 
-    Ok(html_page(views::auth::login(None)).into_response())
+    Ok(views::auth::login(None).into_response())
 }
 
 fn login_error_page(status: axum::http::StatusCode, message: &str) -> Response {
-    (status, html_page(views::auth::login(Some(message)))).into_response()
+    (status, views::auth::login(Some(message))).into_response()
 }
 
 fn login_success_response(jar: CookieJar, token: &str, cookie_secure: bool) -> Response {
@@ -146,11 +146,11 @@ pub async fn setup_page(State(state): State<AppState>) -> Result<Response> {
         return Ok(Redirect::to("/auth/login").into_response());
     }
 
-    Ok(html_page(views::auth::setup(None)).into_response())
+    Ok(views::auth::setup(None).into_response())
 }
 
 fn setup_error_page(status: axum::http::StatusCode, message: &str) -> Response {
-    (status, html_page(views::auth::setup(Some(message)))).into_response()
+    (status, views::auth::setup(Some(message))).into_response()
 }
 
 pub async fn setup_submit(
@@ -199,7 +199,7 @@ pub async fn setup_submit(
         // The token was right, so this attempt guessed nothing; refund it so a
         // typo in the username or password does not burn the budget.
         state.setup_rate_limiter.release(ip);
-        return Ok(html_page(views::auth::setup(Some(&message))).into_response());
+        return Ok(views::auth::setup(Some(&message)).into_response());
     }
 
     // The count check above is only a fast path; this INSERT is the real gate.
@@ -262,7 +262,7 @@ pub async fn logout(
 }
 
 pub async fn new_user_page(admin_user: AdminUser) -> Result<Response> {
-    Ok(html_page(views::auth::new_user(&admin_user.0, None)).into_response())
+    Ok(views::auth::new_user(&admin_user.0, None).into_response())
 }
 
 pub async fn new_user_submit(
@@ -271,16 +271,14 @@ pub async fn new_user_submit(
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
     if let Some(message) = validate_credentials(&form).await? {
-        return Ok(html_page(views::auth::new_user(&admin_user.0, Some(&message))).into_response());
+        return Ok(views::auth::new_user(&admin_user.0, Some(&message)).into_response());
     }
 
     let username = form.username.trim();
     if state.user_repo.find_by_username(username).await?.is_some() {
-        return Ok(html_page(views::auth::new_user(
-            &admin_user.0,
-            Some("Username already exists"),
-        ))
-        .into_response());
+        return Ok(
+            views::auth::new_user(&admin_user.0, Some("Username already exists")).into_response(),
+        );
     }
 
     state
@@ -293,7 +291,7 @@ pub async fn new_user_submit(
 
 pub async fn users_list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let users = state.user_repo.find_all().await?;
-    Ok(html_page(views::auth::users_list(&auth_user, &users)).into_response())
+    Ok(views::auth::users_list(&auth_user, &users).into_response())
 }
 
 /// The admin's password, re-entered to confirm a user-management action.
@@ -374,7 +372,7 @@ async fn render_confirm_page(
         form_action: &action.form_action(target_id),
         error: error.as_deref(),
     };
-    Ok(html_page(views::auth::confirm_action(&view)).into_response())
+    Ok(views::auth::confirm_action(&view).into_response())
 }
 
 struct SensitiveRequest<'a> {
