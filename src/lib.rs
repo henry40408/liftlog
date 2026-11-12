@@ -15,3 +15,4 @@ pub mod setup_token;
 pub mod state;
 pub mod timezone;
 pub mod version;
+pub mod views;

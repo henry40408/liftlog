@@ -21,6 +21,7 @@ mod setup_token;
 mod state;
 mod timezone;
 mod version;
+mod views;
 
 use config::Config;
 use migrations::run_migrations;

@@ -1,8 +1,7 @@
-use askama::Template;
 use axum::{
     Form,
     extract::{Path, Request, State},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::CookieJar;
 
@@ -12,47 +11,11 @@ use crate::handlers::reauth::{self, ReauthAttempt, ReauthOutcome};
 use crate::middleware::auth::ValidatedSession;
 use crate::middleware::{AdminUser, AuthUser, SuppressSessionRefresh};
 use crate::models::{
-    CreateUser, LoginCredentials, SetupForm, UserListItem, UserRole, password_policy_error,
-    username_error,
+    CreateUser, LoginCredentials, SetupForm, UserRole, password_policy_error, username_error,
 };
 use crate::session::{create_session_cookie, remove_session_cookie, token_fingerprint};
 use crate::state::AppState;
-
-#[derive(Template)]
-#[template(path = "auth/login.html")]
-struct LoginTemplate {
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "auth/setup.html")]
-struct SetupTemplate {
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "auth/new_user.html")]
-struct NewUserTemplate {
-    user: AuthUser,
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "auth/confirm_action.html")]
-struct ConfirmActionTemplate {
-    user: AuthUser,
-    action_label: &'static str,
-    consequence: String,
-    form_action: String,
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "auth/users.html")]
-struct UsersListTemplate {
-    user: AuthUser,
-    users: Vec<UserListItem>,
-}
+use crate::views::{self, layout::html_page};
 
 /// Returns the validation error message, or `None` if the form is valid.
 ///
@@ -81,15 +44,11 @@ pub async fn login_page(State(state): State<AppState>, request: Request) -> Resu
         return Ok(Redirect::to("/auth/setup").into_response());
     }
 
-    let template = LoginTemplate { error: None };
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(views::auth::login(None)).into_response())
 }
 
-fn login_error_page(status: axum::http::StatusCode, message: &str) -> Result<Response> {
-    let template = LoginTemplate {
-        error: Some(message.to_string()),
-    };
-    Ok((status, Html(template.render()?)).into_response())
+fn login_error_page(status: axum::http::StatusCode, message: &str) -> Response {
+    (status, html_page(views::auth::login(Some(message)))).into_response()
 }
 
 fn login_success_response(jar: CookieJar, token: &str, cookie_secure: bool) -> Response {
@@ -128,10 +87,10 @@ pub async fn login_submit(
     // creation trimmed names may carry spaces and must keep logging in.
     if !state.login_rate_limiter.try_acquire(ip) {
         audit::login_throttled(&audit_ctx, &credentials.username);
-        return login_error_page(
+        return Ok(login_error_page(
             axum::http::StatusCode::TOO_MANY_REQUESTS,
             "Too many login attempts. Please try again later.",
-        );
+        ));
     }
 
     // Delay applies to any submitted username, real or not, so it can't
@@ -158,7 +117,10 @@ pub async fn login_submit(
             &credentials.username,
             u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX),
         );
-        return login_error_page(axum::http::StatusCode::OK, "Invalid username or password");
+        return Ok(login_error_page(
+            axum::http::StatusCode::OK,
+            "Invalid username or password",
+        ));
     };
 
     state.login_backoff.reset(&credentials.username);
@@ -184,15 +146,11 @@ pub async fn setup_page(State(state): State<AppState>) -> Result<Response> {
         return Ok(Redirect::to("/auth/login").into_response());
     }
 
-    let template = SetupTemplate { error: None };
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(views::auth::setup(None)).into_response())
 }
 
-fn setup_error_page(status: axum::http::StatusCode, message: &str) -> Result<Response> {
-    let template = SetupTemplate {
-        error: Some(message.to_string()),
-    };
-    Ok((status, Html(template.render()?)).into_response())
+fn setup_error_page(status: axum::http::StatusCode, message: &str) -> Response {
+    (status, html_page(views::auth::setup(Some(message)))).into_response()
 }
 
 pub async fn setup_submit(
@@ -219,18 +177,18 @@ pub async fn setup_submit(
     // guessable only online, so a wrong guess always stays charged.
     if !state.setup_rate_limiter.try_acquire(ip) {
         audit::setup_throttled(&audit_ctx);
-        return setup_error_page(
+        return Ok(setup_error_page(
             axum::http::StatusCode::TOO_MANY_REQUESTS,
             "Too many setup attempts. Please try again later.",
-        );
+        ));
     }
 
     if !state.setup_token.verify(&form.setup_token) {
         audit::setup_token_rejected(&audit_ctx);
-        return setup_error_page(
+        return Ok(setup_error_page(
             axum::http::StatusCode::FORBIDDEN,
             "Invalid setup token. Find it on the server's stderr.",
-        );
+        ));
     }
 
     let credentials = CreateUser {
@@ -241,10 +199,7 @@ pub async fn setup_submit(
         // The token was right, so this attempt guessed nothing; refund it so a
         // typo in the username or password does not burn the budget.
         state.setup_rate_limiter.release(ip);
-        let template = SetupTemplate {
-            error: Some(message),
-        };
-        return Ok(Html(template.render()?).into_response());
+        return Ok(html_page(views::auth::setup(Some(&message))).into_response());
     }
 
     // The count check above is only a fast path; this INSERT is the real gate.
@@ -307,11 +262,7 @@ pub async fn logout(
 }
 
 pub async fn new_user_page(admin_user: AdminUser) -> Result<Response> {
-    let template = NewUserTemplate {
-        user: admin_user.0,
-        error: None,
-    };
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(views::auth::new_user(&admin_user.0, None)).into_response())
 }
 
 pub async fn new_user_submit(
@@ -320,20 +271,16 @@ pub async fn new_user_submit(
     Form(form): Form<CreateUser>,
 ) -> Result<Response> {
     if let Some(message) = validate_credentials(&form).await? {
-        let template = NewUserTemplate {
-            user: admin_user.0,
-            error: Some(message),
-        };
-        return Ok(Html(template.render()?).into_response());
+        return Ok(html_page(views::auth::new_user(&admin_user.0, Some(&message))).into_response());
     }
 
     let username = form.username.trim();
     if state.user_repo.find_by_username(username).await?.is_some() {
-        let template = NewUserTemplate {
-            user: admin_user.0,
-            error: Some("Username already exists".to_string()),
-        };
-        return Ok(Html(template.render()?).into_response());
+        return Ok(html_page(views::auth::new_user(
+            &admin_user.0,
+            Some("Username already exists"),
+        ))
+        .into_response());
     }
 
     state
@@ -346,11 +293,7 @@ pub async fn new_user_submit(
 
 pub async fn users_list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let users = state.user_repo.find_all().await?;
-    let template = UsersListTemplate {
-        user: auth_user,
-        users,
-    };
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(views::auth::users_list(&auth_user, &users)).into_response())
 }
 
 /// The admin's password, re-entered to confirm a user-management action.
@@ -424,14 +367,14 @@ async fn render_confirm_page(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let template = ConfirmActionTemplate {
-        user: admin_user,
+    let view = views::auth::ConfirmActionView {
+        user: &admin_user,
         action_label: action.label(),
-        consequence: action.consequence(&target.username),
-        form_action: action.form_action(target_id),
-        error,
+        consequence: &action.consequence(&target.username),
+        form_action: &action.form_action(target_id),
+        error: error.as_deref(),
     };
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(views::auth::confirm_action(&view)).into_response())
 }
 
 struct SensitiveRequest<'a> {
