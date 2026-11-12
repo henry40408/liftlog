@@ -1,32 +1,24 @@
-use askama::Template;
 use axum::{
     extract::{Path, Query, State},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
-use crate::models::{
-    ChartPoint, DynamicPR, Exercise, PersonalRecordSummary, WorkoutLogWithExercise,
-    recent_pr_window_start,
-};
+use crate::models::{ChartPoint, recent_pr_window_start};
 use crate::state::AppState;
 use crate::timezone;
-
-#[derive(Template)]
-#[template(path = "stats/index.html")]
-struct StatsTemplate {
-    user: AuthUser,
-    workouts_this_week: i64,
-    workouts_this_month: i64,
-    total_volume: f64,
-    total_workouts: i64,
-    prs: Vec<PersonalRecordSummary>,
-}
+use crate::views::{
+    layout::html_page,
+    stats::{
+        ExerciseStatsView, StatsView, exercise as exercise_view, index as index_view,
+        prs as prs_view,
+    },
+};
 
 /// Precomputed geometry for the server-rendered SVG of the requested series.
-pub(crate) struct RenderedChart {
+pub struct RenderedChart {
     pub(crate) width: f64,
     pub(crate) height: f64,
     pub(crate) padding_left: f64,
@@ -43,7 +35,7 @@ pub(crate) struct RenderedChart {
     pub(crate) x_ticks: Vec<(f64, String)>,
 }
 
-pub(crate) struct RenderedPoint {
+pub struct RenderedPoint {
     pub(crate) x: f64,
     pub(crate) y: f64,
     pub(crate) is_pr: bool,
@@ -53,33 +45,6 @@ pub(crate) struct RenderedPoint {
     pub(crate) hit_width: f64,
     /// Tooltip text. Mirrors what `showTip` builds client-side.
     pub(crate) title: String,
-}
-
-#[derive(Template)]
-#[template(path = "stats/exercise.html")]
-struct ExerciseStatsTemplate {
-    user: AuthUser,
-    exercise: Exercise,
-    history: Vec<WorkoutLogWithExercise>,
-    pr: Option<DynamicPR>,
-    /// Total session count for this exercise (for the empty/sparse copy).
-    session_count: usize,
-    /// Rendered chart for the requested metric/range. `None` when fewer
-    /// than 2 sessions.
-    chart: Option<RenderedChart>,
-    /// JSON-encoded full `Vec<ChartPoint>` for the client switcher.
-    /// Already escaped: `</` → `<\/` so it cannot break out of `<script>`.
-    chart_data_json: String,
-    /// Active tab, in query-string spelling, so the tab and SVG agree.
-    metric: &'static str,
-    range: &'static str,
-}
-
-#[derive(Template)]
-#[template(path = "stats/prs.html")]
-struct PrsTemplate {
-    user: AuthUser,
-    prs: Vec<PersonalRecordSummary>,
 }
 
 const CHART_W: f64 = 600.0;
@@ -117,7 +82,7 @@ impl ChartMetric {
         }
     }
 
-    /// Must agree with `metricValue` in `templates/stats/exercise.html`,
+    /// Must agree with `metricValue` in `src/views/stats_exercise.js`,
     /// which recomputes the same series client-side.
     fn value(self, p: &ChartPoint) -> f64 {
         match self {
@@ -314,16 +279,16 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
         .get_pr_summaries_by_user(&auth_user.id, recent_pr_window_start())
         .await?;
 
-    let template = StatsTemplate {
-        user: auth_user,
+    let view = StatsView {
+        user: &auth_user,
         workouts_this_week,
         workouts_this_month,
         total_volume,
         total_workouts,
-        prs,
+        prs: &prs,
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(index_view(&view)).into_response())
 }
 
 pub async fn exercise_stats(
@@ -361,19 +326,19 @@ pub async fn exercise_stats(
     let chart = render_chart(&chart_points, metric, range);
     let chart_data_json = encode_chart_data(&chart_points)?;
 
-    let template = ExerciseStatsTemplate {
-        user: auth_user,
-        exercise,
-        history,
-        pr,
+    let view = ExerciseStatsView {
+        user: &auth_user,
+        exercise: &exercise,
+        history: &history,
+        pr: pr.as_ref(),
         session_count,
-        chart,
-        chart_data_json,
+        chart: chart.as_ref(),
+        chart_data_json: &chart_data_json,
         metric: metric.as_str(),
         range: range.as_str(),
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(exercise_view(&view)).into_response())
 }
 
 pub async fn prs_list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
@@ -382,10 +347,5 @@ pub async fn prs_list(State(state): State<AppState>, auth_user: AuthUser) -> Res
         .get_pr_summaries_by_user(&auth_user.id, recent_pr_window_start())
         .await?;
 
-    let template = PrsTemplate {
-        user: auth_user,
-        prs,
-    };
-
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(prs_view(&auth_user, &prs)).into_response())
 }

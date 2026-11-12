@@ -88,7 +88,7 @@ pub async fn confirm_delete(
 ) -> Result<Response> {
     let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Delete exercise",
         format!(
@@ -97,7 +97,7 @@ pub async fn confirm_delete(
         ),
         format!("/exercises/{id}/delete"),
         "/exercises".to_string(),
-    )
+    ))
 }
 
 pub async fn delete(

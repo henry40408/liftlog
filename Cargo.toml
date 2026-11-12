@@ -7,7 +7,6 @@ license = "MIT"
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
-askama = "0.16"
 maud = "0.27"
 time = "0.3"
 rusqlite = { version = "0.40", features = ["bundled", "chrono"] }

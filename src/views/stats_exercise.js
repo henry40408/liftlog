@@ -1,150 +1,3 @@
-{% extends "base.html" %}
-
-{% block title %}{{ exercise.name }} Stats - LiftLog{% endblock %}
-
-{% block content %}
-{% include "nav.html" %}
-
-<main>
-    <div class="page-header">
-        <h1>{{ exercise.name }}</h1>
-        <div class="subtitle">{{ exercise.category }}</div>
-    </div>
-
-    <h2>Personal Record</h2>
-    {% match pr %}
-    {% when Some with (p) %}
-    <div class="card card-gold" style="margin-bottom: var(--sp-6); display: inline-block;">
-        <div style="display: flex; align-items: baseline; gap: var(--sp-4);">
-            <span class="stat-value" style="font-size: var(--font-4xl);">{{ p.value }}</span>
-            <span class="text-secondary text-sm">kg &middot; <time datetime="{{ p.achieved_at.to_rfc3339() }}" data-fmt="date">{{ p.achieved_at.format("%Y-%m-%d") }}</time></span>
-        </div>
-    </div>
-    {% when None %}
-    <p class="muted">No PR for this exercise yet.</p>
-    {% endmatch %}
-
-    <h2>Progress Trend</h2>
-    <div class="card" style="margin-bottom: var(--sp-6);">
-        {% if session_count == 0 %}
-        <p class="muted">No progress data yet — log this exercise to see your trend.</p>
-        {% else %}
-        {# Links so every series is reachable without scripts; the script
-           below redraws in place instead. #}
-        <div id="exercise-chart-controls" style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);">
-            <div role="group" aria-label="Metric" style="display: flex; gap: var(--sp-2);">
-                <a href="?metric=top_set&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "top_set" %} is-active{% endif %}" data-metric="top_set">Top Set</a>
-                <a href="?metric=e1rm&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "e1rm" %} is-active{% endif %}" data-metric="e1rm">e1RM</a>
-                <a href="?metric=volume&amp;range={{ range }}" class="btn btn-sm btn-tab{% if metric == "volume" %} is-active{% endif %}" data-metric="volume">Volume</a>
-            </div>
-            <div role="group" aria-label="Range" style="display: flex; gap: var(--sp-2);">
-                <a href="?metric={{ metric }}&amp;range=20" class="btn btn-sm btn-tab{% if range == "20" %} is-active{% endif %}" data-range="20">Last 20</a>
-                <a href="?metric={{ metric }}&amp;range=all" class="btn btn-sm btn-tab{% if range == "all" %} is-active{% endif %}" data-range="all">All</a>
-            </div>
-        </div>
-
-        <div id="exercise-chart-wrap" style="position: relative;">
-            <svg id="exercise-chart" viewBox="0 0 600 220" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Progress line chart">
-                {% match chart %}
-                {% when Some with (c) %}
-                <g id="chart-y-grid">
-                    {% for tick in c.y_ticks %}
-                    <line x1="{{ c.padding_left }}" x2="{{ c.width - c.padding_right }}"
-                          y1="{{ tick.0 }}" y2="{{ tick.0 }}"
-                          stroke="var(--border-light)" stroke-width="1" />
-                    <text x="{{ c.padding_left - 6.0 }}" y="{{ tick.0 + 4.0 }}"
-                          text-anchor="end" font-size="11" fill="var(--text-secondary)">{{ tick.1 }}</text>
-                    {% endfor %}
-                </g>
-                <g id="chart-x-labels">
-                    {% for tick in c.x_ticks %}
-                    <text x="{{ tick.0 }}" y="{{ c.height - 8.0 }}"
-                          text-anchor="middle" font-size="11" fill="var(--text-secondary)">{{ tick.1 }}</text>
-                    {% endfor %}
-                </g>
-                <polyline id="chart-line"
-                          fill="none" stroke="var(--accent)" stroke-width="2"
-                          points="{{ c.polyline }}" />
-                <g id="chart-dots">
-                    {% for pt in c.points %}
-                    <circle cx="{{ pt.x }}" cy="{{ pt.y }}" r="4"
-                            class="{% if pt.is_pr %}ll-dot-pr{% else %}ll-dot{% endif %}"
-                            fill="{% if pt.is_pr %}var(--gold){% else %}var(--accent){% endif %}"
-                            stroke="var(--bg-root)" stroke-width="1.5" />
-                    {% endfor %}
-                </g>
-                {% when None %}
-                {% if session_count == 1 %}
-                <circle cx="300" cy="110" r="5" fill="var(--accent)" stroke="var(--bg-root)" stroke-width="1.5" />
-                {% endif %}
-                {% endmatch %}
-                {# No-JS tooltips via SVG <title>; the client redraw replaces them. #}
-                <g id="chart-hit-areas">
-                    {% match chart %}
-                    {% when Some with (c) %}
-                    {% for pt in c.points %}
-                    <rect x="{{ pt.hit_x }}" y="{{ c.padding_top }}"
-                          width="{{ pt.hit_width }}" height="{{ c.plot_height }}"
-                          fill="transparent" style="cursor:crosshair"><title>{{ pt.title }}</title></rect>
-                    {% endfor %}
-                    {% when None %}
-                    {% endmatch %}
-                </g>
-            </svg>
-
-            <div id="exercise-chart-tooltip"
-                 style="position: absolute; display: none; pointer-events: none;
-                        background: var(--bg-elevated); border: 1px solid var(--border);
-                        padding: 8px 10px; font-size: 12px; border-radius: 6px;
-                        color: var(--text-primary); white-space: nowrap; z-index: 2;"></div>
-        </div>
-
-        {% if session_count == 1 %}
-        <p class="muted" style="margin-top: var(--sp-4);">Need at least 2 sessions to draw a trend.</p>
-        {% endif %}
-
-        <div style="display: flex; gap: var(--sp-4); margin-top: var(--sp-3); font-size: 12px; color: var(--text-secondary);">
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);vertical-align:middle;margin-right:4px;"></span>Session</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold);vertical-align:middle;margin-right:4px;"></span>Running PR</span>
-        </div>
-
-        <script type="application/json" id="exercise-chart-data">{{ chart_data_json|safe }}</script>
-        {% endif %}
-    </div>
-
-    <h2>Recent History</h2>
-    {% if history.is_empty() %}
-    <p class="muted">No history for this exercise.</p>
-    {% else %}
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Set</th>
-                <th>Weight</th>
-                <th>Reps</th>
-                <th>RPE</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for log in history %}
-            <tr>
-                <td>{{ log.set_number }}</td>
-                <td style="color: var(--text-primary); font-weight: 500;">{{ log.weight }}</td>
-                <td>{{ log.reps }}</td>
-                <td>{% match log.rpe %}{% when Some with (r) %}{{ r }}{% when None %}-{% endmatch %}</td>
-                <td>{% if log.is_pr %}<span class="pr-badge" title="All-time best for this exercise">PR</span>{% else if log.is_recent_pr %}<span class="pr-badge pr-badge-recent" title="Best for this exercise in the last month">PR 1M</span>{% endif %}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
-
-    <a href="/exercises" class="back-link">&larr; Back to Exercises</a>
-</main>
-
-{% if session_count >= 2 %}
-<script>
 (function() {
     var dataEl = document.getElementById('exercise-chart-data');
     if (!dataEl) return;
@@ -165,8 +18,8 @@
     var plotW = W - PL - PR_, plotH = H - PT - PB;
 
     /* Start from the server's selection, not a hardcoded default. */
-    var activeMetric = '{{ metric }}';
-    var activeRange = '{{ range }}';
+    var activeMetric = '{{METRIC}}';
+    var activeRange = '{{RANGE}}';
     var lastYMin = 0, lastYMax = 1;
 
     function metricValue(p, m) {
@@ -323,6 +176,3 @@
 
     redraw();
 })();
-</script>
-{% endif %}
-{% endblock %}

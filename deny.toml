@@ -7,9 +7,6 @@ version = 2
 # `ignore`: reviewed and accepted advisory IDs.
 yanked = "deny"
 ignore = [
-    # basic-toml is unmaintained and has no patched version; askama_derive still
-    # depends on it. Remove once askama drops it. Tracked in #214.
-    "RUSTSEC-2026-0374",
     # libsqlite3-sys bundles a vulnerable SQLite (CVE-2026-119375); the fix needs
     # rusqlite 0.41, which r2d2_sqlite 0.36.0 (cooldown ends 2026-11-16) supports.
     # Remove after upgrading. Tracked in #233.

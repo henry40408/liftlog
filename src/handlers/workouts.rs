@@ -243,7 +243,7 @@ pub async fn confirm_delete(
         n => format!("All {n} of its recorded sets will be deleted with it."),
     };
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Delete workout",
         format!(
@@ -252,7 +252,7 @@ pub async fn confirm_delete(
         ),
         format!("/workouts/{id}/delete"),
         format!("/workouts/{id}"),
-    )
+    ))
 }
 
 pub async fn delete(
@@ -324,7 +324,7 @@ pub async fn confirm_delete_log(
         .find(|l| l.id == log_id)
         .ok_or_else(|| AppError::NotFound("Set not found".to_string()))?;
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Delete set",
         format!(
@@ -336,7 +336,7 @@ pub async fn confirm_delete_log(
         ),
         format!("/workouts/{session_id}/logs/{log_id}/delete"),
         format!("/workouts/{session_id}"),
-    )
+    ))
 }
 
 pub async fn delete_log(
@@ -480,7 +480,7 @@ pub async fn confirm_revoke_share(
         .find_owned_session(&id, &auth_user.id)
         .await?;
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Revoke share link",
         "The existing share link will stop working for anyone who already has it. \
@@ -488,7 +488,7 @@ pub async fn confirm_revoke_share(
             .to_string(),
         format!("/workouts/{id}/revoke-share"),
         format!("/workouts/{id}"),
-    )
+    ))
 }
 
 pub async fn revoke_share(

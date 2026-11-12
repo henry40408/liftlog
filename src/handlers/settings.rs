@@ -266,13 +266,13 @@ pub async fn confirm_logout_others(
         }
     };
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Log out other devices",
         consequence,
         "/settings/logout-others".to_string(),
         "/settings".to_string(),
-    )
+    ))
 }
 
 pub async fn logout_others(

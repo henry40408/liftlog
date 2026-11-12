@@ -4,7 +4,6 @@
 
 use axum::response::{IntoResponse, Response};
 
-use crate::error::Result;
 use crate::middleware::AuthUser;
 use crate::views::{
     confirm::{ConfirmView, confirm},
@@ -19,7 +18,7 @@ pub fn page(
     consequence: String,
     form_action: String,
     cancel_url: String,
-) -> Result<Response> {
+) -> Response {
     let view = ConfirmView {
         user: &user,
         action_label,
@@ -27,5 +26,5 @@ pub fn page(
         form_action: &form_action,
         cancel_url: &cancel_url,
     };
-    Ok(html_page(confirm(&view)).into_response())
+    html_page(confirm(&view)).into_response()
 }
