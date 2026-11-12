@@ -9,12 +9,8 @@ use crate::middleware::AuthUser;
 use crate::models::{ChartPoint, recent_pr_window_start};
 use crate::state::AppState;
 use crate::timezone;
-use crate::views::{
-    layout::html_page,
-    stats::{
-        ExerciseStatsView, StatsView, exercise as exercise_view, index as index_view,
-        prs as prs_view,
-    },
+use crate::views::stats::{
+    ExerciseStatsView, StatsView, exercise as exercise_view, index as index_view, prs as prs_view,
 };
 
 /// Precomputed geometry for the server-rendered SVG of the requested series.
@@ -288,7 +284,7 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
         prs: &prs,
     };
 
-    Ok(html_page(index_view(&view)).into_response())
+    Ok(index_view(&view).into_response())
 }
 
 pub async fn exercise_stats(
@@ -338,7 +334,7 @@ pub async fn exercise_stats(
         range: range.as_str(),
     };
 
-    Ok(html_page(exercise_view(&view)).into_response())
+    Ok(exercise_view(&view).into_response())
 }
 
 pub async fn prs_list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
@@ -347,5 +343,5 @@ pub async fn prs_list(State(state): State<AppState>, auth_user: AuthUser) -> Res
         .get_pr_summaries_by_user(&auth_user.id, recent_pr_window_start())
         .await?;
 
-    Ok(html_page(prs_view(&auth_user, &prs)).into_response())
+    Ok(prs_view(&auth_user, &prs).into_response())
 }

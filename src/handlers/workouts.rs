@@ -18,7 +18,6 @@ use crate::models::{
 use crate::repositories::{NewWorkoutLog, WorkoutLogEdit};
 use crate::state::AppState;
 use crate::views::{
-    layout::html_page,
     workout_show::{LastWeightRow, PrefillSet, ShareInfo, ShowWorkoutView, show as show_view},
     workouts::{
         EditLogView, NewWorkoutView, WorkoutsListView, edit as edit_view,
@@ -64,7 +63,7 @@ pub async fn list(
         total_pages,
     };
 
-    Ok(html_page(list_view(&view)).into_response())
+    Ok(list_view(&view).into_response())
 }
 
 pub async fn new_page(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
@@ -77,7 +76,7 @@ pub async fn new_page(State(state): State<AppState>, auth_user: AuthUser) -> Res
         error: None,
     };
 
-    Ok(html_page(new_view(&view)).into_response())
+    Ok(new_view(&view).into_response())
 }
 
 pub async fn create(
@@ -186,7 +185,7 @@ pub async fn show(
         error: None,
     };
 
-    Ok(html_page(show_view(&view)).into_response())
+    Ok(show_view(&view).into_response())
 }
 
 pub async fn edit_page(
@@ -199,7 +198,7 @@ pub async fn edit_page(
         .find_owned_session(&id, &auth_user.id)
         .await?;
 
-    Ok(html_page(edit_view(&auth_user, &workout, None)).into_response())
+    Ok(edit_view(&auth_user, &workout, None).into_response())
 }
 
 #[derive(Deserialize)]
@@ -388,7 +387,7 @@ pub async fn edit_log_page(
         error: None,
     };
 
-    Ok(html_page(edit_log_view(&view)).into_response())
+    Ok(edit_log_view(&view).into_response())
 }
 
 pub async fn update_log(
@@ -530,7 +529,7 @@ pub async fn view_shared(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    Ok(html_page(shared_view(&workout, &logs, &owner.username)).into_response())
+    Ok(shared_view(&workout, &logs, &owner.username).into_response())
 }
 
 #[cfg(test)]

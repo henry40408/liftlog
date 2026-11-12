@@ -16,10 +16,7 @@ use crate::session::{create_session_cookie, token_fingerprint};
 use crate::state::AppState;
 use crate::timezone;
 use crate::version::GIT_VERSION;
-use crate::views::{
-    layout::html_page,
-    settings::{SettingsView, settings},
-};
+use crate::views::settings::{SettingsView, settings};
 
 #[derive(Deserialize)]
 pub struct ChangePasswordForm {
@@ -68,7 +65,7 @@ async fn render_page_with_status(
         success: notice.success.as_deref(),
         sessions: &sessions,
     };
-    Ok((status, html_page(settings(&view))).into_response())
+    Ok((status, settings(&view)).into_response())
 }
 
 pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {

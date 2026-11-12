@@ -1,4 +1,3 @@
-use axum::response::Html;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::middleware::AuthUser;
@@ -56,8 +55,4 @@ pub fn nav(user: &AuthUser) -> Markup {
             }
         }
     }
-}
-
-pub fn html_page(markup: Markup) -> Html<String> {
-    Html(markup.into_string())
 }
