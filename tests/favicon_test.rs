@@ -93,3 +93,38 @@ async fn test_favicon_keeps_public_cache_control_for_authenticated_user() {
         "public, max-age=86400"
     );
 }
+
+#[tokio::test]
+async fn test_app_assets_are_served_publicly_with_their_content_types() {
+    for (path, content_type, marker) in [
+        ("/assets/app.css", "text/css; charset=utf-8", ":root"),
+        (
+            "/assets/app.js",
+            "text/javascript; charset=utf-8",
+            "LiftLog",
+        ),
+    ] {
+        let pool = common::setup_test_db();
+        let app = common::create_test_app(pool);
+
+        let response = app
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            content_type
+        );
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "public, max-age=86400"
+        );
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(
+            String::from_utf8_lossy(&body).contains(marker),
+            "{path} body"
+        );
+    }
+}

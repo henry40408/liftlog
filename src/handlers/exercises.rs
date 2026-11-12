@@ -1,41 +1,16 @@
-use askama::Template;
 use axum::{
     Form,
     extract::{Path, State},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect, Response},
 };
 
 use crate::error::Result;
 use crate::handlers::confirm;
 use crate::middleware::AuthUser;
-use crate::models::exercise::{CATEGORIES, ExerciseCategory};
-use crate::models::{CreateExercise, Exercise, UpdateExercise};
+use crate::models::exercise::CATEGORIES;
+use crate::models::{CreateExercise, UpdateExercise};
 use crate::state::AppState;
-
-#[derive(Template)]
-#[template(path = "exercises/list.html")]
-struct ExercisesListTemplate {
-    user: AuthUser,
-    exercises: Vec<Exercise>,
-    categories: &'static [ExerciseCategory],
-}
-
-#[derive(Template)]
-#[template(path = "exercises/new.html")]
-struct NewExerciseTemplate {
-    user: AuthUser,
-    categories: &'static [ExerciseCategory],
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "exercises/edit.html")]
-struct EditExerciseTemplate {
-    user: AuthUser,
-    exercise: Exercise,
-    categories: &'static [ExerciseCategory],
-    error: Option<String>,
-}
+use crate::views::{exercises, layout::html_page};
 
 pub async fn list(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let exercises = state
@@ -43,23 +18,11 @@ pub async fn list(State(state): State<AppState>, auth_user: AuthUser) -> Result<
         .find_available_for_user(&auth_user.id)
         .await?;
 
-    let template = ExercisesListTemplate {
-        user: auth_user,
-        exercises,
-        categories: CATEGORIES,
-    };
-
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(exercises::list(&auth_user, &exercises, CATEGORIES)).into_response())
 }
 
 pub async fn new_page(auth_user: AuthUser) -> Result<Response> {
-    let template = NewExerciseTemplate {
-        user: auth_user,
-        categories: CATEGORIES,
-        error: None,
-    };
-
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(exercises::new(&auth_user, CATEGORIES, None)).into_response())
 }
 
 pub async fn create(
@@ -68,12 +31,8 @@ pub async fn create(
     Form(form): Form<CreateExercise>,
 ) -> Result<Response> {
     if form.name.trim().is_empty() {
-        let template = NewExerciseTemplate {
-            user: auth_user,
-            categories: CATEGORIES,
-            error: Some("Exercise name is required".to_string()),
-        };
-        return Ok(Html(template.render()?).into_response());
+        let page = exercises::new(&auth_user, CATEGORIES, Some("Exercise name is required"));
+        return Ok(html_page(page).into_response());
     }
 
     state
@@ -91,14 +50,7 @@ pub async fn edit_page(
 ) -> Result<Response> {
     let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
-    let template = EditExerciseTemplate {
-        user: auth_user,
-        exercise,
-        categories: CATEGORIES,
-        error: None,
-    };
-
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(exercises::edit(&auth_user, &exercise, CATEGORIES, None)).into_response())
 }
 
 pub async fn update(
@@ -110,13 +62,13 @@ pub async fn update(
     let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
     if form.name.trim().is_empty() {
-        let template = EditExerciseTemplate {
-            user: auth_user,
-            exercise,
-            categories: CATEGORIES,
-            error: Some("Exercise name is required".to_string()),
-        };
-        return Ok(Html(template.render()?).into_response());
+        let page = exercises::edit(
+            &auth_user,
+            &exercise,
+            CATEGORIES,
+            Some("Exercise name is required"),
+        );
+        return Ok(html_page(page).into_response());
     }
 
     state
@@ -136,7 +88,7 @@ pub async fn confirm_delete(
 ) -> Result<Response> {
     let exercise = state.exercise_repo.find_owned(&id, &auth_user.id).await?;
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Delete exercise",
         format!(
@@ -145,7 +97,7 @@ pub async fn confirm_delete(
         ),
         format!("/exercises/{id}/delete"),
         "/exercises".to_string(),
-    )
+    ))
 }
 
 pub async fn delete(

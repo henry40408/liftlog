@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-LiftLog is a self-hosted workout journal: an Axum + Askama server-rendered app backed by a single SQLite file, shipped as a Docker image.
+LiftLog is a self-hosted workout journal: an Axum + maud server-rendered app backed by a single SQLite file, shipped as a Docker image.
 
 ## Commands
 
@@ -46,7 +46,7 @@ Keep the port check. Cookies ignore ports, so a port-blind check (#187, reverted
 
 **First-user bootstrap.** With no users, `/auth/login` redirects to `/auth/setup`, whose POST creates an admin and signs in. Later users are created by an admin at `/users/new`. `e2e/src/seeding.rs` does the same over HTTP, idempotently.
 
-**Server-rendered POST→Redirect.** One Askama struct per template (`templates/`). Success redirects; errors re-render with `error: Option<String>`. No JSON API.
+**Server-rendered POST→Redirect.** One maud view function per page in `src/views/` (shared layout in `views/layout.rs`). Success redirects; errors re-render with `error: Option<String>`. No JSON API.
 
 **Destructive actions confirm on the server.** Each is `get(confirm_page).post(action)` on one path: the trigger is an `<a href>`, the GET renders `handlers::confirm::page` (`templates/confirm.html`), and only the POST acts. The GET must be inert and apply the **same ownership check** as the POST; each has a test for both. With JS, a delegated handler in `base.html` intercepts `a[data-confirm]`, shows `confirm()`, and POSTs directly. So a trigger needs **both** `href` and `data-confirm`. The dialog asks the short question; the page gives detail only the server knows (cascade counts etc.). Promote/delete-user use the same route shape plus an admin password re-check with their own template, and are deliberately not JS-enhanced.
 
@@ -72,7 +72,7 @@ Use `tests/common/mod.rs`: `setup_test_db()` (in-memory, migrated) and `create_t
 
 `e2e/tests/e2e/main.rs` starts one `target/debug/liftlog` on a throwaway SQLite file and OS-assigned port, opens one browser per scenario, and kills the server afterwards.
 
-- **Stale binary.** `ensure_binary` (`e2e/src/server.rs`) builds only if the binary is missing. Askama compiles templates in, so run `cargo build` at the root after any `src/` or `templates/` change, or the suite tests the old build. CI builds first.
+- **Stale binary.** `ensure_binary` (`e2e/src/server.rs`) builds only if the binary is missing. maud compiles views into the binary, so run `cargo build` at the root after any `src/` change, or the suite tests the old build. CI builds first.
 - **Separate workspace.** Nothing is inherited: the lint set is copied into `e2e/Cargo.toml` (keep in sync). It's excluded from `cargo deny` and `.dockerignore`d.
 - **One server, one DB for the run.** Isolate fixtures with a per-scenario suffix (`world.unique("Squat")`); never assume a user has no other data.
 - **`@bootstrap` runs first**, as a separate pass on the empty DB. The tag is on the feature, and `gherkin` doesn't propagate feature tags, so the filter checks both.

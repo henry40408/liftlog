@@ -165,7 +165,7 @@ cargo test --test e2e
 
 ## Tech Stack
 
-Axum 0.8 · Tokio · SQLite (rusqlite + r2d2) · Askama · Argon2
+Axum 0.8 · Tokio · SQLite (rusqlite + r2d2) · maud · Argon2
 
 ## License
 

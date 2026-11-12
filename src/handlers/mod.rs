@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod auth;
 pub mod confirm;
 pub mod dashboard;

@@ -1,109 +1,35 @@
-use askama::Template;
 use axum::{
     Form,
     extract::{Path, Query, State},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect, Response},
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use serde::{Deserialize, Deserializer};
 
 use crate::error::{AppError, Result};
 use crate::handlers::confirm;
 use crate::middleware::AuthUser;
-use crate::models::exercise::{CATEGORIES, ExerciseCategory};
+use crate::models::exercise::CATEGORIES;
 use crate::models::workout_log::REP_SCHEMES;
 use crate::models::{
-    CreateWorkoutLog, CreateWorkoutSession, Exercise, LastExerciseWeight, UpdateWorkoutLog,
-    WorkoutLog, WorkoutLogWithExercise, WorkoutSession, recent_pr_window_start,
+    CreateWorkoutLog, CreateWorkoutSession, LastExerciseWeight, UpdateWorkoutLog,
+    WorkoutLogWithExercise, recent_pr_window_start,
 };
 use crate::repositories::{NewWorkoutLog, WorkoutLogEdit};
 use crate::state::AppState;
-
-#[derive(Template)]
-#[template(path = "workouts/list.html")]
-struct WorkoutsListTemplate {
-    user: AuthUser,
-    workouts: Vec<WorkoutSession>,
-    page: i64,
-    total_pages: i64,
-}
-
-#[derive(Template)]
-#[template(path = "workouts/new.html")]
-struct NewWorkoutTemplate {
-    user: AuthUser,
-    today: NaiveDate,
-    /// Without a saved timezone the server only knows UTC, so the page falls
-    /// back to the browser's date.
-    use_browser_today: bool,
-    error: Option<String>,
-}
-
-/// Add Set form values from `?prefill=<log_id>` (no-JS Clone).
-pub(crate) struct PrefillSet {
-    pub(crate) exercise_id: String,
-    pub(crate) weight: f64,
-    pub(crate) reps: i32,
-    pub(crate) rpe: Option<i32>,
-}
-
-/// One row of the `<noscript>` last-weights list.
-pub(crate) struct LastWeightRow {
-    pub(crate) exercise_name: String,
-    pub(crate) weight: f64,
-    pub(crate) rpe: Option<i32>,
-    pub(crate) logged_at: DateTime<Utc>,
-}
+use crate::views::{
+    layout::html_page,
+    workout_show::{LastWeightRow, PrefillSet, ShareInfo, ShowWorkoutView, show as show_view},
+    workouts::{
+        EditLogView, NewWorkoutView, WorkoutsListView, edit as edit_view,
+        edit_log as edit_log_view, list as list_view, new as new_view, shared as shared_view,
+    },
+};
 
 /// `?prefill=` on the workout page.
 #[derive(Deserialize)]
 pub struct ShowQuery {
     prefill: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "workouts/show.html")]
-struct ShowWorkoutTemplate {
-    user: AuthUser,
-    workout: WorkoutSession,
-    logs: Vec<WorkoutLogWithExercise>,
-    exercises: Vec<Exercise>,
-    categories: &'static [ExerciseCategory],
-    exercise_last_weights: Vec<LastExerciseWeight>,
-    last_weight_rows: Vec<LastWeightRow>,
-    /// Datalist values; see `weight_suggestions`.
-    weight_suggestions: Vec<f64>,
-    rep_suggestions: &'static [i32],
-    prefill: Option<PrefillSet>,
-    share_url: Option<String>,
-    share_expires_at: Option<DateTime<Utc>>,
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "workouts/shared.html")]
-struct SharedWorkoutTemplate {
-    workout: WorkoutSession,
-    logs: Vec<WorkoutLogWithExercise>,
-    owner_username: String,
-}
-
-#[derive(Template)]
-#[template(path = "workouts/edit.html")]
-struct EditWorkoutTemplate {
-    user: AuthUser,
-    workout: WorkoutSession,
-    error: Option<String>,
-}
-
-#[derive(Template)]
-#[template(path = "workouts/edit_log.html")]
-struct EditLogTemplate {
-    user: AuthUser,
-    workout: WorkoutSession,
-    log: WorkoutLog,
-    exercise_name: String,
-    error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -131,27 +57,27 @@ pub async fn list(
         .await?;
     let total_pages = (total + per_page - 1) / per_page;
 
-    let template = WorkoutsListTemplate {
-        user: auth_user,
-        workouts,
+    let view = WorkoutsListView {
+        user: &auth_user,
+        workouts: &workouts,
         page,
         total_pages,
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(list_view(&view)).into_response())
 }
 
 pub async fn new_page(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let timezone = state.user_repo.find_timezone(&auth_user.id).await?;
 
-    let template = NewWorkoutTemplate {
-        user: auth_user,
+    let view = NewWorkoutView {
+        user: &auth_user,
         today: crate::timezone::today_in(timezone.as_deref()),
         use_browser_today: timezone.is_none(),
         error: None,
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(new_view(&view)).into_response())
 }
 
 pub async fn create(
@@ -240,25 +166,27 @@ pub async fn show(
         .share_token
         .as_ref()
         .map(|token| format!("/shared/{token}"));
-    let share_expires_at = workout.share_expires_at;
+    let share = share_url.as_deref().map(|url| ShareInfo {
+        url,
+        expires_at: workout.share_expires_at,
+    });
 
-    let template = ShowWorkoutTemplate {
-        user: auth_user,
-        workout,
-        logs,
-        exercises,
+    let view = ShowWorkoutView {
+        user: &auth_user,
+        workout: &workout,
+        logs: &logs,
+        exercises: &exercises,
         categories: CATEGORIES,
-        exercise_last_weights,
-        last_weight_rows,
-        weight_suggestions,
+        exercise_last_weights: &exercise_last_weights,
+        last_weight_rows: &last_weight_rows,
+        weight_suggestions: &weight_suggestions,
         rep_suggestions: REP_SCHEMES,
-        prefill,
-        share_url,
-        share_expires_at,
+        prefill: prefill.as_ref(),
+        share,
         error: None,
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(show_view(&view)).into_response())
 }
 
 pub async fn edit_page(
@@ -271,13 +199,7 @@ pub async fn edit_page(
         .find_owned_session(&id, &auth_user.id)
         .await?;
 
-    let template = EditWorkoutTemplate {
-        user: auth_user,
-        workout,
-        error: None,
-    };
-
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(edit_view(&auth_user, &workout, None)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -321,7 +243,7 @@ pub async fn confirm_delete(
         n => format!("All {n} of its recorded sets will be deleted with it."),
     };
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Delete workout",
         format!(
@@ -330,7 +252,7 @@ pub async fn confirm_delete(
         ),
         format!("/workouts/{id}/delete"),
         format!("/workouts/{id}"),
-    )
+    ))
 }
 
 pub async fn delete(
@@ -402,7 +324,7 @@ pub async fn confirm_delete_log(
         .find(|l| l.id == log_id)
         .ok_or_else(|| AppError::NotFound("Set not found".to_string()))?;
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Delete set",
         format!(
@@ -414,7 +336,7 @@ pub async fn confirm_delete_log(
         ),
         format!("/workouts/{session_id}/logs/{log_id}/delete"),
         format!("/workouts/{session_id}"),
-    )
+    ))
 }
 
 pub async fn delete_log(
@@ -458,15 +380,15 @@ pub async fn edit_log_page(
         .await?
         .ok_or_else(|| AppError::NotFound("Exercise not found".to_string()))?;
 
-    let template = EditLogTemplate {
-        user: auth_user,
-        workout: session,
-        log,
-        exercise_name: exercise.name,
+    let view = EditLogView {
+        user: &auth_user,
+        workout: &session,
+        log: &log,
+        exercise_name: &exercise.name,
         error: None,
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(edit_log_view(&view)).into_response())
 }
 
 pub async fn update_log(
@@ -558,7 +480,7 @@ pub async fn confirm_revoke_share(
         .find_owned_session(&id, &auth_user.id)
         .await?;
 
-    confirm::page(
+    Ok(confirm::page(
         auth_user,
         "Revoke share link",
         "The existing share link will stop working for anyone who already has it. \
@@ -566,7 +488,7 @@ pub async fn confirm_revoke_share(
             .to_string(),
         format!("/workouts/{id}/revoke-share"),
         format!("/workouts/{id}"),
-    )
+    ))
 }
 
 pub async fn revoke_share(
@@ -608,13 +530,7 @@ pub async fn view_shared(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let template = SharedWorkoutTemplate {
-        workout,
-        logs,
-        owner_username: owner.username,
-    };
-
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(shared_view(&workout, &logs, &owner.username)).into_response())
 }
 
 #[cfg(test)]

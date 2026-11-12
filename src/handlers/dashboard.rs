@@ -1,25 +1,16 @@
-use askama::Template;
 use axum::{
     extract::State,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 
 use crate::error::Result;
 use crate::middleware::AuthUser;
-use crate::models::WorkoutSession;
 use crate::state::AppState;
 use crate::timezone;
-
-#[derive(Template)]
-#[template(path = "dashboard/index.html")]
-struct DashboardTemplate {
-    user: AuthUser,
-    workouts_this_week: i64,
-    workouts_this_month: i64,
-    total_volume: f64,
-    recent_workouts: Vec<WorkoutSession>,
-    timezone_unset: bool,
-}
+use crate::views::{
+    dashboard::{DashboardView, dashboard},
+    layout::html_page,
+};
 
 pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
     let timezone = state.user_repo.find_timezone(&auth_user.id).await?;
@@ -44,14 +35,14 @@ pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result
         .find_sessions_by_user_paginated(&auth_user.id, 5, 0)
         .await?;
 
-    let template = DashboardTemplate {
-        user: auth_user,
+    let view = DashboardView {
+        user: &auth_user,
         workouts_this_week,
         workouts_this_month,
         total_volume,
-        recent_workouts,
+        recent_workouts: &recent_workouts,
         timezone_unset: timezone.is_none(),
     };
 
-    Ok(Html(template.render()?).into_response())
+    Ok(html_page(dashboard(&view)).into_response())
 }

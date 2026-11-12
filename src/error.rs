@@ -25,12 +25,6 @@ pub enum AppError {
     PasswordHash,
 }
 
-impl From<askama::Error> for AppError {
-    fn from(err: askama::Error) -> Self {
-        AppError::Internal(err.to_string())
-    }
-}
-
 impl From<tokio::task::JoinError> for AppError {
     fn from(err: tokio::task::JoinError) -> Self {
         AppError::Internal(err.to_string())
@@ -81,12 +75,6 @@ pub type Result<T> = std::result::Result<T, AppError>;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn askama_error_converts_to_internal() {
-        let err: AppError = askama::Error::Fmt.into();
-        assert!(matches!(err, AppError::Internal(_)));
-    }
 
     #[tokio::test]
     async fn join_error_converts_to_internal() {
