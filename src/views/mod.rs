@@ -6,3 +6,6 @@ pub mod confirm;
 pub mod dashboard;
 pub mod exercises;
 pub mod layout;
+pub mod settings;
+pub mod workout_show;
+pub mod workouts;
