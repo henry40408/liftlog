@@ -1,10 +1,8 @@
 use axum::response::Html;
-use maud::{DOCTYPE, Markup, PreEscaped, html};
+use maud::{DOCTYPE, Markup, html};
 
 use crate::middleware::AuthUser;
-
-const BASE_CSS: &str = include_str!("base.css");
-const BASE_JS: &str = include_str!("base.js");
+use crate::version::GIT_VERSION;
 
 /// The document shell shared by every page. `title` is the full `<title>`.
 pub fn page(title: &str, body: Markup) -> Markup {
@@ -19,8 +17,9 @@ pub fn page(title: &str, body: Markup) -> Markup {
                 title { (title) }
                 link rel="preconnect" href="https://fonts.bunny.net";
                 link href="https://fonts.bunny.net/css2?family=Chakra+Petch:wght@400;600;700&family=Overpass+Mono:wght@400;500;600;700&display=swap" rel="stylesheet";
-                style { (PreEscaped(BASE_CSS)) }
-                script { (PreEscaped(BASE_JS)) }
+                link rel="stylesheet" href={"/assets/app.css?v=" (GIT_VERSION)};
+                // Blocking on purpose: inline page scripts use `window.LiftLog`.
+                script src={"/assets/app.js?v=" (GIT_VERSION)} {}
             }
             body {
                 div class="app-accent-bar" {}

@@ -6,7 +6,9 @@ use axum::{
 
 use tower_http::csrf::CsrfLayer;
 
-use crate::handlers::{auth, dashboard, exercises, favicon, health, settings, stats, workouts};
+use crate::handlers::{
+    assets, auth, dashboard, exercises, favicon, health, settings, stats, workouts,
+};
 use crate::middleware::{
     CsrfLayerState, HstsHeader, SessionLayerState, baseline_headers_middleware, hsts_middleware,
     log_csrf_rejection, sliding_session_middleware,
@@ -16,6 +18,8 @@ use crate::state::AppState;
 fn routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health::health_check))
+        .route("/assets/app.css", get(assets::app_css))
+        .route("/assets/app.js", get(assets::app_js))
         .route("/favicon.svg", get(favicon::favicon_svg))
         .route("/apple-touch-icon.png", get(favicon::apple_touch_icon))
         .route("/", get(dashboard::index))
