@@ -1,9 +1,8 @@
-use askama::Template;
 use axum::{
     Form,
     extract::State,
     http::StatusCode,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 
@@ -13,11 +12,14 @@ use crate::handlers::confirm;
 use crate::handlers::reauth::{self, ReauthAttempt, ReauthOutcome};
 use crate::middleware::{AuthUser, SuppressSessionRefresh};
 use crate::models::password_policy_error;
-use crate::repositories::SessionListRow;
 use crate::session::{create_session_cookie, token_fingerprint};
 use crate::state::AppState;
 use crate::timezone;
 use crate::version::GIT_VERSION;
+use crate::views::{
+    layout::html_page,
+    settings::{SettingsView, settings},
+};
 
 #[derive(Deserialize)]
 pub struct ChangePasswordForm {
@@ -29,18 +31,6 @@ pub struct ChangePasswordForm {
 #[derive(Deserialize)]
 pub struct TimezoneForm {
     pub timezone: String,
-}
-
-#[derive(Template)]
-#[template(path = "settings/index.html")]
-struct SettingsTemplate {
-    user: AuthUser,
-    timezone: Option<String>,
-    timezone_names: Vec<&'static str>,
-    git_version: &'static str,
-    error: Option<String>,
-    success: Option<String>,
-    sessions: Vec<SessionListRow>,
 }
 
 struct PageNotice {
@@ -67,16 +57,18 @@ async fn render_page_with_status(
 ) -> Result<Response> {
     let sessions = state.session_repo.list_for_user(&auth_user.id).await?;
     let timezone = state.user_repo.find_timezone(&auth_user.id).await?;
-    let template = SettingsTemplate {
-        user: auth_user,
-        timezone,
-        timezone_names: chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name()).collect(),
+    let timezone_names: Vec<&'static str> =
+        chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name()).collect();
+    let view = SettingsView {
+        user: &auth_user,
+        timezone: timezone.as_deref(),
+        timezone_names: &timezone_names,
         git_version: GIT_VERSION,
-        error: notice.error,
-        success: notice.success,
-        sessions,
+        error: notice.error.as_deref(),
+        success: notice.success.as_deref(),
+        sessions: &sessions,
     };
-    Ok((status, Html(template.render()?)).into_response())
+    Ok((status, html_page(settings(&view))).into_response())
 }
 
 pub async fn index(State(state): State<AppState>, auth_user: AuthUser) -> Result<Response> {
