@@ -20,10 +20,12 @@ pub fn login(error: Option<&str>) -> Markup {
                 form method="post" action="/auth/login" {
                     div class="form-group" {
                         label for="username" { "Username" }
+                        " "
                         input type="text" id="username" name="username" required autofocus autocomplete="username";
                     }
                     div class="form-group" {
                         label for="password" { "Password" }
+                        " "
                         input type="password" id="password" name="password" required autocomplete="current-password";
                     }
                     button type="submit" { "Login" }
@@ -44,15 +46,19 @@ pub fn setup(error: Option<&str>) -> Markup {
                 form method="post" action="/auth/setup" {
                     div class="form-group" {
                         label for="setup_token" { "Setup token" }
+                        " "
                         input type="text" id="setup_token" name="setup_token" required autofocus autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX";
+                        " "
                         small { "Find it on the server's stderr (`docker logs` shows it), on the line starting with \"Setup token\". It is shown only until the first account exists." }
                     }
                     div class="form-group" {
                         label for="username" { "Username" }
+                        " "
                         input type="text" id="username" name="username" required;
                     }
                     div class="form-group" {
                         label for="password" { "Password (min 8 characters)" }
+                        " "
                         input type="password" id="password" name="password" required minlength="12" maxlength="128";
                     }
                     button type="submit" { "Create Account" }
@@ -72,10 +78,12 @@ pub fn new_user(user: &AuthUser, error: Option<&str>) -> Markup {
             form method="post" action="/users/new" {
                 div class="form-group" {
                     label for="username" { "Username" }
+                    " "
                     input type="text" id="username" name="username" required autofocus;
                 }
                 div class="form-group" {
                     label for="password" { "Password (min 8 characters)" }
+                    " "
                     input type="password" id="password" name="password" required minlength="12" maxlength="128";
                 }
                 button type="submit" { "Create User" }
@@ -105,9 +113,11 @@ pub fn confirm_action(view: &ConfirmActionView) -> Markup {
             form method="post" action=(view.form_action) {
                 div class="form-group" {
                     label for="current_password" { "Confirm your password to continue" }
+                    " "
                     input type="password" id="current_password" name="current_password" required autocomplete="current-password" autofocus;
                 }
                 button type="submit" class="btn btn-danger" { (view.action_label) }
+                " "
                 a href="/users" class="btn btn-ghost" { "Cancel" }
             }
         }
@@ -161,6 +171,7 @@ fn user_row(viewer: &AuthUser, u: &UserListItem) -> Markup {
                         div class="actions" {
                             @if !u.role.is_admin() {
                                 a href={"/users/" (u.id) "/promote"} class="btn btn-ghost btn-sm" { "Promote" }
+                                " "
                             }
                             a href={"/users/" (u.id) "/delete"} class="btn btn-danger btn-sm" { "Delete" }
                         }

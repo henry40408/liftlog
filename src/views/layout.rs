@@ -34,8 +34,10 @@ pub fn nav(user: &AuthUser) -> Markup {
     html! {
         nav class="nav-bar" {
             a href="/" class="nav-logo" { "Lift" span { "Log" } }
+            " "
             input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox";
-            label for="nav-toggle" class="nav-toggle-label" { span class="nav-toggle-icon" {} }
+            " "
+            label for="nav-toggle" class="nav-toggle-label" { " " span class="nav-toggle-icon" {} " " }
             ul class="nav-links" {
                 li { a href="/" { "Dashboard" } }
                 li { a href="/workouts" { "Workouts" } }

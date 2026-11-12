@@ -142,6 +142,7 @@ fn add_set_form(view: &ShowWorkoutView) -> Markup {
         form method="post" action={"/workouts/" (view.workout.id) "/logs"} {
             div class="form-group" {
                 label for="exercise_id" { "Exercise" }
+                " "
                 select id="exercise_id" name="exercise_id" required {
                     option value="" { "-- Select --" }
                     @for cat in view.categories {
@@ -156,6 +157,7 @@ fn add_set_form(view: &ShowWorkoutView) -> Markup {
             }
             div class="form-group" {
                 label for="weight" { "Weight" }
+                " "
                 // Datalist, not <select>: suggestions, any weight still typeable.
                 input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" list="weight-list" autocomplete="off" required value=[prefill.map(|p| p.weight)];
                 @if !view.weight_suggestions.is_empty() {
@@ -166,6 +168,7 @@ fn add_set_form(view: &ShowWorkoutView) -> Markup {
             }
             div class="form-group" {
                 label for="reps" { "Reps" }
+                " "
                 // Fixed list: `models::workout_log::REP_SCHEMES`.
                 input type="number" inputmode="numeric" id="reps" name="reps" min="1" list="reps-list" autocomplete="off" required value=[prefill.map(|p| p.reps)];
                 datalist id="reps-list" {
@@ -174,6 +177,7 @@ fn add_set_form(view: &ShowWorkoutView) -> Markup {
             }
             div class="form-group" {
                 label for="rpe" { "RPE (1-10, optional)" }
+                " "
                 input type="number" inputmode="numeric" id="rpe" name="rpe" min="1" max="10" value=[prefill.and_then(|p| p.rpe)];
             }
             button type="submit" { "Add Set" }

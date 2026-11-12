@@ -57,6 +57,7 @@ fn timezone_section(view: &SettingsView) -> Markup {
         form method="post" action="/settings/timezone" {
             div class="form-group" {
                 label for="timezone-input" { "Timezone (IANA name)" }
+                " "
                 input type="text" id="timezone-input" name="timezone" list="timezone-names" required
                     autocomplete="off" value=(view.timezone.unwrap_or("")) placeholder="Asia/Taipei";
                 datalist id="timezone-names" {
@@ -75,14 +76,17 @@ fn password_section() -> Markup {
         form method="post" action="/settings/password" {
             div class="form-group" {
                 label for="current_password" { "Current Password" }
+                " "
                 input type="password" id="current_password" name="current_password" required autocomplete="current-password";
             }
             div class="form-group" {
                 label for="new_password" { "New Password" }
+                " "
                 input type="password" id="new_password" name="new_password" required minlength="12" maxlength="128" autocomplete="new-password";
             }
             div class="form-group" {
                 label for="confirm_password" { "Confirm New Password" }
+                " "
                 input type="password" id="confirm_password" name="confirm_password" required minlength="12" maxlength="128" autocomplete="new-password";
             }
             button type="submit" { "Change Password" }

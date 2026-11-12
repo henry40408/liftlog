@@ -159,6 +159,7 @@ pub fn exercise(view: &ExerciseStatsView) -> Markup {
                 div class="card card-gold" style="margin-bottom: var(--sp-6); display: inline-block;" {
                     div style="display: flex; align-items: baseline; gap: var(--sp-4);" {
                         span class="stat-value" style="font-size: var(--font-4xl);" { (p.value) }
+                        " "
                         span class="text-secondary text-sm" {
                             "kg " (PreEscaped("&middot;")) " " (date_time(p.achieved_at))
                         }
@@ -241,11 +242,14 @@ fn progress_trend(view: &ExerciseStatsView) -> Markup {
         div id="exercise-chart-controls" style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);" {
             div role="group" aria-label="Metric" style="display: flex; gap: var(--sp-2);" {
                 (metric_tab(view, "top_set", "Top Set"))
+                " "
                 (metric_tab(view, "e1rm", "e1RM"))
+                " "
                 (metric_tab(view, "volume", "Volume"))
             }
             div role="group" aria-label="Range" style="display: flex; gap: var(--sp-2);" {
                 (range_tab(view, "20", "Last 20"))
+                " "
                 (range_tab(view, "all", "All"))
             }
         }
@@ -259,6 +263,7 @@ fn progress_trend(view: &ExerciseStatsView) -> Markup {
         }
         div style="display: flex; gap: var(--sp-4); margin-top: var(--sp-3); font-size: 12px; color: var(--text-secondary);" {
             span { span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);vertical-align:middle;margin-right:4px;" {} "Session" }
+            " "
             span { span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold);vertical-align:middle;margin-right:4px;" {} "Running PR" }
         }
         // `chart_data_json` has `</` escaped to `<\/` (see `encode_chart_data`), so

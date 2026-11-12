@@ -19,6 +19,7 @@ pub fn list(user: &AuthUser, exercises: &[Exercise], categories: &[ExerciseCateg
                             a href={"/stats/exercise/" (ex.id)} { (ex.name) }
                             div class="actions" {
                                 a href={"/exercises/" (ex.id) "/edit"} class="btn btn-ghost btn-sm" { "Edit" }
+                                " "
                                 a href={"/exercises/" (ex.id) "/delete"} class="btn btn-danger btn-sm"
                                     data-confirm={"Delete " (ex.name) "?"} { "Delete" }
                             }
@@ -40,10 +41,12 @@ pub fn new(user: &AuthUser, categories: &[ExerciseCategory], error: Option<&str>
             form method="post" action="/exercises" {
                 div class="form-group" {
                     label for="name" { "Name" }
+                    " "
                     input type="text" id="name" name="name" required autofocus;
                 }
                 div class="form-group" {
                     label for="category" { "Category" }
+                    " "
                     select id="category" name="category" required {
                         @for cat in categories { option value=(cat.name) { (cat.display_name) } }
                     }
@@ -70,10 +73,12 @@ pub fn edit(
             form method="post" action={"/exercises/" (exercise.id)} {
                 div class="form-group" {
                     label for="name" { "Name" }
+                    " "
                     input type="text" id="name" name="name" value=(exercise.name) required autofocus;
                 }
                 div class="form-group" {
                     label for="category" { "Category" }
+                    " "
                     select id="category" name="category" required {
                         @for cat in categories {
                             option value=(cat.name) selected[cat.name == exercise.category] { (cat.display_name) }

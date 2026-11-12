@@ -23,11 +23,13 @@ pub fn dashboard(view: &DashboardView) -> Markup {
             }
             div class="actions actions-lead" {
                 a href="/workouts/new" class="btn btn-primary" { "+ New Workout" }
+                " "
                 a href="/stats/prs" class="btn btn-ghost" { "View PRs" }
             }
             @if view.timezone_unset {
                 div class="alert alert-warning" role="status" {
                     span class="alert-text" { "Your timezone is not set, so weekly and monthly stats use UTC dates." }
+                    " "
                     a href="/settings#timezone" class="btn btn-primary btn-sm" { "Set timezone" }
                 }
             }
@@ -47,6 +49,7 @@ pub fn dashboard(view: &DashboardView) -> Markup {
                     @for w in view.recent_workouts {
                         div class="workout-item" {
                             a href={"/workouts/" (w.id)} { (w.date) }
+                            " "
                             span class="notes" {
                                 @if let Some(n) = &w.notes { (n) } @else { (PreEscaped("&mdash;")) }
                             }

@@ -31,6 +31,7 @@ pub fn list(view: &WorkoutsListView) -> Markup {
                     @for w in view.workouts {
                         div class="workout-item" {
                             a href={"/workouts/" (w.id)} { (w.date) }
+                            " "
                             span class="notes" {
                                 @if let Some(n) = &w.notes { (n) } @else { (PreEscaped("&mdash;")) }
                             }
@@ -49,9 +50,11 @@ fn pagination(page: i64, total_pages: i64) -> Markup {
         div class="pagination" {
             span { "Page " (page) " / " (total_pages) }
             @if page > 1 {
+                " "
                 a href={"/workouts?page=" (page - 1)} { (PreEscaped("&larr;")) " Previous" }
             }
             @if page < total_pages {
+                " "
                 a href={"/workouts?page=" (page + 1)} { "Next " (PreEscaped("&rarr;")) }
             }
         }
@@ -92,10 +95,12 @@ pub fn new(view: &NewWorkoutView) -> Markup {
             form method="post" action="/workouts" {
                 div class="form-group" {
                     label for="date" { "Date" }
+                    " "
                     input type="date" id="date" name="date" value=(view.today) data-server-today=(view.today) required;
                 }
                 div class="form-group" {
                     label for="notes" { "Notes (optional)" }
+                    " "
                     textarea id="notes" name="notes" rows="3" {}
                 }
                 button type="submit" { "Create Workout" }
@@ -118,10 +123,12 @@ pub fn edit(user: &AuthUser, workout: &WorkoutSession, error: Option<&str>) -> M
             form method="post" action={"/workouts/" (workout.id)} {
                 div class="form-group" {
                     label for="date" { "Date" }
+                    " "
                     input type="date" id="date" name="date" value=(workout.date) required;
                 }
                 div class="form-group" {
                     label for="notes" { "Notes (optional)" }
+                    " "
                     textarea id="notes" name="notes" rows="3" { @if let Some(n) = &workout.notes { (n) } }
                 }
                 button type="submit" { "Save Changes" }
@@ -150,22 +157,27 @@ pub fn edit_log(view: &EditLogView) -> Markup {
             form method="post" action={"/workouts/" (workout.id) "/logs/" (log.id)} {
                 div class="form-group" {
                     label { "Exercise" }
+                    " "
                     input type="text" value=(view.exercise_name) disabled style="opacity: 0.6;";
                 }
                 div class="form-group" {
                     label { "Set Number" }
+                    " "
                     input type="number" inputmode="numeric" value=(log.set_number) disabled style="opacity: 0.6;";
                 }
                 div class="form-group" {
                     label for="weight" { "Weight" }
+                    " "
                     input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" value=(log.weight) required;
                 }
                 div class="form-group" {
                     label for="reps" { "Reps" }
+                    " "
                     input type="number" inputmode="numeric" id="reps" name="reps" min="1" value=(log.reps) required;
                 }
                 div class="form-group" {
                     label for="rpe" { "RPE (1-10, optional)" }
+                    " "
                     input type="number" inputmode="numeric" id="rpe" name="rpe" min="1" max="10" value=[log.rpe];
                 }
                 button type="submit" { "Save Changes" }
