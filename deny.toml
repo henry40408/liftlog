@@ -11,9 +11,6 @@ ignore = [
     # rusqlite 0.41, which r2d2_sqlite 0.36.0 (cooldown ends 2026-11-16) supports.
     # Remove after upgrading. Tracked in #233.
     "RUSTSEC-2026-0459",
-    # pin-utils is unmaintained with no safe upgrade; pulled in by hyper 1.8.1.
-    # Remove once hyper drops it. Tracked in #232.
-    "RUSTSEC-2026-0441",
 ]
 
 [licenses]
