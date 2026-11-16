@@ -4,3 +4,8 @@
 *.sqlite3-shm
 *.sqlite3-wal
 .env
+bin/
+covdata/
+coverage*.out
+e2e/.tmp/
+!internal/db/testdata/*.sqlite3
