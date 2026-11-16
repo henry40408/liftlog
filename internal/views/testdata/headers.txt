@@ -1,0 +1,297 @@
+## anon-redirect-login-empty-db: GET /auth/login -> 303
+location: /auth/setup
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## setup: GET /auth/setup -> 200
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1704
+
+
+## setup-invalid-token: POST /auth/setup -> 403
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1781
+
+
+## setup-weak-password: POST /auth/setup -> 200
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1812
+
+
+## setup-short-password: POST /auth/setup -> 200
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1768
+
+
+## setup-no-username: POST /auth/setup -> 200
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1749
+
+
+## setup-success: POST /auth/setup -> 303
+location: /
+set-cookie: session=547faca9-954c-4a03-ae83-56241b5e56c9; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## setup-again-redirect: GET /auth/setup -> 303
+location: /auth/login
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## login-while-signed-in: GET /auth/login -> 303
+location: /
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## ex-create-squat: POST /exercises -> 303
+location: /exercises
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## ex-create-bench: POST /exercises -> 303
+location: /exercises
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## wk-create: POST /workouts -> 303
+location: /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## log-1: POST /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356/logs -> 303
+location: /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## log-2: POST /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356/logs -> 303
+location: /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## log-3: POST /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356/logs -> 303
+location: /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## share: POST /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356/share -> 303
+location: /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## new-user: POST /users/new -> 303
+location: /users
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## workout-show-created: GET /workouts/5ec1073b-9cbf-45bd-86cc-80ae5afcb356 -> 200
+content-type: text/html; charset=utf-8
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 11885
+
+
+## login-success: POST /auth/login -> 303
+location: /
+set-cookie: session=d7fd09cc-474b-4c8f-a20d-dc729de1a3a2; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## logout: POST /auth/logout -> 303
+location: /auth/login
+set-cookie: session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0
+clear-site-data: "cache", "cookies", "storage"
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 0
+
+
+## GET /health (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: application/json
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 50
+
+
+## GET /assets/app.css (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: text/css; charset=utf-8
+cache-control: public, max-age=86400
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 38718
+
+
+## GET /assets/app.js (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: text/javascript; charset=utf-8
+cache-control: public, max-age=86400
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 4449
+
+
+## GET /favicon.svg (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: image/svg+xml
+cache-control: public, max-age=86400
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 323
+
+
+## GET /apple-touch-icon.png (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: image/png
+cache-control: public, max-age=86400
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1565
+
+
+## GET /auth/login (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 1277
+
+
+## GET /shared/seed-share-active-0000000000000000000000000000000000000000 (anonymous, seeded server)
+HTTP/1.1 200 OK
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 3238
+
+
+## GET / (alice, seeded server)
+HTTP/1.1 200 OK
+content-type: text/html; charset=utf-8
+cache-control: no-cache, no-store, must-revalidate
+pragma: no-cache
+content-security-policy: frame-ancestors 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+content-length: 3200
+
