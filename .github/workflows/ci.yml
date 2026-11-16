@@ -4,145 +4,115 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
-# A newer push cancels the previous run on the same ref.
+# A newer push cancels the running one for the same ref; tag runs never are.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  # Every module is permissively licensed, so there is no licence gate.
+  deps:
+    name: deps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go mod tidy -diff
+      - run: |
+          go mod vendor
+          test -z "$(git status --porcelain -- vendor go.mod go.sum)"
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      # `e2e/` is a separate Go module with its own vendor directory.
+      - run: go mod tidy -diff
+        working-directory: e2e
+      - run: |
+          go mod vendor
+          test -z "$(git status --porcelain -- vendor go.mod go.sum)"
+        working-directory: e2e
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        working-directory: e2e
+
   lint:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          fetch-depth: 0
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-  lint-e2e:
-    name: lint-e2e
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          # `e2e` is a separate workspace and must be named to be cached.
-          workspaces: e2e
-
-      # Outside `cargo deny`: none of the browser stack ships.
-      - name: Check E2E formatting
+          go-version-file: go.mod
+      - run: |
+          unformatted="$(git ls-files -z '*.go' | grep -zvE '(^|/)vendor/' | xargs -0 gofmt -l 2>&1)"
+          echo "$unformatted"
+          test -z "$unformatted"
+      - run: go vet -mod=vendor ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - run: go vet -mod=vendor ./...
         working-directory: e2e
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy on E2E
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
         working-directory: e2e
-        run: cargo clippy --all-targets -- -D warnings
+      # CI and the Dockerfile read the Go version from the root go.mod only, so
+      # the nested module must not drift from it.
+      - run: |
+          root="$(grep -E '^(go|toolchain) ' go.mod)"
+          nested="$(grep -E '^(go|toolchain) ' e2e/go.mod)"
+          test "$root" = "$nested" || { echo "e2e/go.mod differs from go.mod:"; echo "$root"; echo "--"; echo "$nested"; exit 1; }
 
   test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Build
-        run: cargo build --verbose
-
-      - uses: taiki-e/install-action@8c6986fc38d22c217606a7ad4f1d438eced263e0 # nextest
-
-      - name: Run tests
-        run: cargo nextest run
-
-  deny:
-    name: deny
+    name: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          tool: cargo-deny@0.18.9
-      - name: cargo deny check
-        run: cargo deny check
-
-  e2e:
-    name: e2e
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0 # full history so build.rs `git describe` resolves a tagged version
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          # `e2e` is a separate workspace and must be named to be cached.
-          workspaces: |
-            .
-            e2e
-          # Own key: an exact hit is never re-saved, so sharing a key with
-          # another job would keep restoring that job's artefacts.
-          key: dev
-
-      # Built up front so the compile is off the suite's startup timeout.
-      - name: Build server
-        run: cargo build
-
-      # The runner ships Chrome; thirtyfour downloads chromedriver.
-      - name: Run E2E tests
-        working-directory: e2e
-        run: cargo test --test e2e
+          go-version-file: go.mod
+      - run: go test -mod=vendor -race ./...
 
   coverage:
     name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          fetch-depth: 0
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - uses: taiki-e/install-action@ad25acb6b9413207b3174a4202c12aa9133691c6 # cargo-llvm-cov
-
-      - uses: taiki-e/install-action@8c6986fc38d22c217606a7ad4f1d438eced263e0 # nextest
-
-      - name: Generate coverage
-        run: cargo llvm-cov nextest --lcov --output-path lcov.info
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+          go-version-file: go.mod
+      # `-coverprofile` ignores the binary cmd/liftlog's TestMain execs; with
+      # LIFTLOG_COVERDIR set it builds that binary with `-cover`.
+      - run: |
+          LIFTLOG_COVERDIR="$PWD/covdata" go test -mod=vendor -coverprofile=coverage.out ./...
+          go tool covdata textfmt -i=covdata -o coverage-bin.out
+          tail -n +2 coverage-bin.out >> coverage.out
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: henry40408/liftlog
-          files: lcov.info
+          files: coverage.out
           fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history so the VCS-stamped version resolves
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Prebuild the server the suite launches, keeping the compile off its
+      # timeout.
+      - run: go build -mod=vendor -o bin/liftlog ./cmd/liftlog
+      # The runner ships Chrome; chromedp starts it itself, so no driver is needed.
+      # Pinned, because chromedp's own search would pick the runner's Chromium
+      # snapshot ahead of google-chrome.
+      - run: google-chrome --version
+      - run: go test -count=1 -v -timeout 15m ./...
+        working-directory: e2e
+        env:
+          E2E_CHROME: /usr/bin/google-chrome
 
   lint-workflow:
     name: lint-workflow

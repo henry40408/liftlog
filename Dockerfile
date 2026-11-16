@@ -1,56 +1,37 @@
 # syntax=docker/dockerfile:1
 
-# ---- build: static musl binary, cross-compiled natively by cargo-zigbuild ----
-# No qemu: zig cross-compiles to the target's musl triple. No Rust version:
-# rust-toolchain.toml is the source of truth. Keep the `bookworm` suffix — a
-# bare `rust:<version>` tag resolves to trixie, a silent Debian major bump.
-FROM --platform=$BUILDPLATFORM rust:bookworm AS build
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl xz-utils \
-    && rm -rf /var/lib/apt/lists/*
-
-# 0.15+ needs libc++-19 for bindgen.
-ARG ZIG_VERSION=0.14.1
-# Floor: older releases pass rustc 1.98's `-Wl,--fix-cortex-a53-843419` to
-# zig cc, which rejects it (rust-cross/cargo-zigbuild#452).
-ARG ZIGBUILD_VERSION=0.23.0
-RUN cargo install cargo-zigbuild --version "${ZIGBUILD_VERSION}" --locked
-RUN set -eux; \
-    case "$(uname -m)" in \
-      x86_64) zarch=x86_64 ;; \
-      aarch64) zarch=aarch64 ;; \
-      *) echo "unsupported build arch $(uname -m)" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-${zarch}-linux-${ZIG_VERSION}.tar.xz" \
-      | tar -xJ -C /opt; \
-    ln -s "/opt/zig-${zarch}-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
+# ---- build: cross-compile a static Go binary --------------------------------
+# Runs on the native build platform; Go cross-compiles to the target with
+# CGO off, so no qemu and no C toolchain.
+# No Go version tag: the image's Go is used when it is at least go.mod's
+# `toolchain` line; otherwise GOTOOLCHAIN=auto fetches that line (auto only
+# moves up). Keep the `bookworm` suffix — a bare tag
+# resolves to trixie, a silent Debian bump.
+FROM --platform=$BUILDPLATFORM golang:bookworm AS build
 
 WORKDIR /app
 
-# Install the pinned toolchain in its own layer so source edits don't
-# re-download it.
-COPY rust-toolchain.toml .
-RUN cargo --version
+# The official image sets GOTOOLCHAIN=local, which ignores go.mod's toolchain
+# line. Fetch a newer toolchain in a layer keyed on go.mod/go.sum alone, so
+# source edits do not re-download it.
+ENV GOTOOLCHAIN=auto
+COPY go.mod go.sum ./
+RUN go version
 
 COPY . .
 
-# .git is excluded by .dockerignore, so build.rs takes GIT_VERSION from CI.
+# `vendor/` ships in the repository, so the build needs no network. .git is
+# excluded by .dockerignore, so the version comes from GIT_VERSION.
+ARG TARGETOS
 ARG TARGETARCH
 ARG GIT_VERSION=dev
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target,sharing=locked \
-    set -eux; \
-    case "$TARGETARCH" in \
-      amd64) target=x86_64-unknown-linux-musl ;; \
-      arm64) target=aarch64-unknown-linux-musl ;; \
-      *) echo "unsupported target arch $TARGETARCH" >&2; exit 1 ;; \
-    esac; \
-    rustup target add "$target"; \
-    GIT_VERSION="${GIT_VERSION}" cargo zigbuild --release --target "$target"; \
-    install -Dm755 "target/${target}/release/liftlog" /out/liftlog
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
+    go build -mod=vendor -trimpath \
+      -ldflags "-s -w -X github.com/henry40408/liftlog/internal/version.version=${GIT_VERSION}" \
+      -o /out/liftlog ./cmd/liftlog
 
-# ---- runtime: distroless static (CA certs + tzdata, no shell) ---------------
+# ---- runtime: minimal static image (CA certs + tzdata, no shell) ------------
 # Root user (not :nonroot) so existing bind-mounted /data stays writable.
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/liftlog /liftlog
