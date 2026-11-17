@@ -87,9 +87,11 @@ jobs:
 
   # One job, so the required check stays named `mutation`. Pushes to main run
   # every mutant (about 8 minutes on 10 cores, expect 20-25 on this 4-vCPU
-  # runner); pull requests only mutate the lines they change. `e2e/` is a
-  # separate module with no coverage profile, so gremlins would count its
-  # mutants as "not covered".
+  # runner); pull requests only mutate the lines they change. The efficacy
+  # threshold, `--timeout-coefficient` and the `e2e/` and `vendor/` exclusions
+  # live in .gremlins.yaml: gremlins v0.6.0 ignores `--threshold-efficacy` on
+  # the command line, so never pass it here. The run fails when efficacy is at
+  # or below 95%.
   mutation:
     name: mutation
     runs-on: ubuntu-latest
@@ -109,8 +111,7 @@ jobs:
       - run: go clean -testcache
       - if: github.event_name == 'push'
         run: |
-          go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
-            -E '^e2e/' -E '^vendor/' --threshold-efficacy 95 --timeout-coefficient 20 .
+          go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash .
       - if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -121,9 +122,20 @@ jobs:
             echo "No changes against $BASE_REF; nothing to mutate."
             exit 0
           fi
+          status=0
           go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
-            -E '^e2e/' -E '^vendor/' --threshold-efficacy 95 --timeout-coefficient 20 \
-            --diff "origin/$BASE_REF" .
+            --diff "origin/$BASE_REF" . > "$RUNNER_TEMP/mutation.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/mutation.log"
+          # A diff with no mutable Go line (docs, CI only) yields zero mutants,
+          # which gremlins scores as 0% and so fails the threshold. That is not
+          # a low score, so treat it as a pass.
+          if [ "$status" -ne 0 ] \
+            && grep -q '^Killed: 0, Lived: 0, Not covered: 0$' "$RUNNER_TEMP/mutation.log" \
+            && grep -q '^Timed out: 0, ' "$RUNNER_TEMP/mutation.log"; then
+            echo "No mutants in the changed lines; nothing to test."
+            exit 0
+          fi
+          exit "$status"
 
   coverage:
     name: coverage
