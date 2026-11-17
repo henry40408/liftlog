@@ -62,6 +62,7 @@ func TestDictionarySuggestionsFollowTheTokenShape(t *testing.T) {
 		{"all upper gets the capitalization hint first", match.Match{Token: "GIRAFFE"}, []string{suggestionCapitalization}},
 		{"lower case needs none", match.Match{Token: "giraffe"}, nil},
 		{"reversed long word", match.Match{Token: "effarig", Reversed: true}, []string{suggestionReversedWords}},
+		{"reversed word of exactly four letters", match.Match{Token: "abcd", Reversed: true}, []string{suggestionReversedWords}},
 		{"reversed short word is not worth a hint", match.Match{Token: "abc", Reversed: true}, nil},
 		{"l33t", match.Match{Token: "g1raffe", L33t: true}, []string{suggestionSubstitutions}},
 	}
