@@ -16,7 +16,11 @@ go test ./internal/server -run TestCSRF   # one test
 go vet ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+# licences (CI-enforced; GOROOT must be set explicitly or the standard library fails with "does not have module info")
+GOROOT=$(go env GOROOT) go run github.com/google/go-licenses/v2@v2.0.1 check ./... --include_tests --allowed_licenses=<list from ci.yml>
 ```
+
+Licences are enforced by the `deps` job in `.github/workflows/ci.yml`, which holds the allow-list (`ALLOWED_LICENSES`). The root module and `e2e/` are each checked once; `e2e/` alone also allows MPL-2.0 (godog pulls in go-immutable-radix, go-memdb and golang-lru), and MPL-2.0 must not enter the root module. Locally, run the `e2e/` check from `e2e/` with `--ignore github.com/henry40408/liftlog/e2e` (the module has no licence file) and `,MPL-2.0` appended. `--include_tests` is needed to see the test-only dependencies. An Unknown or unlisted licence is a decision for the maintainer: do not widen the list or swap the module to get around it.
 
 CI also checks: `gofmt -l` over the tracked non-vendor `.go` files prints nothing; `go mod tidy -diff`; after `go mod vendor`, `git status --porcelain -- vendor go.mod go.sum` prints nothing (`git diff` would miss an untracked vendored package). To add or update a dependency: `go get <module>@<version>`, `go mod tidy`, `go mod vendor`, and commit `go.mod`, `go.sum` and `vendor/` together. Check the release is at least 7 days old first.
 
