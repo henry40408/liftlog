@@ -11,10 +11,16 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
-  # Every module is permissively licensed, so there is no licence gate.
+  # The licence allow-list lives in this job, once for the root module and once
+  # for `e2e/`, which alone may also use MPL-2.0 (godog brings it in). go-licenses
+  # reports standard-library packages as "does not have module info" unless
+  # GOROOT is set explicitly, and `--include_tests` is what makes it see the
+  # test-only dependencies of `e2e/`.
   deps:
     name: deps
     runs-on: ubuntu-latest
+    env:
+      ALLOWED_LICENSES: Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MIT-0,Zlib,Unlicense,CC0-1.0,Unicode-3.0,BSL-1.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -25,6 +31,9 @@ jobs:
           go mod vendor
           test -z "$(git status --porcelain -- vendor go.mod go.sum)"
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - run: |
+          GOROOT="$(go env GOROOT)" go run github.com/google/go-licenses/v2@v2.0.1 check ./... \
+            --include_tests --allowed_licenses="$ALLOWED_LICENSES"
       # `e2e/` is a separate Go module with its own vendor directory.
       - run: go mod tidy -diff
         working-directory: e2e
@@ -33,6 +42,12 @@ jobs:
           test -z "$(git status --porcelain -- vendor go.mod go.sum)"
         working-directory: e2e
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        working-directory: e2e
+      # `--ignore` skips the e2e module itself, which has no licence file.
+      - run: |
+          GOROOT="$(go env GOROOT)" go run github.com/google/go-licenses/v2@v2.0.1 check ./... \
+            --include_tests --ignore github.com/henry40408/liftlog/e2e \
+            --allowed_licenses="$ALLOWED_LICENSES,MPL-2.0"
         working-directory: e2e
 
   lint:
