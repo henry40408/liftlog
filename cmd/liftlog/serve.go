@@ -78,7 +78,7 @@ func serve(p serveParams) error {
 	}
 	// Restore default signal handling, so a second signal force-quits a stuck drain.
 	stop()
-	shutdownGracefully(httpServer, p.logger)
+	shutdownGracefully(httpServer, p.logger, shutdownTimeout)
 	// Drained; the sweep stops before the checkpoint so nothing writes after it.
 	stopSweep()
 	if err := db.Checkpoint(context.Background(), pool); err != nil {
@@ -130,8 +130,8 @@ func announceSetupToken(ctx context.Context, users *repo.Users, stderr io.Writer
 	return token, nil
 }
 
-func shutdownGracefully(httpServer *http.Server, logger *slog.Logger) {
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+func shutdownGracefully(httpServer *http.Server, logger *slog.Logger, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	err := httpServer.Shutdown(ctx)
 	if err == nil {
