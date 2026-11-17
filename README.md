@@ -1,12 +1,12 @@
 # LiftLog
 
-> A self-hosted workout logging application built with Rust.
+> A self-hosted workout logging application built with Go.
 
 [![CI](https://github.com/henry40408/liftlog/actions/workflows/ci.yml/badge.svg)](https://github.com/henry40408/liftlog/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/henry40408/liftlog/graph/badge.svg)](https://codecov.io/gh/henry40408/liftlog)
 [![Release](https://img.shields.io/github/v/release/henry40408/liftlog)](https://github.com/henry40408/liftlog/releases/latest)
 [![License](https://img.shields.io/github/license/henry40408/liftlog)](LICENSE.txt)
-[![Rust toolchain](https://img.shields.io/badge/dynamic/toml?url=https://raw.githubusercontent.com/henry40408/liftlog/main/rust-toolchain.toml&query=$.toolchain.channel&label=rust%20toolchain&logo=rust)](https://www.rust-lang.org/)
+[![Go version](https://img.shields.io/github/go-mod/go-version/henry40408/liftlog)](go.mod)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/henry40408/liftlog)
 [![Casual Maintenance Intended](https://casuallymaintained.tech/badge.svg)](https://casuallymaintained.tech/)
 [![Vibe Coded](https://img.shields.io/badge/vibe_coded-Claude-d97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
@@ -34,34 +34,38 @@ docker run -d \
   ghcr.io/henry40408/liftlog:latest
 ```
 
-Visit `http://localhost:8080` and create your account. The form asks for a **setup token**, which the server prints once at startup while no account exists, on stderr only (never through the structured log), as `Setup token: XXXXX-XXXXX`. Read it with `docker logs liftlog` (which captures stderr) (or the terminal running `./target/release/liftlog`). Dashes, case and spaces do not matter. The token lives in memory only: a restart before the first account issues a new one, and none is issued once any user exists.
+Visit `http://localhost:8080` and create your account. The form asks for a **setup token**, which the server prints once at startup while no account exists, on stderr only (never through the structured log), as `Setup token: XXXXX-XXXXX`. Read it with `docker logs liftlog` (which captures stderr) (or the terminal running `bin/liftlog`). Dashes, case and spaces do not matter. The token lives in memory only: a restart before the first account issues a new one, and none is issued once any user exists.
 
 ### From source
 
 ```bash
 git clone https://github.com/henry40408/liftlog.git
 cd liftlog
-cargo build --release
-./target/release/liftlog
+go build -o bin/liftlog ./cmd/liftlog
+./bin/liftlog
 ```
+
+The binary is static (pure Go, no cgo) and embeds its assets and migrations. Third-party modules are vendored, so the build needs no network. `liftlog --version` prints the version, which comes from `-ldflags "-X github.com/henry40408/liftlog/internal/version.version=..."`, else the VCS stamp, else `dev`.
 
 ## Configuration
 
-All configuration is via environment variables:
+Configuration is via environment variables. A `.env` file in the working directory (only `./.env`) is read at startup; a variable already set in the environment always wins over the file. The file is strict: every non-blank, non-comment line must be `NAME=value` (an optional `export ` prefix and single or double quotes are accepted, nothing is unescaped), and a malformed line stops startup.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite connection string |
+| `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite location: a `sqlite:path?query` URL or a bare path (the query is ignored); the container image sets `/data/liftlog.sqlite3`. Existing databases made by the Rust build open unchanged. |
 | `LIFTLOG_BIND` | `127.0.0.1:8080` | Bind address. Loopback by default; the container image sets `0.0.0.0:8080`. |
 | `LIFTLOG_TRUSTED_PROXY_HEADER` | (unset) | Header trusted to carry the client IP for the per-IP login limit: `x-forwarded-for` or `x-real-ip`. **Your proxy MUST overwrite it** (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` or `proxy_set_header X-Real-IP $remote_addr;`), otherwise clients can forge their IP. Unset, no header is read and every client behind a proxy shares one bucket. |
 | `LIFTLOG_TRUSTED_PROXIES` | (empty) | Comma-separated IPs of proxies allowed to supply that header. Loopback is always trusted. The **rightmost** `X-Forwarded-For` hop is used. A proxy in a separate container must be listed here. |
 | `LIFTLOG_COOKIE_SECURE` | `false` | Set `true` for HTTPS (including behind a TLS-terminating proxy); leave `false` on plain HTTP or the browser silently drops the cookie. `true` also renames the cookie to `__Host-session`, so flipping it logs everyone out once. |
 | `LIFTLOG_HSTS_MAX_AGE` | `0` | `Strict-Transport-Security` `max-age` in seconds; `0`/unset/empty sends no header. |
 | `LIFTLOG_HSTS_INCLUDE_SUBDOMAINS` | `false` | Add `includeSubDomains` to that header. |
-| `RUST_LOG` | `error,liftlog=info` | Log filter |
-| `LIFTLOG_LOG_FORMAT` | `full` | `full`, `compact`, `pretty`, or `json` (also `--log-format`) |
+| `LIFTLOG_LOG_FORMAT` | `full` | `full` (slog text, one `key=value` line per event) or `json` (also `--log-format`) |
+| `LIFTLOG_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` (also `--log-level`) |
 
-> **Migration note:** `BIND` and `LOG_FORMAT` were renamed to `LIFTLOG_BIND` and `LIFTLOG_LOG_FORMAT`. If an old name is still set, the server refuses to start and names the replacement.
+Precedence is flag, then environment, then default. Logs go to stdout; stderr carries fatal errors and the setup token.
+
+> **Migration note:** `BIND`, `LOG_FORMAT` and `RUST_LOG` are retired. If any of them is still set (even empty), the server refuses to start and names the replacement: `LIFTLOG_BIND`, `LIFTLOG_LOG_FORMAT`, `LIFTLOG_LOG_LEVEL`. `RUST_LOG`'s per-module filter syntax has no equivalent; the Rust build's `compact` and `pretty` log formats are gone too, and are rejected rather than ignored.
 
 ### Reverse proxy
 
@@ -89,7 +93,7 @@ All configuration is via environment variables:
 
 Passwords must be **12–128 characters** (counted as characters, not bytes; never truncated) **and score ≥ 3 of 4 on [zxcvbn](https://github.com/dropbox/zxcvbn)**, which runs offline and also rejects passwords built from the username. So `MyPassword12` is refused and `deadlift squats bench` accepted. Refusals show zxcvbn's feedback but not its crack-time estimate.
 
-The 12-character floor is below NIST SP800-63B's 15 for non-MFA deployments on purpose: 12 plus zxcvbn rejects strictly more weak passwords than 15 alone (`123456789012345` is 15 characters). Both thresholds are constants in `src/models/user.rs`; changing them doesn't invalidate stored passwords. zxcvbn's dictionaries are English-centric, so passwords in other scripts rely mainly on the length floor.
+The 12-character floor is below NIST SP800-63B's 15 for non-MFA deployments on purpose: 12 plus zxcvbn rejects strictly more weak passwords than 15 alone (`123456789012345` is 15 characters). Both thresholds are constants in `internal/auth/policy.go`; changing them doesn't invalidate stored passwords. zxcvbn's dictionaries are English-centric, so passwords in other scripts rely mainly on the length floor.
 
 ### Headers
 
@@ -103,7 +107,7 @@ Every response carries `Content-Security-Policy: frame-ancestors 'none'`, `X-Fra
 
 ## Audit Log
 
-Security events are structured `tracing` events under the `liftlog::audit` target. Set `LIFTLOG_LOG_FORMAT=json` for one JSON event per line.
+Security events are structured `slog` records carrying the attribute `target=liftlog::audit`. Set `LIFTLOG_LOG_FORMAT=json` for one JSON event per line.
 
 | Event | Level | Meaning |
 |-------|-------|---------|
@@ -144,28 +148,29 @@ Build locally with `docker build -t liftlog:latest .`
 
 ## Development
 
-SQLite is bundled via rusqlite; only a Rust toolchain is needed.
+SQLite is [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (pure Go); only a Go toolchain is needed. The version comes from `go.mod`.
 
 ```bash
-cargo run
-cargo nextest run
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
+go run ./cmd/liftlog
+go test -race ./...
+gofmt -l $(git ls-files '*.go' | grep -v '^vendor/' | grep -v '^e2e/vendor/')
+go vet ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 ```
 
 ### E2E tests
 
-`e2e/` ([cucumber](https://github.com/cucumber-rs/cucumber) + [thirtyfour](https://github.com/stevepryde/thirtyfour)) is a separate Cargo workspace with Gherkin features in `e2e/features/`. It needs a local Chrome or Chromium (`brew install --cask ungoogled-chromium` on macOS):
+`e2e/` ([godog](https://github.com/cucumber/godog) + [chromedp](https://github.com/chromedp/chromedp)) is a separate Go module with its own `vendor/` and Gherkin features in `e2e/features/`. It needs a local Chrome or Chromium (`brew install --cask ungoogled-chromium` on macOS); there is no driver to download:
 
 ```bash
-cargo build          # the suite runs target/debug/liftlog as-is, even if stale
+go build -o bin/liftlog ./cmd/liftlog   # the suite runs bin/liftlog as-is, even if stale
 cd e2e
-cargo test --test e2e
+go test -count=1 -v ./...
 ```
 
 ## Tech Stack
 
-Axum 0.8 · Tokio · SQLite (rusqlite + r2d2) · maud · Argon2
+Go `net/http` · SQLite (modernc.org/sqlite) · server-rendered HTML · Argon2id
 
 ## License
 

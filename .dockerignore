@@ -1,40 +1,13 @@
-# Build artifacts
-target/
-debug/
-release/
+# CI passes the version in as GIT_VERSION; excluding .git stops every commit
+# from invalidating the `COPY . .` layer and the build behind it.
+.git
+.github
 
-# Cargo
-.cargo/
+# Browser tests: a separate Go module that never ships in the image.
+e2e
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment
-.env
-.env.*
-!.env.example
-
-# Database
+# Local build output and data.
+bin
 *.sqlite3
-*.db
-
-# Git
-.git/
-.gitignore
-
-# Documentation
-*.md
-!README.md
-
-# CI/CD
-.github/
-
-# Browser E2E suite
-e2e/
-
-# Misc
-Dockerfile
-.dockerignore
+*.sqlite3-*
+.env

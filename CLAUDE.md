@@ -2,92 +2,106 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-LiftLog is a self-hosted workout journal: an Axum + maud server-rendered app backed by a single SQLite file, shipped as a Docker image.
+LiftLog is a self-hosted workout journal: a Go `net/http` server-rendered app backed by a single SQLite file (pure-Go `modernc.org/sqlite`, no cgo), shipped as a Docker image. It was rewritten from Rust; some fixtures and comments refer to "the Rust build" for that reason.
 
 ## Commands
 
+The Go version comes from `go.mod` alone (`go` + `toolchain` lines). Third-party modules are **vendored and committed** (`vendor/`, and `e2e/vendor/`); Go selects `-mod=vendor` automatically.
+
 ```bash
-cargo run                                 # dev server on $LIFTLOG_BIND (default 127.0.0.1:8080)
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo deny check
-cargo nextest run
-cargo nextest run --test workout_test     # single integration file
-cargo nextest run session_repo            # name substring
-cargo nextest run -E 'test(session_repo)' # filterset
+go build -o bin/liftlog ./cmd/liftlog     # the binary the e2e suite runs
+go run ./cmd/liftlog                      # dev server on $LIFTLOG_BIND (default 127.0.0.1:8080)
+go test -race ./...
+go test ./internal/server -run TestCSRF   # one test
+go vet ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 ```
 
-The root fmt, clippy, nextest and coverage runs do not cover `e2e/`: it is a separate workspace whose test target sets `harness = false`, so it runs with `cargo test` from `e2e/` (below), and fmt/clippy must be run there too (CI does).
+CI also checks: `gofmt -l` over the tracked non-vendor `.go` files prints nothing; `go mod tidy -diff`; after `go mod vendor`, `git status --porcelain -- vendor go.mod go.sum` prints nothing (`git diff` would miss an untracked vendored package). To add or update a dependency: `go get <module>@<version>`, `go mod tidy`, `go mod vendor`, and commit `go.mod`, `go.sum` and `vendor/` together. Check the release is at least 7 days old first.
 
-E2E suite (cucumber + thirtyfour, in `e2e/`, its own workspace):
+Coverage (as CI): `LIFTLOG_COVERDIR=$PWD/covdata go test -coverprofile=coverage.out ./...`, then `go tool covdata textfmt -i=covdata -o coverage-bin.out` and append it without its `mode:` line. `-coverprofile` ignores the binary `cmd/liftlog`'s `TestMain` builds and execs; with `LIFTLOG_COVERDIR` set it builds that binary with `-cover`.
+
+E2E (godog + chromedp, in `e2e/`, its own module with its own `vendor/`; `go test ./...` at the root does not run it):
 
 ```bash
-cargo build                               # first — the suite never rebuilds a stale binary
+go build -o bin/liftlog ./cmd/liftlog     # first, the suite never rebuilds an existing binary
 cd e2e
-cargo test --test e2e
-cargo test --test e2e -- -n "Add Set"     # one scenario (regex)
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
+go test -count=1 -v ./...                 # -count=1: the test cache cannot see a rebuilt binary
+E2E_FEATURES=features/auth/login.feature go test -count=1 -v ./...   # comma-separated subset
+gofmt -l . ; go vet ./... ; go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 ```
 
-Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); the driver manager fetches chromedriver but never the browser. No Node anywhere.
+Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); chromedp starts it itself, so there is no driver to download. `E2E_CHROME` pins the browser binary (CI sets `/usr/bin/google-chrome`). `E2E_BINARY` pins the server binary. No Node anywhere.
 
 ## Architecture
 
-**State.** `AppState` (`src/state.rs`) holds the four repositories (user, exercise, workout, session) over an `r2d2` SQLite pool, plus rate limiters and config. Handlers take `State<AppState>`.
+**Layout.** A thin `cmd/liftlog` (flags, `.env`, logging, serve, hourly sweep) over `internal/` packages, so tests build the handler directly: `server.New(options).Handler()`. `internal/server` holds routing, middleware and handlers; `internal/repo` the SQL (one type per table, context + `*sql.DB`); `internal/views` the pages; `internal/chart` the progress chart; `internal/auth` password hashing, policy, rate limits, backoff, setup token and client IP; `internal/session` the sliding-expiry rules and cookie; `internal/audit` the audit events; `internal/timezone` the allowed zone names; `internal/db` opening SQLite and the time/id storage conventions; `internal/assets` the embedded CSS/JS/icons; `migrations/` the SQL files. `internal/zxcvbn` is a rune-correct fork of trustelem/zxcvbn that follows the Rust crate's verdicts.
 
-**Sessions.** `sliding_session_middleware` (`src/middleware/auth.rs`) runs on every route: it calls `SessionRepository::validate_and_touch` and injects a `ValidatedSession` extension. `AuthUser`/`AdminUser` extractors read that extension, never the DB. Routes that must not refresh the cookie (logout) insert `SuppressSessionRefresh`. A tokio task in `main.rs` sweeps expired sessions hourly. Tokens are opaque and DB-backed, so revocation is instant; JWT/refresh tokens were rejected as complexity without benefit. The active-session list stores no User-Agent or IP, by choice.
+**State.** `server.App` (`internal/server/server.go`, built by `server.New(Options)`) holds the repositories, the audit logger, the throttles and the config. Handlers are methods on `*App`.
 
-**CSRF.** `tower_http::csrf::CsrfLayer` runs before the session layer (order in `src/routes.rs`: HSTS → baseline headers → CSRF logging → CSRF guard → session) and 403s cross-site state-changing requests. `Sec-Fetch-Site` decides when present — only `same-origin`/`none` pass, **not** `same-site`. Otherwise `Origin`'s authority, **port included**, must match the request's. Safe methods and header-less clients (curl, tests) pass. With `SameSite=Lax` cookies this is the entire CSRF defence; there is no token.
+**Sessions.** `sessionMiddleware` (`internal/server/middleware_session.go`) runs on every route: it calls `Sessions.ValidateAndTouch` (the rules live in `session.ComputeTouchAction`) and stores a `ValidatedSession` in the request state. `requireUser`/`requireAdmin` (`context.go`) read that state, never the DB. Routes that must not refresh the cookie (logout, the password-change rotation) call `suppressSessionRefresh`. A goroutine started from `cmd/liftlog/sweep.go` sweeps expired sessions hourly. Tokens are opaque and DB-backed, so revocation is instant; JWT/refresh tokens were rejected as complexity without benefit. The active-session list stores no User-Agent or IP, by choice. The cookie is `session`, or `__Host-session` when `LIFTLOG_COOKIE_SECURE` is true.
 
-Keep the port check. Cookies ignore ports, so a port-blind check (#187, reverted) would treat any other service on the same host as same-origin. On plain HTTP there is no fetch metadata, so the `Origin` check is the only one running. Operators forward `Host` with its port (nginx `$http_host`), as the README says.
+**CSRF.** `csrfGuard` (`internal/server/middleware_csrf.go`) wraps `http.NewCrossOriginProtection()` and 403s cross-site state-changing requests with an empty body. Order, outermost first, in `Handler` (`routes.go`): HSTS + baseline headers (`securityHeaders`) → CSRF guard (which also emits the audit event) → session → mux. `Sec-Fetch-Site` decides when present — only `same-origin`/`none` pass, **not** `same-site`. Otherwise `Origin`'s authority, **port included**, must match the request's `Host`. Safe methods and header-less clients (curl, tests) pass. With `SameSite=Lax` cookies this is the entire CSRF defence; there is no token.
 
-`src/middleware/csrf.rs` holds `log_csrf_rejection`, layered just outside `CsrfLayer`, which emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or `origin_fallback`) from the `ProtectionError` on the 403.
+Keep the port check. Cookies ignore ports, so a port-blind check would treat any other service on the same host as same-origin. On plain HTTP there is no fetch metadata, so the `Origin` check is the only one running. Operators forward `Host` with its port (nginx `$http_host`), as the README says.
 
-**First-user bootstrap.** With no users, `/auth/login` redirects to `/auth/setup`, whose POST creates an admin and signs in. Later users are created by an admin at `/users/new`. `e2e/src/seeding.rs` does the same over HTTP, idempotently.
+The guard emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or `origin_fallback`, from `csrfReason`) on every 403.
 
-**Server-rendered POST→Redirect.** One maud view function per page in `src/views/` (shared layout in `views/layout.rs`). Success redirects; errors re-render with `error: Option<String>`. No JSON API.
+**Audit events** are `slog` records with the attribute `target=liftlog::audit` and an `event` name (`internal/audit/audit.go`); the logger is injected, so tests capture them. Field names are part of the operator-facing contract in the README.
 
-**Destructive actions confirm on the server.** Each is `get(confirm_page).post(action)` on one path: the trigger is an `<a href>`, the GET renders `handlers::confirm::page` (`templates/confirm.html`), and only the POST acts. The GET must be inert and apply the **same ownership check** as the POST; each has a test for both. With JS, a delegated handler in `base.html` intercepts `a[data-confirm]`, shows `confirm()`, and POSTs directly. So a trigger needs **both** `href` and `data-confirm`. The dialog asks the short question; the page gives detail only the server knows (cascade counts etc.). Promote/delete-user use the same route shape plus an admin password re-check with their own template, and are deliberately not JS-enhanced.
+**First-user bootstrap.** With no users, `/auth/login` redirects to `/auth/setup`, whose POST creates an admin and signs in (`Users.CreateFirstAdmin` is one atomic `INSERT … WHERE NOT EXISTS`). The form needs a **setup token** that the server prints once on **stderr only** (never through the structured log) while no user exists. Later users are created by an admin at `/users/new`. `e2e/internal/harness/seeding.go` does the same over HTTP, idempotently, with the token it read from the server's stderr.
 
-**Migrations** are `include_str!`'d in `src/migrations.rs` and applied at startup (tracked in `_migrations`). Add `NNN_description.sql` (gaps are fine) and append it to `MIGRATIONS`. Tests use `run_migrations_for_tests`.
+**Server-rendered POST→Redirect.** One view function per page in `internal/views/` (shared layout in `layout.go`); markup is built with the small escaping builder in `html.go` (not `html/template`; it escapes only `& < > "`). Success redirects with 303; errors re-render with an error string. No JSON API except `/health`.
 
-**Exercise categories are code.** `CATEGORIES` in `src/models/exercise.rs`; changing them is a code change, not a migration.
+**Destructive actions confirm on the server.** Each is a GET + POST on one path: the trigger is an `<a href>`, the GET renders `writeConfirmPage` (`internal/server/confirm.go`), and only the POST acts. The GET must be inert and apply the **same ownership check** as the POST; each has a test for both. With JS, a delegated handler in `internal/assets/static/app.js` intercepts `a[data-confirm]`, shows `confirm()`, and POSTs directly. So a trigger needs **both** `href` and `data-confirm`. The dialog asks the short question; the page gives detail only the server knows (cascade counts etc.). Promote/delete-user use the same route shape plus an admin password re-check (`reauth.go`) with their own page, and are deliberately not JS-enhanced.
 
-**Timestamps render in the browser's timezone.** Emit every `DateTime<Utc>` as `<time datetime="{{ x.to_rfc3339() }}" data-fmt="datetime|date">{{ x.format("…UTC") }}</time>`; the text is the no-JS fallback. `base.html` rewrites these to a fixed `YYYY-MM-DD HH:MM GMT±H` (or `YYYY-MM-DD`) via `window.LiftLog.formatLocalDate/formatLocalDateTime` — not `toLocaleString()`, to keep column widths constant. `NaiveDate`s (`workout.date`, chart x-axes) are calendar dates and must **not** be converted.
+**Migrations** are `go:embed`ded SQL files in `migrations/` and applied at startup (tracked in `_migrations`; `migrations.Run`). Add `NNN_description.sql` (gaps are fine); `migrations.go` picks it up by name. Tests use `migrations.RunForTests`. The numbering and the schema are shared with the former Rust build, so existing databases open unchanged.
 
-**The progress chart is drawn twice; keep both in sync.** `/stats/exercise/{id}?metric=top_set|e1rm|volume&range=20|all` is rendered as SVG by `handlers::stats::render_chart`; tabs are plain links. The script in `templates/stats/exercise.html` intercepts them, redraws from the embedded `ChartPoint` JSON, and `history.replaceState`s the URL. `ChartMetric::value` mirrors `metricValue`; PR dots are the running best of the plotted series on both sides; the server's `<g id="chart-hit-areas">` bands (with SVG `<title>` tooltips) mirror the client's. Unknown query values fall back to defaults.
+**Storage conventions** (`internal/db`). Timestamps are written as text in chrono's format (`2006-01-02 15:04:05[.fraction]+00:00`) and read back from that, RFC 3339, or the bare form, always as UTC. Always bind strings, never `time.Time`. Dates are `YYYY-MM-DD`. An in-memory test database is limited to one connection.
 
-**Add Set is server-prefillable.** Clone links to `/workouts/{id}?prefill=<log_id>`; `show` resolves it only against the workout's own logs. The script fills the form in place instead, so the trigger has both `href` and `data-clone-*`. The "last weight" hint is also rendered in `<noscript>`.
+**Exercise categories are code.** `models.Categories` in `internal/models/exercise.go`; changing them is a code change, not a migration.
 
-**JS-only controls ship `hidden`.** The share-link clipboard button (`templates/workouts/show.html`, the owner's workout page; the public `shared.html` has none) has `hidden data-requires-js`; `base.html` reveals it on `DOMContentLoaded`. `[hidden] { display: none !important }` exists because `.btn`'s `display: inline-flex` would otherwise win.
+**Timestamps render in the browser's timezone.** Emit every instant through `views` (`shared.go`) as `<time datetime="…RFC3339…" data-fmt="datetime|date">…UTC text…</time>`; the text is the no-JS fallback. `app.js` rewrites these to a fixed `YYYY-MM-DD HH:MM GMT±H` (or `YYYY-MM-DD`) via `window.LiftLog.formatLocalDate/formatLocalDateTime` — not `toLocaleString()`, to keep column widths constant. Plain calendar dates (`workout.date`, chart x-axes) must **not** be converted. User timezones are validated against `internal/timezone/zones.txt` (exact, case-sensitive).
 
-**`build.rs`** renders `apple-touch-icon.png` from `assets/favicon.svg` (resvg) and sets `GIT_VERSION` from the `GIT_VERSION` env var when set (Docker builds pass it as a build arg because `.dockerignore` excludes `.git`), else from `git describe`, else `dev`.
+**The progress chart is drawn twice; keep both in sync.** `/stats/exercise/{id}?metric=top_set|e1rm|volume&range=20|all` is rendered as SVG by `internal/chart` (`chart.Render`, parsed with `chart.ParseMetric`/`ParseRange`); tabs are plain links. The script `internal/views/scripts/stats_exercise.js` intercepts them, redraws from the embedded point JSON (`chart.EncodeData`), and `history.replaceState`s the URL. `Metric.Value` mirrors `metricValue`; PR dots are the running best of the plotted series on both sides; the server's `<g id="chart-hit-areas">` bands (with SVG `<title>` tooltips) mirror the client's. Unknown query values fall back to defaults. The JSON must print floats like Rust did (`100.0`); see `chart/format.go`.
 
-## Integration tests
+**Add Set is server-prefillable.** Clone links to `/workouts/{id}?prefill=<log_id>`; `prefillFrom` (`handlers_workouts.go`) resolves it only against the workout's own logs. The script (`workout_show.js`) fills the form in place instead, so the trigger has both `href` and `data-clone-*`. The "last weight" hint is also rendered in `<noscript>`.
 
-Use `tests/common/mod.rs`: `setup_test_db()` (in-memory, migrated) and `create_test_app_with_session()` (router + seeded session). Don't build a fresh server.
+**JS-only controls ship `hidden`.** The share-link clipboard button (`internal/views/workout_show.go`, the owner's workout page; the public shared page has none) has `hidden data-requires-js`; `app.js` reveals it on `DOMContentLoaded`. `[hidden] { display: none !important }` exists because `.btn`'s `display: inline-flex` would otherwise win.
+
+**Version.** `internal/version.Version()` returns the `-ldflags -X …/internal/version.version=` value (Docker builds pass it from the `GIT_VERSION` build arg because `.dockerignore` excludes `.git`), else the VCS-stamped module version, else `dev`. `apple-touch-icon.png` is a committed asset (`internal/assets/static/`); there is no build step.
+
+**Configuration and logging.** `internal/config` parses the environment; retired variables (`BIND`, `LOG_FORMAT`, `RUST_LOG`) fail startup (`config/legacy.go`: update that list whenever a variable is added, renamed or removed). `cmd/liftlog` reads `./.env` only (strict: a malformed line is fatal; never overrides a set variable), then flags > environment > default for `--log-format` (`full`|`json`) and `--log-level`. Logs go to stdout; stderr is reserved for fatal errors and the setup token.
+
+## Tests
+
+- **Server tests** use `internal/server/harness_test.go` (in-memory migrated DB, the real `Handler`, seeded users and sessions). Don't build a fresh server.
+- **Golden pages.** `internal/views/testdata/*.golden.html` pin the exact markup (the e2e suite and the no-JS CSS depend on it). They were captured from the Rust server; `views_test.go` normalises version and clock before comparing. See `testdata/README.txt`.
+- **Fixtures from the Rust build**: `internal/db/testdata/rust-created.sqlite3` (opened by `repo/rust_fixture_test.go`), `internal/auth/testdata/password_policy.json`.
+- `cmd/liftlog/main_test.go` builds the binary in `TestMain` and execs it; use that shape for anything waiting on a log line or a signal.
 
 ## E2E tests
 
-`e2e/tests/e2e/main.rs` starts one `target/debug/liftlog` on a throwaway SQLite file and OS-assigned port, opens one browser per scenario, and kills the server afterwards.
+`e2e/e2e_test.go` starts one `bin/liftlog` on a throwaway SQLite file and OS-assigned port, opens one Chrome per scenario, and stops the server afterwards.
 
-- **Stale binary.** `ensure_binary` (`e2e/src/server.rs`) builds only if the binary is missing. maud compiles views into the binary, so run `cargo build` at the root after any `src/` change, or the suite tests the old build. CI builds first.
-- **Separate workspace.** Nothing is inherited: the lint set is copied into `e2e/Cargo.toml` (keep in sync). It's excluded from `cargo deny` and `.dockerignore`d.
+- **Stale binary.** `ensureBinary` (`e2e/internal/harness/server.go`) builds only if the binary is missing. Run `go build -o bin/liftlog ./cmd/liftlog` after any server change, or the suite tests the old build. CI builds first.
+- **Separate module.** Its own `go.mod`/`vendor/`; the `go` and `toolchain` lines must equal the root's (CI checks). It is `.dockerignore`d.
 - **One server, one DB for the run.** Isolate fixtures with a per-scenario suffix (`world.unique("Squat")`); never assume a user has no other data.
-- **`@bootstrap` runs first**, as a separate pass on the empty DB. The tag is on the feature, and `gherkin` doesn't propagate feature tags, so the filter checks both.
-- **Concurrency** is `available_parallelism` capped at 4; `WAIT_TIMEOUT` is 30s — sized for a two-core CI runner.
+- **`@bootstrap` runs first**, as a separate pass on the empty DB. The tag is on the feature; the filter checks feature and scenario tags (pickles carry both).
+- **Concurrency** is `min(NumCPU, 4)`; `harness.WaitTimeout` is 30s — sized for a two-core CI runner.
 - **Wait for every submit's effect** (new URL, row appears/disappears). `click` may return before the redirect, and the next navigation cancels the in-flight POST, silently losing the fixture.
-- **Confirm dialogs** are auto-accepted via `unhandledPromptBehavior: accept`. Promote/delete-user steps fill the password page instead.
-- **`@no-js`** (on a feature or a scenario, checked by `tagged()`) runs the scenario with scripting off via CDP `Emulation.setScriptExecutionDisabled`, applied in the `before` hook. `features/no_js/` drives the destructive-action confirmation pages that way. The handler-level Rust tests still assert both `href` and `data-confirm` on every destructive trigger; keep those when changing one.
-- **Status codes and guest access go over HTTP** (`e2e/src/http.rs`), since WebDriver can't see responses — with the browser's cookie for 403/404, without for share links.
-- **`WebElement::text()` is rendered text** (affected by `text-transform`); compare user-chosen names with `pages::dom_text` (`textContent`).
-- **Set `noValidate` before submitting invalid passwords** (`SetupPage::submit`, `SettingsPage::change_password`), or `minlength`/`maxlength` blocks the request client-side.
-- **`Browser::prepare`** runs one session first so parallel sessions don't race to download the driver.
+- **Confirm dialogs** are auto-accepted. Promote/delete-user steps fill the password page instead.
+- **`@no-js`** (on a feature or a scenario) runs with scripting off via CDP `Emulation.setScriptExecutionDisabled`. `features/no_js/` drives the destructive-action confirmation pages that way. The handler-level Go tests still assert both `href` and `data-confirm` on every destructive trigger; keep those when changing one.
+- **Status codes and guest access go over HTTP** (`harness/http.go`), since the browser can't see responses — with the browser's cookie for 403/404, without for share links.
+- **Rendered text vs `textContent`.** Compare user-chosen names with `Browser.DomText` (`textContent`), not rendered text, which `text-transform` changes.
+- **Set `noValidate` before submitting invalid passwords** (`pages.go`, used by setup and change-password), or `minlength`/`maxlength` blocks the request client-side.
+- Features live in `e2e/features/**`.
 
 ## Conventions
 
 - Conventional commits with an area scope (`feat(stats):`, `fix(workouts):`, `chore(deps):`, `test(e2e):`); PR titles match.
 - GitHub Actions pinned by SHA with the tag as a trailing comment.
-- No `rust-version` is declared; the toolchain is pinned in `rust-toolchain.toml`. Don't add one on a toolchain bump.
-- Releases: `gh release create --generate-notes`; never edit `Cargo.toml` version or add `CHANGELOG.md`.
+- Dependencies, actions and base images must be at least 7 days old.
+- Format with `gofmt` before committing.
+- Releases: `gh release create --generate-notes`; never add a `CHANGELOG.md`.

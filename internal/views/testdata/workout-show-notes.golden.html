@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><title>Workout 2026-11-13 - LiftLog</title><link rel="preconnect" href="https://fonts.bunny.net"><link href="https://fonts.bunny.net/css2?family=Chakra+Petch:wght@400;600;700&amp;family=Overpass+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet"><link rel="stylesheet" href="/assets/app.css?v=v0.30.1-1-g19c79d8"><script src="/assets/app.js?v=v0.30.1-1-g19c79d8"></script></head><body><div class="app-accent-bar"></div><div class="app"><nav class="nav-bar"><a href="/" class="nav-logo">Lift<span>Log</span></a> <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox"> <label for="nav-toggle" class="nav-toggle-label"> <span class="nav-toggle-icon"></span> </label><ul class="nav-links"><li><a href="/">Dashboard</a></li><li><a href="/workouts">Workouts</a></li><li><a href="/exercises">Exercises</a></li><li><a href="/stats">Stats</a></li><li><a href="/settings">Settings</a></li><li><a href="/users">Users</a></li></ul><div class="nav-user"><span class="username">alice <span class="admin-badge">Admin</span></span><form action="/auth/logout" method="post" style="display:inline;"><button type="submit" class="sign-out-btn">Sign Out</button></form></div></nav><main><div class="page-header"><h1>2026-11-13</h1><div class="subtitle"><em>Felt strong &lt;b&gt;today&lt;/b&gt; &amp; the bar moved &quot;fast&quot;. Don't skip warm-up.</em></div></div><div class="actions mb-6"><a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/edit" class="btn btn-ghost btn-sm">Edit</a> <a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/delete" class="btn btn-danger btn-sm" data-confirm="Delete this workout? Every set recorded in it is deleted too, and this cannot be undone.">Delete</a> <form action="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/share" method="post" class="share-form"><select id="expires_in_days" name="expires_in_days" aria-label="Share link expiry"><option value="" selected>Never expires</option><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select> <button type="submit" class="btn btn-ghost btn-sm">Share</button></form></div><h3 id="add-set">Add Set</h3><div class="card card-accent" style="margin: var(--sp-4) 0;"><form method="post" action="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs"><div class="form-group"><label for="exercise_id">Exercise</label> <select id="exercise_id" name="exercise_id" required><option value="">-- Select --</option><optgroup label="Chest"><option value="fbe58868-1aa5-5ab6-ad18-9dd398a49b5b">Bench Press</option></optgroup><optgroup label="Back"><option value="f2efc5aa-2ac8-54b6-af56-933b6c5be8cf">Deadlift</option><option value="de28bf00-4cb9-5486-877d-dd7f8f55f010">Pull-up</option></optgroup><optgroup label="Legs"><option value="aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea">Squat</option></optgroup><optgroup label="Shoulders"><option value="9f62366c-2d2b-5ab4-ab90-a9a93d1b08de">Overhead Press</option></optgroup><optgroup label="Arms"><option value="9264ffa1-b941-569f-88ec-e1f12d75ad74">Barbell Curl</option></optgroup><optgroup label="Core"><option value="0376c522-0917-5353-b064-fbfc9510d054">Farmer's Walk &amp; &lt;Carry&gt;</option><option value="fac81715-c51c-5bae-a239-e6359a311d8e">Plank</option></optgroup></select><div id="exercise-last-weight-info" class="pr-info"></div></div><div class="form-group"><label for="weight">Weight</label> <input type="number" inputmode="decimal" id="weight" name="weight" step="0.25" min="0" list="weight-list" autocomplete="off" required><datalist id="weight-list"><option value="32.5"></option><option value="51"></option><option value="86.25"></option><option value="150"></option><option value="152.5"></option><option value="180"></option></datalist></div><div class="form-group"><label for="reps">Reps</label> <input type="number" inputmode="numeric" id="reps" name="reps" min="1" list="reps-list" autocomplete="off" required><datalist id="reps-list"><option value="1"></option><option value="3"></option><option value="5"></option><option value="6"></option><option value="8"></option><option value="10"></option><option value="12"></option><option value="15"></option><option value="20"></option></datalist></div><div class="form-group"><label for="rpe">RPE (1-10, optional)</label> <input type="number" inputmode="numeric" id="rpe" name="rpe" min="1" max="10"></div><button type="submit">Add Set</button></form><noscript><h4 style="margin: var(--sp-5) 0 var(--sp-2) 0;">Last time</h4><table class="data-table"><thead><tr><th>Exercise</th><th>Weight</th><th>RPE</th><th>Logged</th></tr></thead><tbody><tr><td data-label="Exercise">Barbell Curl</td><td data-label="Weight">32.5 kg</td><td data-label="RPE">8</td><td data-label="Logged"><time datetime="2026-10-23T10:28:00+00:00" data-fmt="date">2026-10-23</time></td></tr><tr><td data-label="Exercise">Bench Press</td><td data-label="Weight">86.25 kg</td><td data-label="RPE">7</td><td data-label="Logged"><time datetime="2026-11-10T10:20:00+00:00" data-fmt="date">2026-11-10</time></td></tr><tr><td data-label="Exercise">Deadlift</td><td data-label="Weight">180 kg</td><td data-label="RPE">9</td><td data-label="Logged"><time datetime="2026-11-07T10:16:00+00:00" data-fmt="date">2026-11-07</time></td></tr><tr><td data-label="Exercise">Overhead Press</td><td data-label="Weight">51 kg</td><td data-label="RPE">-</td><td data-label="Logged"><time datetime="2026-11-13T10:12:00+00:00" data-fmt="date">2026-11-13</time></td></tr><tr><td data-label="Exercise">Pull-up</td><td data-label="Weight">0 kg</td><td data-label="RPE">9</td><td data-label="Logged"><time datetime="2026-10-26T10:28:00+00:00" data-fmt="date">2026-10-26</time></td></tr><tr><td data-label="Exercise">Squat</td><td data-label="Weight">152.5 kg</td><td data-label="RPE">9</td><td data-label="Logged"><time datetime="2026-11-13T10:08:00+00:00" data-fmt="date">2026-11-13</time></td></tr></tbody></table></noscript></div><h2>Sets</h2><div class="sets-list"><div class="sets-header"><div>Exercise</div><div>Set</div><div>Weight</div><div>Reps</div><div>RPE</div><div></div></div><div class="set-row"><div class="set-cell set-cell-exercise"><a href="/stats/exercise/9f62366c-2d2b-5ab4-ab90-a9a93d1b08de">Overhead Press</a></div><div class="set-cell set-cell-set">1</div><div class="set-cell set-cell-weight">51</div><div class="set-cell set-cell-reps">6</div><div class="set-cell set-cell-rpe">-</div><div class="set-cell set-cell-pr"><span class="pr-badge" title="All-time best for this exercise">PR</span></div><div class="set-row-actions"><a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/7e6a9ef8-37e4-5f1a-a082-ff49ccb9406f/edit" class="btn btn-ghost btn-sm">Edit</a> <a href="?prefill=7e6a9ef8-37e4-5f1a-a082-ff49ccb9406f#add-set" class="btn btn-ghost btn-sm" data-clone-exercise="9f62366c-2d2b-5ab4-ab90-a9a93d1b08de" data-clone-weight="51" data-clone-reps="6" data-clone-rpe="">Clone</a> <a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/7e6a9ef8-37e4-5f1a-a082-ff49ccb9406f/delete" class="btn btn-danger btn-sm" aria-label="Delete set" data-confirm="Delete set 1 of Overhead Press?">&times;</a></div></div><div class="set-row"><div class="set-cell set-cell-exercise"><a href="/stats/exercise/aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea">Squat</a></div><div class="set-cell set-cell-set">3</div><div class="set-cell set-cell-weight">152.5</div><div class="set-cell set-cell-reps">3</div><div class="set-cell set-cell-rpe">9</div><div class="set-cell set-cell-pr"><span class="pr-badge" title="All-time best for this exercise">PR</span></div><div class="set-row-actions"><a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/24208feb-94ca-5f8e-b90c-4988725ff2a2/edit" class="btn btn-ghost btn-sm">Edit</a> <a href="?prefill=24208feb-94ca-5f8e-b90c-4988725ff2a2#add-set" class="btn btn-ghost btn-sm" data-clone-exercise="aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea" data-clone-weight="152.5" data-clone-reps="3" data-clone-rpe="9">Clone</a> <a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/24208feb-94ca-5f8e-b90c-4988725ff2a2/delete" class="btn btn-danger btn-sm" aria-label="Delete set" data-confirm="Delete set 3 of Squat?">&times;</a></div></div><div class="set-row"><div class="set-cell set-cell-exercise"><a href="/stats/exercise/aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea">Squat</a></div><div class="set-cell set-cell-set">2</div><div class="set-cell set-cell-weight">150</div><div class="set-cell set-cell-reps">5</div><div class="set-cell set-cell-rpe">8</div><div class="set-cell set-cell-pr"></div><div class="set-row-actions"><a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/54c5d2fc-92a6-55d4-adde-e78ea01789fd/edit" class="btn btn-ghost btn-sm">Edit</a> <a href="?prefill=54c5d2fc-92a6-55d4-adde-e78ea01789fd#add-set" class="btn btn-ghost btn-sm" data-clone-exercise="aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea" data-clone-weight="150" data-clone-reps="5" data-clone-rpe="8">Clone</a> <a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/54c5d2fc-92a6-55d4-adde-e78ea01789fd/delete" class="btn btn-danger btn-sm" aria-label="Delete set" data-confirm="Delete set 2 of Squat?">&times;</a></div></div><div class="set-row"><div class="set-cell set-cell-exercise"><a href="/stats/exercise/aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea">Squat</a></div><div class="set-cell set-cell-set">1</div><div class="set-cell set-cell-weight">150</div><div class="set-cell set-cell-reps">5</div><div class="set-cell set-cell-rpe">-</div><div class="set-cell set-cell-pr"></div><div class="set-row-actions"><a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/b915f6f5-8d90-5ec5-8aae-a6a3b1ad3b2e/edit" class="btn btn-ghost btn-sm">Edit</a> <a href="?prefill=b915f6f5-8d90-5ec5-8aae-a6a3b1ad3b2e#add-set" class="btn btn-ghost btn-sm" data-clone-exercise="aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea" data-clone-weight="150" data-clone-reps="5" data-clone-rpe="">Clone</a> <a href="/workouts/02782218-b94f-5b6c-9a5c-672691802f7e/logs/b915f6f5-8d90-5ec5-8aae-a6a3b1ad3b2e/delete" class="btn btn-danger btn-sm" aria-label="Delete set" data-confirm="Delete set 1 of Squat?">&times;</a></div></div></div><a href="/workouts" class="back-link">&larr; Back to Workouts</a></main><script>
+var exerciseLastWeights = {};
+
+exerciseLastWeights["9f62366c-2d2b-5ab4-ab90-a9a93d1b08de"] = {
+    weight: 51,
+    rpe: null,
+    loggedAt: "2026-11-13T10:12:00+00:00"
+};
+
+exerciseLastWeights["aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea"] = {
+    weight: 152.5,
+    rpe: 9,
+    loggedAt: "2026-11-13T10:08:00+00:00"
+};
+
+exerciseLastWeights["fbe58868-1aa5-5ab6-ad18-9dd398a49b5b"] = {
+    weight: 86.25,
+    rpe: 7,
+    loggedAt: "2026-11-10T10:20:00+00:00"
+};
+
+exerciseLastWeights["f2efc5aa-2ac8-54b6-af56-933b6c5be8cf"] = {
+    weight: 180,
+    rpe: 9,
+    loggedAt: "2026-11-07T10:16:00+00:00"
+};
+
+exerciseLastWeights["de28bf00-4cb9-5486-877d-dd7f8f55f010"] = {
+    weight: 0,
+    rpe: 9,
+    loggedAt: "2026-10-26T10:28:00+00:00"
+};
+
+exerciseLastWeights["9264ffa1-b941-569f-88ec-e1f12d75ad74"] = {
+    weight: 32.5,
+    rpe: 8,
+    loggedAt: "2026-10-23T10:28:00+00:00"
+};
+
+
+var lastWeightInfoEl = document.getElementById('exercise-last-weight-info');
+var exerciseSelect = document.getElementById('exercise_id');
+
+function showLastWeightInfo(exerciseId) {
+    if (exerciseId && exerciseLastWeights[exerciseId]) {
+        var entry = exerciseLastWeights[exerciseId];
+        var rpeHtml = (entry.rpe !== null)
+            ? '<span class="rpe-chip">RPE ' + entry.rpe + '</span>'
+            : '<span class="rpe-chip rpe-chip-empty">RPE —</span>';
+        var loggedDate = window.LiftLog.formatLocalDate(entry.loggedAt) || '';
+        lastWeightInfoEl.innerHTML = "Last: " + entry.weight + " kg " + rpeHtml +
+            ' <span class="muted">' + loggedDate + '</span>' +
+            ' <button type="button" class="btn btn-sm btn-inline" style="background:var(--gold);color:var(--text-inverse);border-color:var(--gold);" onclick="fillLastWeight()">Fill</button>';
+        lastWeightInfoEl.classList.add('visible');
+    } else {
+        lastWeightInfoEl.innerHTML = "";
+        lastWeightInfoEl.classList.remove('visible');
+    }
+}
+
+function fillLastWeight() {
+    var exerciseId = exerciseSelect.value;
+    if (exerciseId && exerciseLastWeights[exerciseId]) {
+        document.getElementById('weight').value = exerciseLastWeights[exerciseId].weight;
+    }
+}
+
+exerciseSelect.addEventListener('change', function() {
+    showLastWeightInfo(this.value);
+});
+
+function cloneSet(exerciseId, weight, reps, rpe) {
+    exerciseSelect.value = exerciseId;
+    document.getElementById('weight').value = weight;
+    document.getElementById('reps').value = reps;
+    document.getElementById('rpe').value = rpe === null ? '' : rpe;
+    showLastWeightInfo(exerciseId);
+    exerciseSelect.scrollIntoView({ behavior: 'smooth' });
+}
+
+/* Fill the form in place instead of following the `?prefill=` link;
+   modified clicks still open it. */
+document.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button !== 0 ||
+        e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+        return;
+    }
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') {
+        return;
+    }
+    var link = target.closest('a[data-clone-exercise]');
+    if (!link) {
+        return;
+    }
+
+    e.preventDefault();
+    var rpe = link.dataset.cloneRpe;
+    cloneSet(
+        link.dataset.cloneExercise,
+        link.dataset.cloneWeight,
+        link.dataset.cloneReps,
+        rpe === '' ? null : rpe
+    );
+});
+
+/* Server-prefilled form (?prefill=…): show its hint too. */
+if (exerciseSelect.value) {
+    showLastWeightInfo(exerciseSelect.value);
+}
+
+document.addEventListener('click', function (e) {
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') {
+        return;
+    }
+    var btn = target.closest('[data-copy-url]');
+    if (!btn) {
+        return;
+    }
+
+    var fullUrl = window.location.origin + btn.dataset.copyUrl;
+    navigator.clipboard.writeText(fullUrl).then(function() {
+        alert('Link copied to clipboard!');
+    }, function() {
+        prompt('Copy this link:', fullUrl);
+    });
+});
+</script></div></body></html>
