@@ -5,8 +5,8 @@ import (
 	"net/http"
 )
 
-// appError is a failure with the status and public message Rust's AppError
-// mapped it to. The cause is logged, never sent to the client.
+// appError is a failure with the HTTP status and public message to send. The
+// cause is logged, never sent to the client.
 type appError struct {
 	status  int
 	message string

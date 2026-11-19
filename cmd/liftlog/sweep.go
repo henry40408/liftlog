@@ -75,9 +75,9 @@ func startExpirySweep(pool *sql.DB, logger *slog.Logger) (stop func()) {
 		defer close(done)
 		newSweeper(pool, logger).run(ctx, sweepInterval)
 	}()
-	var once sync.Once
+	cancelOnce := sync.OnceFunc(cancel)
 	return func() {
-		once.Do(cancel)
+		cancelOnce()
 		<-done
 	}
 }

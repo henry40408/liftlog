@@ -75,14 +75,14 @@ func FromEnv(lookup LookupEnv) (Config, error) {
 	if cfg.TrustedProxies, err = ParseTrustedProxies(get("LIFTLOG_TRUSTED_PROXIES")); err != nil {
 		return Config{}, err
 	}
-	if cfg.CookieSecure, err = ParseBoolEnv("LIFTLOG_COOKIE_SECURE", get("LIFTLOG_COOKIE_SECURE"), false); err != nil {
+	if cfg.CookieSecure, err = ParseBoolEnv("LIFTLOG_COOKIE_SECURE", get("LIFTLOG_COOKIE_SECURE")); err != nil {
 		return Config{}, err
 	}
 	if cfg.HSTSMaxAge, err = ParseHSTSMaxAge(get("LIFTLOG_HSTS_MAX_AGE")); err != nil {
 		return Config{}, err
 	}
 	includeSubdomains := get("LIFTLOG_HSTS_INCLUDE_SUBDOMAINS")
-	if cfg.HSTSIncludeSubdomains, err = ParseBoolEnv("LIFTLOG_HSTS_INCLUDE_SUBDOMAINS", includeSubdomains, false); err != nil {
+	if cfg.HSTSIncludeSubdomains, err = ParseBoolEnv("LIFTLOG_HSTS_INCLUDE_SUBDOMAINS", includeSubdomains); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -148,16 +148,14 @@ func ParseTrustedProxyHeader(raw string) (TrustedProxyHeader, error) {
 }
 
 // ParseBoolEnv accepts true/false/1/0, case-insensitively; unset or blank
-// yields def. Anything else errors, so `COOKIE_SECURE=yes` cannot silently
+// means false. Anything else errors, so `COOKIE_SECURE=yes` cannot silently
 // mean off.
-func ParseBoolEnv(name, raw string, def bool) (bool, error) {
+func ParseBoolEnv(name, raw string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "":
-		return def, nil
+	case "", "false", "0":
+		return false, nil
 	case "true", "1":
 		return true, nil
-	case "false", "0":
-		return false, nil
 	}
 	return false, fmt.Errorf("invalid %s '%s': expected one of true, false, 1, 0", name, raw)
 }
