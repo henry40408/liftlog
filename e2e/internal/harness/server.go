@@ -122,7 +122,7 @@ func (s *Server) Stop() {
 	}
 	_ = s.cmd.Process.Kill()
 	select {
-	case <-s.exited:
+	case <-s.exited: //nolint:errcheck // Stop only waits for the child to be gone
 	case <-time.After(10 * time.Second):
 	}
 	s.cmd = nil
@@ -240,7 +240,7 @@ func freePort() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("asking the OS for a free port: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 

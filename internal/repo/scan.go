@@ -76,7 +76,7 @@ func nullableString(s *string) any {
 }
 
 func collect[T any](rows *sql.Rows, scan func(scanner) (T, error)) ([]T, error) {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := []T{}
 	for rows.Next() {
 		item, err := scan(rows)
