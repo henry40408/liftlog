@@ -65,7 +65,7 @@ func wkSeeded(t *testing.T) wkWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pool.Close() })
+	t.Cleanup(func() { _ = pool.Close() })
 	ctx := context.Background()
 	if err := migrations.RunForTests(ctx, pool); err != nil {
 		t.Fatal(err)

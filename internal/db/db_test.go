@@ -36,7 +36,7 @@ func TestOpenMemoryURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 	if got := pragmaInt(t, pool, "foreign_keys"); got != 1 {
 		t.Errorf("foreign_keys = %d", got)
 	}
@@ -51,7 +51,7 @@ func TestOpenStripsQueryParamsAndSqlitePrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 	if err := pool.Ping(); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestOpenMemoryKeepsItsDataAcrossStatements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 	if _, err := pool.Exec("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('kept')"); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestOpenFileWithSpecialCharactersInPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 	if _, err := pool.Exec("CREATE TABLE t (v TEXT)"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestForeignKeysEnabledOnEveryPooledConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		conns = append(conns, conn)
 	}
 	for i, conn := range conns {
@@ -156,7 +156,7 @@ func TestDriverRenderingOfDateColumnsIsParseable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 	_, err = pool.Exec(`CREATE TABLE t (d DATE, at DATETIME);
 		INSERT INTO t VALUES ('2024-01-15', '2024-01-15 10:30:00.123+00:00');
 		INSERT INTO t VALUES ('2024-01-16', CURRENT_TIMESTAMP);`)
@@ -168,7 +168,7 @@ func TestDriverRenderingOfDateColumnsIsParseable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var d, at string
 		if err := rows.Scan(&d, &at); err != nil {

@@ -29,7 +29,7 @@ func (s *Server) Get(path, session string) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("requesting %s: %w", path, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return Response{}, fmt.Errorf("reading the body of %s: %w", path, err)

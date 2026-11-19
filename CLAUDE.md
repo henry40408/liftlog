@@ -13,8 +13,8 @@ go build -o bin/liftlog ./cmd/liftlog     # the binary the e2e suite runs
 go run ./cmd/liftlog                      # dev server on $LIFTLOG_BIND (default 127.0.0.1:8080)
 go test -race ./...
 go test ./internal/server -run TestCSRF   # one test
-go vet ./...
-go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+golangci-lint fmt --diff ./...             # `run` does not check formatting, so this is separate
+golangci-lint run ./...                   # config in .golangci.yml; suppress with `//nolint:<linter> // reason`
 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 # licences (CI-enforced; GOROOT must be set explicitly or the standard library fails with "does not have module info")
 GOROOT=$(go env GOROOT) go run github.com/google/go-licenses/v2@v2.0.1 check ./... --include_tests --allowed_licenses=<list from ci.yml>
@@ -22,7 +22,9 @@ GOROOT=$(go env GOROOT) go run github.com/google/go-licenses/v2@v2.0.1 check ./.
 
 Licences are enforced by the `deps` job in `.github/workflows/ci.yml`, which holds the allow-list (`ALLOWED_LICENSES`). The root module and `e2e/` are each checked once; `e2e/` alone also allows MPL-2.0 (godog pulls in go-immutable-radix, go-memdb and golang-lru), and MPL-2.0 must not enter the root module. Locally, run the `e2e/` check from `e2e/` with `--ignore github.com/henry40408/liftlog/e2e` (the module has no licence file) and `,MPL-2.0` appended. `--include_tests` is needed to see the test-only dependencies. An Unknown or unlisted licence is a decision for the maintainer: do not widen the list or swap the module to get around it.
 
-CI also checks: `gofmt -l` over the tracked non-vendor `.go` files prints nothing; `go mod tidy -diff`; after `go mod vendor`, `git status --porcelain -- vendor go.mod go.sum` prints nothing (`git diff` would miss an untracked vendored package). To add or update a dependency: `go get <module>@<version>`, `go mod tidy`, `go mod vendor`, and commit `go.mod`, `go.sum` and `vendor/` together. Check the release is at least 7 days old first.
+Lint is golangci-lint (config in `.golangci.yml`; run it in `e2e/` too, `./...` does not enter that module). CI installs it with `golangci/golangci-lint-action` (`install-only`), so the linter release floats with the action and dependabot tracks only the action. `//lint:ignore` is not honoured: use `//nolint:<linter> // reason`.
+
+CI also checks: `golangci-lint fmt --diff` prints nothing; `go mod tidy -diff`; after `go mod vendor`, `git status --porcelain -- vendor go.mod go.sum` prints nothing (`git diff` would miss an untracked vendored package). To add or update a dependency: `go get <module>@<version>`, `go mod tidy`, `go mod vendor`, and commit `go.mod`, `go.sum` and `vendor/` together. Check the release is at least 7 days old first.
 
 Coverage (as CI): `LIFTLOG_COVERDIR=$PWD/covdata go test -coverprofile=coverage.out ./...`, then `go tool covdata textfmt -i=covdata -o coverage-bin.out` and append it without its `mode:` line. `-coverprofile` ignores the binary `cmd/liftlog`'s `TestMain` builds and execs; with `LIFTLOG_COVERDIR` set it builds that binary with `-cover`.
 
@@ -35,7 +37,7 @@ go build -o bin/liftlog ./cmd/liftlog     # first, the suite never rebuilds an e
 cd e2e
 go test -count=1 -v ./...                 # -count=1: the test cache cannot see a rebuilt binary
 E2E_FEATURES=features/auth/login.feature go test -count=1 -v ./...   # comma-separated subset
-gofmt -l . ; go vet ./... ; go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+golangci-lint fmt --diff ./... ; golangci-lint run ./...
 ```
 
 Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); chromedp starts it itself, so there is no driver to download. `E2E_CHROME` pins the browser binary (CI sets `/usr/bin/google-chrome`). `E2E_BINARY` pins the server binary. No Node anywhere.
@@ -109,5 +111,5 @@ The guard emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or 
 - Conventional commits with an area scope (`feat(stats):`, `fix(workouts):`, `chore(deps):`, `test(e2e):`); PR titles match.
 - GitHub Actions pinned by SHA with the tag as a trailing comment.
 - Dependencies, actions and base images must be at least 7 days old.
-- Format with `gofmt` before committing.
+- Format with `golangci-lint fmt ./...` (gofmt) before committing.
 - Releases: `gh release create --generate-notes`; never add a `CHANGELOG.md`.

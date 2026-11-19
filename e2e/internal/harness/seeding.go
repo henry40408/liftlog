@@ -63,7 +63,7 @@ func (s *Server) callSetup() error {
 	if err != nil {
 		return fmt.Errorf("calling /auth/setup: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode >= 400 {
 		return fmt.Errorf("/auth/setup answered %d", response.StatusCode)
 	}
@@ -77,7 +77,7 @@ func (s *Server) login(client *http.Client, username, password string) error {
 	if err != nil {
 		return fmt.Errorf("signing %s in: %w", username, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 300 || response.StatusCode >= 400 {
 		return fmt.Errorf("signing %s in expected a redirect, got %d", username, response.StatusCode)
 	}

@@ -153,9 +153,8 @@ SQLite is [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (pure Go);
 ```bash
 go run ./cmd/liftlog
 go test -race ./...
-gofmt -l $(git ls-files '*.go' | grep -v '^vendor/' | grep -v '^e2e/vendor/')
-go vet ./...
-go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+golangci-lint fmt --diff ./...   # `run` does not check formatting, so this is separate
+golangci-lint run ./...          # config in .golangci.yml; suppress with `//nolint:<linter> // reason`
 ```
 
 ### E2E tests

@@ -50,7 +50,7 @@ func Run(ctx context.Context, pool *sql.DB, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("get connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := applyPending(ctx, conn, migrations, log); err != nil {
 		return err
@@ -75,7 +75,7 @@ func RunForTests(ctx context.Context, pool *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("get connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	for _, m := range migrations {
 		if _, err := conn.ExecContext(ctx, m.sql); err != nil {
@@ -119,7 +119,7 @@ func appliedNames(ctx context.Context, conn *sql.Conn) (map[string]bool, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list applied migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	applied := map[string]bool{}
 	for rows.Next() {
@@ -147,7 +147,7 @@ func warnOnForeignKeyViolations(ctx context.Context, conn *sql.Conn, log *slog.L
 		log.Warn("PRAGMA foreign_key_check failed", "error", err)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	count := 0
 	for rows.Next() {
