@@ -1,8 +1,9 @@
 package scoring
 
 import (
+	"cmp"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/henry40408/liftlog/internal/zxcvbn/internal/mathutils"
 	"github.com/henry40408/liftlog/internal/zxcvbn/match"
@@ -57,8 +58,8 @@ func MostGuessableMatchSequence(password []rune, matches []*match.Match, exclude
 	}
 	// small detail: for deterministic output, sort each sublist by i.
 	for _, matches := range matchesByJ {
-		sort.SliceStable(matches, func(a, b int) bool {
-			return matches[a].I < matches[b].I
+		slices.SortStableFunc(matches, func(a, b *match.Match) int {
+			return cmp.Compare(a.I, b.I)
 		})
 	}
 

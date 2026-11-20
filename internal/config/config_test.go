@@ -182,32 +182,30 @@ func TestParseTrustedProxyHeaderRejectsUnknown(t *testing.T) {
 	wantErrContaining(t, err, "invalid LIFTLOG_TRUSTED_PROXY_HEADER")
 }
 
-func TestParseBoolEnvDefaultsWhenAbsentOrBlank(t *testing.T) {
+func TestParseBoolEnvIsFalseWhenAbsentOrBlank(t *testing.T) {
 	for _, raw := range []string{"", "   "} {
-		for _, def := range []bool{true, false} {
-			got, err := ParseBoolEnv("LIFTLOG_COOKIE_SECURE", raw, def)
-			if err != nil || got != def {
-				t.Errorf("%q default %v: got %v, %v", raw, def, got, err)
-			}
+		got, err := ParseBoolEnv("LIFTLOG_COOKIE_SECURE", raw)
+		if err != nil || got {
+			t.Errorf("%q: got %v, %v", raw, got, err)
 		}
 	}
 }
 
 func TestParseBoolEnvAcceptsTrueFalse10CaseInsensitively(t *testing.T) {
 	for _, raw := range []string{"true", "TRUE", "  true  ", "1"} {
-		if got, err := ParseBoolEnv("X", raw, false); err != nil || !got {
+		if got, err := ParseBoolEnv("X", raw); err != nil || !got {
 			t.Errorf("%q: got %v, %v", raw, got, err)
 		}
 	}
 	for _, raw := range []string{"false", "False", "  false  ", "0"} {
-		if got, err := ParseBoolEnv("X", raw, true); err != nil || got {
+		if got, err := ParseBoolEnv("X", raw); err != nil || got {
 			t.Errorf("%q: got %v, %v", raw, got, err)
 		}
 	}
 }
 
 func TestParseBoolEnvRejectsUnrecognisedValue(t *testing.T) {
-	_, err := ParseBoolEnv("LIFTLOG_COOKIE_SECURE", "yes", false)
+	_, err := ParseBoolEnv("LIFTLOG_COOKIE_SECURE", "yes")
 	wantErrContaining(t, err, "invalid LIFTLOG_COOKIE_SECURE")
 }
 

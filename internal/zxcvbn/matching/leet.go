@@ -1,8 +1,8 @@
 package matching
 
 import (
+	"cmp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/henry40408/liftlog/internal/zxcvbn/match"
@@ -69,8 +69,8 @@ func dedup(subs [][]kv) [][]kv {
 	var b strings.Builder
 	members := make(map[string]bool)
 	for _, sub := range subs {
-		sort.SliceStable(sub, func(i, j int) bool {
-			return sub[i].k < sub[j].k
+		slices.SortStableFunc(sub, func(a, b kv) int {
+			return cmp.Compare(a.k, b.k)
 		})
 		b.Reset()
 		for _, x := range sub {
