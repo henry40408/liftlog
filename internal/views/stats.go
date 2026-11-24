@@ -390,10 +390,20 @@ func xLabels(ticks []chart.Tick) node {
 	for i, tick := range ticks {
 		children[i] = el("text", []attr{
 			a("x", chart.Display(tick.Pos)), a("y", y),
-			a("text-anchor", "middle"), a("font-size", "11"), a("fill", "var(--text-secondary)"),
+			a("text-anchor", xLabelAnchor(i, len(ticks))), a("font-size", "11"), a("fill", "var(--text-secondary)"),
 		}, text(tick.Label))
 	}
 	return group(children...)
+}
+
+// xLabelAnchor ends the last label at the plot's right edge: centred there it
+// overruns the viewBox, and no padding that suits every font width is safe.
+// stats_exercise.js draws the same labels and must choose the same anchors.
+func xLabelAnchor(index, count int) string {
+	if index == count-1 {
+		return "end"
+	}
+	return "middle"
 }
 
 func dots(points []chart.Point) node {

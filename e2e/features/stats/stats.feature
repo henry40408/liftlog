@@ -11,6 +11,17 @@ Feature: Stats pages
     And I have a workout with a set of 60 kg for 5 reps
     Then I see exercise-specific stats for the exercise I created
 
+  Scenario: The progress chart keeps every date label inside the picture
+    Given I am logged in as "lifter"
+    And I have an exercise in category "legs"
+    And I have a workout with a set of 100 kg for 5 reps
+    And I edit the workout to date "2024-01-05" with notes "first session"
+    And I have a workout with a set of 105 kg for 5 reps
+    When I open the progress chart of the exercise I created
+    Then every date label on the progress chart is inside the chart
+    When I switch the progress chart to the "Volume" tab
+    Then every date label on the progress chart is inside the chart
+
   Scenario: /stats/prs lists the PR after logging a new set
     Given I am logged in as "lifter"
     And I have an exercise in category "legs"
