@@ -259,6 +259,64 @@ func (p StatsPage) HasChart() (bool, error) {
 	return p.browser.has(ID("exercise-chart"))
 }
 
+// chartLabelBoxes is the chart's viewBox and the box of each x-axis date label,
+// in the SVG's own units.
+type chartLabelBoxes struct {
+	ViewLeft  float64 `json:"viewLeft"`
+	ViewRight float64 `json:"viewRight"`
+	Labels    []struct {
+		Text  string  `json:"text"`
+		Left  float64 `json:"left"`
+		Right float64 `json:"right"`
+	} `json:"labels"`
+}
+
+const chartLabelBoxesJS = `(() => {
+	const svg = document.getElementById('exercise-chart');
+	const view = svg.viewBox.baseVal;
+	return {
+		viewLeft: view.x,
+		viewRight: view.x + view.width,
+		labels: [...svg.querySelectorAll('#chart-x-labels text')].map((label) => {
+			const box = label.getBBox();
+			return { text: label.textContent, left: box.x, right: box.x + box.width };
+		}),
+	};
+})()`
+
+// DateLabelsOutsideChart lists the x-axis date labels whose box is not inside
+// the chart's viewBox, empty when every one fits. A chart with fewer than two
+// labels is an error, so a chart that is not drawn yet cannot pass.
+func (p StatsPage) DateLabelsOutsideChart() (string, error) {
+	boxes, err := Eval[chartLabelBoxes](p.browser, chartLabelBoxesJS)
+	if err != nil {
+		return "", err
+	}
+	if len(boxes.Labels) < 2 {
+		return "", fmt.Errorf("the chart has %d date labels, want at least 2", len(boxes.Labels))
+	}
+	var outside []string
+	for _, label := range boxes.Labels {
+		if label.Left < boxes.ViewLeft || label.Right > boxes.ViewRight {
+			outside = append(outside, fmt.Sprintf("%s spans %.1f to %.1f", label.Text, label.Left, label.Right))
+		}
+	}
+	return strings.Join(outside, "; "), nil
+}
+
+// SelectChartTab clicks the metric or range tab with that label and waits for
+// it to turn active: the script redraws the chart in place, so nothing
+// navigates.
+func (p StatsPage) SelectChartTab(label string) error {
+	tab := XPath("//*[@id='exercise-chart-controls']//a[normalize-space(.)=" + Quote(label) + "]")
+	activeTab := XPath("//*[@id='exercise-chart-controls']//a[contains(@class,'is-active')][normalize-space(.)=" + Quote(label) + "]")
+	return clickUntil(p.browser, clickSpec{
+		what:       "the " + label + " tab",
+		locate:     func() (*Element, error) { return displayedIn(p.browser, nil, tab) },
+		tookEffect: func() (bool, error) { return p.browser.has(activeTab) },
+	})
+}
+
 // PRRowsFor is how many rows of the PR list name that exercise.
 func (p StatsPage) PRRowsFor(exercise string) (int, error) {
 	return p.browser.Count(XPath(prRowXPath(exercise)))

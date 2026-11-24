@@ -93,7 +93,9 @@
         for (var k = 0; k < lc; k++) {
             var idx = Math.floor(k * (n - 1) / Math.max(1, lc - 1));
             var lx = PL + (idx / (n - 1)) * plotW;
-            labelHtml += '<text x="' + lx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="var(--text-secondary)">' + slice[idx].date.substring(5) + '</text>';
+            // The last label ends at the plot's right edge; centred there it overruns the viewBox.
+            var anchor = k === lc - 1 ? 'end' : 'middle';
+            labelHtml += '<text x="' + lx + '" y="' + (H - 8) + '" text-anchor="' + anchor + '" font-size="11" fill="var(--text-secondary)">' + slice[idx].date.substring(5) + '</text>';
         }
         xLabels.innerHTML = labelHtml;
 

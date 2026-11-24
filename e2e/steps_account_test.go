@@ -267,6 +267,9 @@ func (w *world) guestGets404() error {
 func registerStatsSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I see the stats overview$`, w.seeStatsOverview)
 	sc.Step(`^I see exercise-specific stats for the exercise I created$`, w.seeExerciseStats)
+	sc.Step(`^I open the progress chart of the exercise I created$`, w.seeExerciseStats)
+	sc.Step(`^I switch the progress chart to the `+quoted+` tab$`, w.switchChartTab)
+	sc.Step(`^every date label on the progress chart is inside the chart$`, w.chartLabelsFit)
 	sc.Step(`^the PR list shows my exercise$`, w.prListShowsExercise)
 	sc.Step(`^the PR list shows (\d+) for my exercise in both the all-time and 1-month columns$`, w.prListShowsWeight)
 }
@@ -299,6 +302,22 @@ func (w *world) seeExerciseStats() error {
 		return err
 	}
 	return harness.Eventually("the progress chart is drawn", stats.HasChart)
+}
+
+func (w *world) switchChartTab(label string) error {
+	b, err := w.browserOf()
+	if err != nil {
+		return err
+	}
+	return b.Stats().SelectChartTab(label)
+}
+
+func (w *world) chartLabelsFit() error {
+	b, err := w.browserOf()
+	if err != nil {
+		return err
+	}
+	return harness.EventuallyEq("the date labels spilling out of the chart (want none)", "", b.Stats().DateLabelsOutsideChart)
 }
 
 func (w *world) prListShowsExercise() error {
