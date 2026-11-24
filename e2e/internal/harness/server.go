@@ -251,6 +251,12 @@ func e2eRoot() string {
 	return filepath.Join(filepath.Dir(file), "..", "..")
 }
 
+// RepoRoot is the repository root, where bin/liftlog is built and the
+// screenshots are kept.
+func RepoRoot() string {
+	return repoRoot()
+}
+
 func repoRoot() string {
 	return filepath.Join(e2eRoot(), "..")
 }

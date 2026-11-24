@@ -13,6 +13,13 @@
 
 Track your training sessions, monitor progress, and celebrate personal records.
 
+## Screenshots
+
+| Dashboard | Bench Press progress |
+|-----------|----------------------|
+| ![The dashboard with this week's totals and recent workouts](screenshots/web-dashboard.png) | ![A lift's personal record, progress chart and set history](screenshots/web-progress.png) |
+| <img src="screenshots/web-dashboard-phone.png" alt="The dashboard on a phone" width="240"> | <img src="screenshots/web-progress-phone.png" alt="A lift's progress on a phone" width="240"> |
+
 ## Features
 
 - **Workout tracking** — sessions, exercises, sets, reps, weight, and RPE (1–10)
