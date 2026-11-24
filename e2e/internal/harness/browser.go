@@ -137,9 +137,48 @@ func (b *Browser) resetViewport() error {
 	})
 }
 
+// Viewport is a screen size in CSS pixels. Mobile makes Chrome lay the page
+// out the way a phone does.
+type Viewport struct {
+	Width, Height int64
+	Mobile        bool
+}
+
+// SetViewport resizes the viewport exactly, through CDP because the window
+// size would include the platform's window chrome.
+func (b *Browser) SetViewport(viewport Viewport) error {
+	return send(b, emulation.SetDeviceMetricsOverride, emulation.SetDeviceMetricsOverrideParams{
+		Width:             viewport.Width,
+		Height:            viewport.Height,
+		DeviceScaleFactor: 1,
+		Mobile:            viewport.Mobile,
+	})
+}
+
+// Screenshot writes the viewport, not the whole page, so the viewport height
+// is where a picture ends.
+func (b *Browser) Screenshot(path string) error {
+	encoded, err := chromedp.Run(b.ctx, chromedp.CaptureScreenshot())
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, encoded, 0o644)
+}
+
 // SetTimezone pins the browser's timezone on the live session.
 func (b *Browser) SetTimezone(timezone string) error {
 	return send(b, emulation.SetTimezoneOverride, emulation.SetTimezoneOverrideParams{TimezoneID: timezone})
+}
+
+// BlockHost refuses every request to the host, so a page that loads a web font
+// from a CDN is drawn the same whether or not the machine is online.
+func (b *Browser) BlockHost(host string) error {
+	if err := send(b, network.Enable, network.EnableParams{}); err != nil {
+		return err
+	}
+	return send(b, network.SetBlockedURLs, network.SetBlockedURLsParams{URLPatterns: []*network.BlockPattern{
+		{URLPattern: "*://" + host + "/*", Block: true},
+	}})
 }
 
 // ClearCookies drops every cookie, which is how a scenario becomes a different

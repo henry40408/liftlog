@@ -38,6 +38,17 @@ func (s *Server) EnsureUser(username, password string) error {
 	return response.Body.Close()
 }
 
+// SignIn signs username in on an HTTP client that keeps the session, for
+// fixtures too many to click through. Like EnsureUser's, it does not follow
+// redirects.
+func (s *Server) SignIn(username, password string) (*http.Client, error) {
+	client, err := newSeedingClient()
+	if err != nil {
+		return nil, err
+	}
+	return client, s.login(client, username, password)
+}
+
 // OpenSecondSession signs username in on a throwaway client, leaving a second
 // live session that is not the browser's.
 func (s *Server) OpenSecondSession(username, password string) error {
