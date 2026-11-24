@@ -42,6 +42,12 @@ golangci-lint fmt --diff ./... ; golangci-lint run ./...
 
 Needs a local Chrome/Chromium (`brew install --cask ungoogled-chromium`); chromedp starts it itself, so there is no driver to download. `E2E_CHROME` pins the browser binary (CI sets `/usr/bin/google-chrome`). `E2E_BINARY` pins the server binary. No Node anywhere.
 
+README screenshots: `cd e2e && go run -mod=vendor ./cmd/screenshots` (writes `../screenshots/`; build `bin/liftlog` first, same reason as above).
+
+## UI changes require screenshot updates
+
+Any change to rendered UI (`internal/views/`, `internal/assets/static/`): rebuild `bin/liftlog`, run the generator above and include the four updated images under `screenshots/` (embedded by `README.md`) in the same change. The generator (`e2e/cmd/screenshots`) captures the dashboard and a lift's progress page, each on a wide viewport and on a phone. The app has only a dark theme, so there are no `-dark` variants.
+
 ## Architecture
 
 **Layout.** A thin `cmd/liftlog` (flags, `.env`, logging, serve, hourly sweep) over `internal/` packages, so tests build the handler directly: `server.New(options).Handler()`. `internal/server` holds routing, middleware and handlers; `internal/repo` the SQL (one type per table, context + `*sql.DB`); `internal/views` the pages; `internal/chart` the progress chart; `internal/auth` password hashing, policy, rate limits, backoff, setup token and client IP; `internal/session` the sliding-expiry rules and cookie; `internal/audit` the audit events; `internal/timezone` the allowed zone names; `internal/db` opening SQLite and the time/id storage conventions; `internal/assets` the embedded CSS/JS/icons; `migrations/` the SQL files. `internal/zxcvbn` is a rune-correct fork of trustelem/zxcvbn that follows the Rust crate's verdicts.
