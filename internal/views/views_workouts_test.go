@@ -2,8 +2,6 @@ package views
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,13 +11,10 @@ import (
 	"github.com/henry40408/liftlog/internal/db"
 	"github.com/henry40408/liftlog/internal/models"
 	"github.com/henry40408/liftlog/internal/repo"
-	"github.com/henry40408/liftlog/internal/version"
 	"github.com/henry40408/liftlog/migrations"
 )
 
-const wkGoldenVersion = "v0.30.1-1-g19c79d8"
-
-// wkClock is the capture time of the goldens (testdata/README.txt).
+// wkClock is the capture time of the goldens (see goldenDigests).
 var wkClock = time.Date(2026, 11, 16, 16, 40, 0, 0, time.UTC)
 
 const (
@@ -70,36 +65,10 @@ func wkSeeded(t *testing.T) wkWorld {
 	if err := migrations.RunForTests(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	seed, err := os.ReadFile(filepath.Join("testdata", "seed.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.ExecContext(ctx, string(seed)); err != nil {
+	if _, err := pool.ExecContext(ctx, wkSeedSQL); err != nil {
 		t.Fatal(err)
 	}
 	return wkWorld{workouts: repo.NewWorkouts(pool), exercises: repo.NewExercises(pool)}
-}
-
-func wkAssertGolden(t *testing.T, name, got string) {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", name+".golden.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := strings.ReplaceAll(string(raw), wkGoldenVersion, version.Version())
-	if got == want {
-		return
-	}
-	i := 0
-	for i < len(got) && i < len(want) && got[i] == want[i] {
-		i++
-	}
-	t.Errorf("%s differs from the Rust golden at byte %d\ngot:  ...%s\nwant: ...%s",
-		name, i, wkAround(got, i), wkAround(want, i))
-}
-
-func wkAround(s string, at int) string {
-	return s[max(at-80, 0):min(at+160, len(s))]
 }
 
 func wkRecentSince() time.Time { return models.RecentPRWindowStart(wkClock) }
@@ -210,15 +179,15 @@ func TestWorkoutsListGoldens(t *testing.T) {
 			t.Fatal(err)
 		}
 		view := WorkoutsListView{User: c.user, Workouts: workouts, Page: c.page, TotalPages: (total + perPage - 1) / perPage}
-		wkAssertGolden(t, c.golden, WorkoutsList(view))
+		assertPageGolden(t, c.golden, WorkoutsList(view))
 	}
 }
 
 func TestNewWorkoutGoldens(t *testing.T) {
 	alice := NewWorkoutView{User: wkAliceNav, Today: time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC), UseBrowserToday: true}
 	bob := NewWorkoutView{User: wkBobNav, Today: time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)}
-	wkAssertGolden(t, "workouts-new", NewWorkout(alice))
-	wkAssertGolden(t, "workouts-new-timezone-set", NewWorkout(bob))
+	assertPageGolden(t, "workouts-new", NewWorkout(alice))
+	assertPageGolden(t, "workouts-new-timezone-set", NewWorkout(bob))
 }
 
 func TestNewWorkoutShowsTheEscapedError(t *testing.T) {
@@ -245,14 +214,14 @@ func TestShowWorkoutGoldens(t *testing.T) {
 		{"workout-show-timezone-set", wkBobNav, wkBob, wkWorkoutBob, ""},
 	}
 	for _, c := range cases {
-		wkAssertGolden(t, c.golden, ShowWorkout(w.showView(t, c)))
+		assertPageGolden(t, c.golden, ShowWorkout(w.showView(t, c)))
 	}
 }
 
 func TestEditWorkoutGoldens(t *testing.T) {
 	w := wkSeeded(t)
-	wkAssertGolden(t, "workout-edit", EditWorkout(wkAliceNav, w.session(t, wkWorkoutNotes, wkAlice), ""))
-	wkAssertGolden(t, "workout-edit-no-notes", EditWorkout(wkAliceNav, w.session(t, wkWorkoutShow, wkAlice), ""))
+	assertPageGolden(t, "workout-edit", EditWorkout(wkAliceNav, w.session(t, wkWorkoutNotes, wkAlice), ""))
+	assertPageGolden(t, "workout-edit-no-notes", EditWorkout(wkAliceNav, w.session(t, wkWorkoutShow, wkAlice), ""))
 }
 
 func TestEditLogGoldens(t *testing.T) {
@@ -268,7 +237,7 @@ func TestEditLogGoldens(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wkAssertGolden(t, golden, EditLog(EditLogView{User: wkAliceNav, Workout: workout, Log: log, ExerciseName: exercise.Name}))
+		assertPageGolden(t, golden, EditLog(EditLogView{User: wkAliceNav, Workout: workout, Log: log, ExerciseName: exercise.Name}))
 	}
 }
 
@@ -284,7 +253,7 @@ func TestSharedWorkoutGoldens(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wkAssertGolden(t, golden, SharedWorkout(workout, logs, "alice"))
+		assertPageGolden(t, golden, SharedWorkout(workout, logs, "alice"))
 	}
 }
 
@@ -311,7 +280,7 @@ func TestStatsIndexGoldens(t *testing.T) {
 	} {
 		view := w.statsView(t, c.userID, today)
 		view.User = c.user
-		wkAssertGolden(t, c.golden, StatsIndex(view))
+		assertPageGolden(t, c.golden, StatsIndex(view))
 	}
 }
 
@@ -325,7 +294,7 @@ func TestPRsGoldens(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wkAssertGolden(t, c.golden, PRs(c.user, prs))
+		assertPageGolden(t, c.golden, PRs(c.user, prs))
 	}
 }
 
@@ -425,6 +394,6 @@ func TestExerciseStatsGoldens(t *testing.T) {
 		{"stats-exercise-bob", wkBobNav, wkBob, wkBobSquat, "", ""},
 	}
 	for _, c := range cases {
-		wkAssertGolden(t, c.golden, ExerciseStats(w.exerciseView(t, c)))
+		assertPageGolden(t, c.golden, ExerciseStats(w.exerciseView(t, c)))
 	}
 }

@@ -1,21 +1,14 @@
 package views
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/henry40408/liftlog/internal/models"
+	"github.com/henry40408/liftlog/internal/timezone"
 	"github.com/henry40408/liftlog/internal/version"
 )
-
-// capturedVersion is the build version baked into the Rust goldens; see
-// testdata/README.txt. It is the only value normalised, together with the
-// clock-dependent session times, which the tests feed in exactly instead.
-const capturedVersion = "v0.30.1-1-g19c79d8"
 
 const (
 	aliceID = "b6db7e65-fdaf-5a9b-ad5c-644b892fafd3"
@@ -30,22 +23,6 @@ var (
 	adminNav = NavUser{Username: "alice", IsAdmin: true}
 	plainNav = NavUser{Username: "bob"}
 )
-
-func readPageGolden(t *testing.T, name string) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", name+".golden.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.ReplaceAll(string(raw), capturedVersion, version.Version())
-}
-
-func assertPageGolden(t *testing.T, name, got string) {
-	t.Helper()
-	if want := readPageGolden(t, name); got != want {
-		t.Errorf("%s differs from the Rust golden\ngot:\n%s\nwant:\n%s", name, got, want)
-	}
-}
 
 func utc(year int, month time.Month, day, hour, minute, second, micro int) time.Time {
 	return time.Date(year, month, day, hour, minute, second, micro*1000, time.UTC)
@@ -193,30 +170,12 @@ func TestConfirmGoldens(t *testing.T) {
 	}))
 }
 
-var timezoneOptionPattern = regexp.MustCompile(`<option value="([^"]*)"></option>`)
-
-// timezoneNamesInGolden reads the datalist back out of the settings golden, so
-// the test does not depend on the timezone package.
-func timezoneNamesInGolden(t *testing.T) []string {
-	t.Helper()
-	golden := readPageGolden(t, "settings")
-	_, datalist, _ := strings.Cut(golden, `<datalist id="timezone-names">`)
-	datalist, _, _ = strings.Cut(datalist, "</datalist>")
-	var names []string
-	for _, m := range timezoneOptionPattern.FindAllStringSubmatch(datalist, -1) {
-		names = append(names, m[1])
-	}
-	if len(names) < 100 {
-		t.Fatalf("only %d timezone names found in the golden", len(names))
-	}
-	return names
-}
-
-func settingsView(t *testing.T) SettingsView {
-	t.Helper()
+// settingsView lists the app's own zone names; the settings digests pin them
+// against the datalist the Rust server rendered.
+func settingsView() SettingsView {
 	return SettingsView{
 		User:                adminNav,
-		TimezoneNames:       timezoneNamesInGolden(t),
+		TimezoneNames:       timezone.Names(),
 		GitVersion:          version.Version(),
 		CurrentSessionToken: "current",
 		Sessions: []SessionRow{
@@ -227,7 +186,7 @@ func settingsView(t *testing.T) SettingsView {
 }
 
 func TestSettingsGoldens(t *testing.T) {
-	view := settingsView(t)
+	view := settingsView()
 	assertPageGolden(t, "settings", Settings(view))
 
 	withError := view
@@ -248,7 +207,7 @@ func TestSettingsGoldens(t *testing.T) {
 }
 
 func TestSettingsShowsTheSuccessMessage(t *testing.T) {
-	view := settingsView(t)
+	view := settingsView()
 	view.Success = "Timezone saved"
 	want := `<div class="alert alert-success" style="margin-bottom: var(--sp-5);">Timezone saved</div>`
 	if got := Settings(view); !strings.Contains(got, want) {

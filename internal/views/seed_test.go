@@ -1,4 +1,22 @@
--- Seed for the LiftLog golden fixtures. Applied after all migrations.
+package views
+
+// wkSeedSQL is the database the Rust goldens were rendered from, applied on
+// top of the migrations. It is the former testdata/seed.sql byte for byte, so
+// its own header still points at a README.txt that no longer exists; what that
+// file said about the seed is below.
+//
+// Every id is the uuid5 of a fixed namespace over a name: ws-aNN is alice's
+// workout NN days/3 before the capture day (a00 is today and empty), ws-bN is
+// bob's, and log-<workout>-<exercise>-<set> and ex-<user>-<name> likewise.
+//
+// Users (all with the password "correct horse battery staple"):
+//   - alice: admin, no timezone (the browser's), two sessions
+//   - bob: user, Asia/Taipei, one session
+//   - carol: user, America/New_York, one session, no exercises or workouts
+//
+// Shares: ws-a02 is active (expires 2026-12-16 12:00 UTC), ws-a05 never
+// expires and ws-a06 expired on 2026-11-01.
+const wkSeedSQL = `-- Seed for the LiftLog golden fixtures. Applied after all migrations.
 -- Every user's password is: correct horse battery staple
 -- Dates are anchored on the capture day 2026-11-16 (see README.txt).
 
@@ -184,3 +202,4 @@ INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight,
 INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight, rpe, created_at) VALUES ('e5706c9c-dc85-53f0-9f4f-0101e2e3854d', 'd063ced1-3a14-5668-95d4-fafe82f94a1f', '22a1bd31-38fc-53db-9ce2-9d43243ea063', 1, 5, 130.0, 8, '2026-11-08 10:00:00+00:00');
 INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight, rpe, created_at) VALUES ('e42e291d-19ad-56fc-b37d-093265fb90f3', 'd063ced1-3a14-5668-95d4-fafe82f94a1f', 'b9568811-747d-510f-a200-9535ad4af018', 1, 5, 85.0, NULL, '2026-11-08 10:04:00+00:00');
 INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight, rpe, created_at) VALUES ('3cff76aa-8c22-5b2e-a170-d31821374a72', '85eef01d-e4a4-5389-9b26-4e868e92b540', '22a1bd31-38fc-53db-9ce2-9d43243ea063', 1, 5, 130.0, NULL, '2026-11-04 10:00:00+00:00');
+`
