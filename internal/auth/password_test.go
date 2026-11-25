@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"encoding/json"
-	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -49,30 +47,27 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 	}
 }
 
-// Hashes created by the Rust server (argon2 crate, Argon2::default()) must
-// keep verifying, so existing databases survive the rewrite.
+// rustArgon2Hashes were created by the Rust server (argon2 crate,
+// Argon2::default()). The salts are random, so Go must verify them, not
+// reproduce them.
+var rustArgon2Hashes = []struct{ password, hash string }{
+	{`correct horse battery staple`, `$argon2id$v=19$m=19456,t=2,p=1$3Qhfe0zjYC6IPFswNbdFIg$0oq1eeqpHP9w6nTTezSm2I6DqOgKk/PrVkrgpqTldeM`},
+	{`x7#Kp2$mQ9vL`, `$argon2id$v=19$m=19456,t=2,p=1$EzIBHtMaJjSngJqWP1nwmw$8KRc26Clk+HCwelySc6ncYNnaVh1ubOsWBSPA9x8eI4`},
+	{`密碼密碼密碼密碼密碼密碼`, `$argon2id$v=19$m=19456,t=2,p=1$rowo5UtLA6JHfb1AQ/Lwfw$/Yfqg+iq/wWFR3aJJjgazqIO4iZ1kCGvZ7Sdf7ZQHdk`},
+	{`liftlog-unknown-user-placeholder`, `$argon2id$v=19$m=19456,t=2,p=1$txK7z/1hYMwwbO3E/0k/iQ$cTK7v2LXGUtEUhwz/374WjhGLvE2bZKDpwz6pV/NKnQ`},
+	{`a`, `$argon2id$v=19$m=19456,t=2,p=1$bJyKI4boZMzgD5Wr/vA20Q$y8wxpH+kpkUD92KYxIPpj2YVL2RgEEVGwFqZuX9JfiU`},
+}
+
+// Hashes created by the Rust server must keep verifying, so existing
+// databases survive the rewrite.
 func TestVerifiesHashesMadeByRust(t *testing.T) {
-	raw, err := os.ReadFile("testdata/argon2_hashes.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		Hash     string `json:"hash"`
-		Password string `json:"password"`
-	}
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		t.Fatal(err)
-	}
-	if len(cases) == 0 {
-		t.Fatal("no cases")
-	}
-	for _, tc := range cases {
-		ok, err := testHasher.Verify(tc.Password, tc.Hash)
+	for _, tc := range rustArgon2Hashes {
+		ok, err := testHasher.Verify(tc.password, tc.hash)
 		if err != nil || !ok {
-			t.Errorf("%q: Verify = %v, %v", tc.Password, ok, err)
+			t.Errorf("%q: Verify = %v, %v", tc.password, ok, err)
 		}
-		if ok, _ := testHasher.Verify(tc.Password+"x", tc.Hash); ok {
-			t.Errorf("%q: a wrong password verified", tc.Password)
+		if ok, _ := testHasher.Verify(tc.password+"x", tc.hash); ok {
+			t.Errorf("%q: a wrong password verified", tc.password)
 		}
 	}
 }
