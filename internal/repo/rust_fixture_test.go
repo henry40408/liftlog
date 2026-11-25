@@ -3,12 +3,12 @@ package repo
 import (
 	"context"
 	"database/sql"
-	"os"
-	"path/filepath"
+	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
-	"github.com/henry40408/liftlog/internal/db"
+	"github.com/henry40408/liftlog/migrations"
 )
 
 const (
@@ -17,26 +17,6 @@ const (
 	rustSquatID   = "8227bbdc-efec-45d3-b9fb-c15ed75f0df0"
 	rustToken     = "68c9c4b1-805f-4561-abcd-96e40ae2f67d"
 )
-
-// openRustDB opens a copy of the database the Rust server wrote, so the
-// timestamps and dates are in the format chrono + rusqlite produced.
-func openRustDB(t *testing.T) *sql.DB {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "db", "testdata", "rust-created.sqlite3"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "liftlog.sqlite3")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	pool, err := db.Open("sqlite:" + path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = pool.Close() })
-	return pool
-}
 
 func TestRustCreatedDatabaseReadsThroughRepositories(t *testing.T) {
 	pool := openRustDB(t)
@@ -97,4 +77,44 @@ func TestRustCreatedDatabaseSessionsAndMetrics(t *testing.T) {
 	if m := metrics[0]; !m.Date.Equal(day(2026, 11, 10)) || m.TopWeight != 102.5 || m.TopReps != 5 || m.Volume != 1012.5 {
 		t.Errorf("metric = %+v", m)
 	}
+}
+
+// A database the Rust binary migrated must start under the Go build without
+// touching what Rust recorded: every row stays, with its original applied_at.
+func TestMigrationsRunKeepsTheRustCreatedTrackingRows(t *testing.T) {
+	pool := openRustDB(t)
+
+	before := trackedMigrations(t, pool)
+	if len(before) == 0 {
+		t.Fatal("the Rust-created database has no tracking rows")
+	}
+	if err := migrations.Run(context.Background(), pool, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	// A migration added later is appended; the captured rows keep their place.
+	after := trackedMigrations(t, pool)
+	if len(after) < len(before) || !slices.Equal(after[:len(before)], before) {
+		t.Errorf("_migrations changed:\nbefore %q\nafter  %q", before, after)
+	}
+}
+
+func trackedMigrations(t *testing.T, pool *sql.DB) []string {
+	t.Helper()
+	rows, err := pool.Query("SELECT name || ' ' || applied_at FROM _migrations ORDER BY rowid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var tracked []string
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		tracked = append(tracked, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tracked
 }
