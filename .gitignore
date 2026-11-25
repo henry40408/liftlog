@@ -6,4 +6,3 @@
 bin/
 covdata/
 coverage*.out
-!internal/db/testdata/*.sqlite3
