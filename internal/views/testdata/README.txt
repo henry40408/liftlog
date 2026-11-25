@@ -9,7 +9,7 @@ Captured with:
                   (start the binary once, stop it, `sqlite3 db < seed.sql`)
   seeded server   127.0.0.1:3991, requests carry `Cookie: session=<token>` below
   empty server   127.0.0.1:3992, a separate empty DB for the first-run setup pages
-                  (its final state is rebuilt in ../../repo/rust_created_test.go)
+                  (its final state is ../../db/testdata/rust-created.sqlite3)
   ids             uuid5 of a fixed namespace over a name. `ws-aNN` is alice's workout NN
                   days/3 before the capture day (a00 is today and empty), `ws-bN` is bob's,
                   `log-<ws>-<exercise>-<set>` and `ex-<user>-<name>` likewise.
