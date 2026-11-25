@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 )
@@ -157,34 +155,27 @@ func TestPolicyAcceptsRandomNonASCIIPasswords(t *testing.T) {
 	}
 }
 
-// Rust zxcvbn 3.1.1 produced password_policy.json; the Go port must give the
-// same verdict and the same words for every case.
+// Rust zxcvbn 3.1.1 produced rustPolicyCases; the Go port must give the same
+// verdict and the same words for every case.
 func TestPolicyMatchesTheRustCorpus(t *testing.T) {
-	raw, err := os.ReadFile("testdata/password_policy.json")
-	if err != nil {
-		t.Fatal(err)
+	// A fixed count, so a case dropped from the table cannot go unnoticed.
+	const wantCases = 506
+	if len(rustPolicyCases) != wantCases {
+		t.Fatalf("%d cases, want %d", len(rustPolicyCases), wantCases)
 	}
-	var cases []struct {
-		Accepted bool    `json:"accepted"`
-		Error    *string `json:"error"`
-		Password string  `json:"password"`
-		Username string  `json:"username"`
-	}
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range cases {
-		got := PasswordPolicyError(tc.Password, "Password", []string{tc.Username})
-		if divergent, ok := knownWordingDivergence[tc.Password]; ok && got == divergent {
+	for _, tc := range rustPolicyCases {
+		got := PasswordPolicyError(tc.password, "Password", []string{tc.username})
+		if divergent, ok := knownWordingDivergence[tc.password]; ok && got == divergent {
 			continue
 		}
-		if (got == "") != tc.Accepted {
+		wantAccepted := tc.message == accepted
+		if (got == "") != wantAccepted {
 			t.Errorf("%q (user %q): accepted = %v, Rust said %v; message %q",
-				tc.Password, tc.Username, got == "", tc.Accepted, got)
+				tc.password, tc.username, got == "", wantAccepted, got)
 			continue
 		}
-		if tc.Error != nil && got != *tc.Error {
-			t.Errorf("%q (user %q):\n got  %q\n want %q", tc.Password, tc.Username, got, *tc.Error)
+		if got != tc.message {
+			t.Errorf("%q (user %q):\n got  %q\n want %q", tc.password, tc.username, got, tc.message)
 		}
 	}
 }
