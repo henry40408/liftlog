@@ -91,8 +91,8 @@ The guard emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or 
 ## Tests
 
 - **Server tests** use `internal/server/harness_test.go` (in-memory migrated DB, the real `Handler`, seeded users and sessions). Don't build a fresh server.
-- **Golden pages.** `internal/views/testdata/*.golden.html` pin the exact markup (the e2e suite and the no-JS CSS depend on it). They were captured from the Rust server; `views_test.go` normalises version and clock before comparing. See `testdata/README.txt`.
-- **Fixtures from the Rust build**: `internal/db/testdata/rust-created.sqlite3` (opened by `repo/rust_fixture_test.go`), `internal/auth/testdata/password_policy.json`.
+- **Golden pages.** `internal/views/testdata/*.golden.html` pin the exact markup (the e2e suite and the no-JS CSS depend on it). They were captured from the Rust server; `views_test.go` normalises version and clock before comparing. Every golden is read by name (`readPageGolden`, `wkAssertGolden`, `loadLayoutGolden`) and nothing scans the directory, so a golden no test names is dead: delete it together with its README row. See `testdata/README.txt`.
+- **Fixtures from the Rust build**: `internal/db/testdata/rust-created.sqlite3` (opened by `repo/rust_fixture_test.go`), `internal/auth/testdata/password_policy.json`. The Rust-made argon2 hashes are inline (`rustArgon2Hashes` in `internal/auth/password_test.go`).
 - `cmd/liftlog/main_test.go` builds the binary in `TestMain` and execs it; use that shape for anything waiting on a log line or a signal.
 
 ## E2E tests

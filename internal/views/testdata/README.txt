@@ -10,16 +10,15 @@ Captured with:
   seeded server   127.0.0.1:3991, requests carry `Cookie: session=<token>` below
   empty server   127.0.0.1:3992, a separate empty DB for the first-run setup pages
                   (its final state is ../../db/testdata/rust-created.sqlite3)
-  ids.json        name -> id map for the seed ("ids", uuid5 of a fixed namespace) and the
-                  four seeded session tokens ("tokens"). `ws-aNN` is alice's workout NN days/3
-                  before the capture day (a00 is today and empty), `ws-bN` is bob's,
+  ids             uuid5 of a fixed namespace over a name. `ws-aNN` is alice's workout NN
+                  days/3 before the capture day (a00 is today and empty), `ws-bN` is bob's,
                   `log-<ws>-<exercise>-<set>` and `ex-<user>-<name>` likewise.
 
 Seed users (all passwords: `correct horse battery staple`, the argon2id hash is in seed.sql)
   alice  admin  timezone NULL (browser timezone)   2 login sessions (alice-current, alice-other)
   bob    user   Asia/Taipei                        1 login session
   carol  user   America/New_York                   1 login session, no exercises or workouts
-Session tokens are 64 hex chars (ids.json "tokens"); `expires_at` is pinned at created_at + 90
+Session tokens are 64 hex chars (in seed.sql); `expires_at` is pinned at created_at + 90
 days so a touch only rewrites `last_touched_at`.
 
 The seeded shares: ws-a02 token `seed-share-active-...` (expires 2026-12-16 12:00 UTC),
@@ -44,10 +43,17 @@ normalise them):
   * `<time>` elements carry the seeded RFC3339 times, which are stable.
 
 Status codes that are not 200, and responses that are not HTML (no golden), are in the tables
-below. Plain-text bodies are the literal body. headers.txt has the response headers of the
-interesting cases (Set-Cookie, Clear-Site-Data, Cache-Control, CSP, static assets).
+below. Plain-text bodies are the literal body.
 Set-Cookie attribute order from the Rust server: `HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`
 (removal: `session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`).
+
+Deleted because no test read them: ids.json (name -> id map and session tokens),
+headers.txt (response headers of the interesting cases: Set-Cookie, Clear-Site-Data,
+Cache-Control, CSP, static assets) and 16 goldens, whose table rows are dropped too:
+confirm-exercise-delete, confirm-log-delete, confirm-revoke-share,
+confirm-workout-delete{,-empty,-one-set}, settings-password-{same,short,weak,wrong-current},
+settings-timezone-{case,updated}, users-new-{duplicate,no-username,short,weak-with-username}.
+Recover any of them with `git show 2482950:internal/views/testdata/<file>`.
 
 Format of the tables: golden file | request [form body] | user | status
 
@@ -120,22 +126,12 @@ stats-exercise-bob.golden.html | GET /stats/exercise/22a1bd31-38fc-53db-9ce2-9d4
 settings.golden.html | GET /settings | alice | 200
 settings-timezone-set.golden.html | GET /settings | bob | 200
 settings-timezone-error.golden.html | POST /settings/timezone [timezone=Mars/Olympus] | alice | 400
-settings-timezone-case.golden.html | POST /settings/timezone [timezone=asia/taipei] | alice | 400
-settings-timezone-updated.golden.html | POST /settings/timezone [timezone=America/New_York] | carol | 200
 settings-password-mismatch.golden.html | POST /settings/password [current_password=x&new_password=correct+horse+battery+staple&confirm_password=different+horse+battery] | alice | 200
-settings-password-same.golden.html | POST /settings/password [current_password=correct+horse+battery+staple&new_password=correct+horse+battery+staple&confirm_password=correct+horse+battery+staple] | alice | 200
-settings-password-short.golden.html | POST /settings/password [current_password=correct+horse+battery+staple&new_password=short&confirm_password=short] | alice | 200
-settings-password-weak.golden.html | POST /settings/password [current_password=correct+horse+battery+staple&new_password=password1234&confirm_password=password1234] | alice | 200
-settings-password-wrong-current.golden.html | POST /settings/password [current_password=not+the+password&new_password=x7%23Kp2%24mQ9vL&confirm_password=x7%23Kp2%24mQ9vL] | alice | 200
 users.golden.html | GET /users | alice | 200
 users-as-user.golden.html | GET /users | bob | 200
 users-new.golden.html | GET /users/new | alice | 200
 (no golden) users-new-as-user | GET /users/new | bob | 403 | ctype=text/plain; charset=utf-8 | location= | body=Admin access required
 users-new-weak.golden.html | POST /users/new [username=dave&password=password1234] | alice | 200
-users-new-short.golden.html | POST /users/new [username=dave&password=short] | alice | 200
-users-new-no-username.golden.html | POST /users/new [username=+++&password=x7%23Kp2%24mQ9vL] | alice | 200
-users-new-duplicate.golden.html | POST /users/new [username=bob&password=x7%23Kp2%24mQ9vL] | alice | 200
-users-new-weak-with-username.golden.html | POST /users/new [username=davedave&password=davedave1234] | alice | 200
 confirm-promote-user.golden.html | GET /users/244f6aef-a7c9-5119-8ae6-7d18f318df5d/promote | alice | 200
 confirm-delete-user.golden.html | GET /users/244f6aef-a7c9-5119-8ae6-7d18f318df5d/delete | alice | 200
 (no golden) confirm-delete-user-self | GET /users/b6db7e65-fdaf-5a9b-ad5c-644b892fafd3/delete | alice | 400 | ctype=text/plain; charset=utf-8 | location= | body=Cannot delete your own account
@@ -143,15 +139,9 @@ confirm-delete-user.golden.html | GET /users/244f6aef-a7c9-5119-8ae6-7d18f318df5
 (no golden) confirm-promote-user-as-user | GET /users/244f6aef-a7c9-5119-8ae6-7d18f318df5d/promote | bob | 403 | ctype=text/plain; charset=utf-8 | location= | body=Admin access required
 confirm-promote-user-wrong-password.golden.html | POST /users/244f6aef-a7c9-5119-8ae6-7d18f318df5d/promote [current_password=wrong] | alice | 200
 confirm-delete-user-wrong-password.golden.html | POST /users/244f6aef-a7c9-5119-8ae6-7d18f318df5d/delete [current_password=wrong] | alice | 200
-confirm-workout-delete.golden.html | GET /workouts/0c9604db-85f8-51ae-bfa0-b6a0d1bf53cd/delete | alice | 200
-confirm-workout-delete-empty.golden.html | GET /workouts/71cfcccf-b0aa-533b-84e4-55839cfbd941/delete | alice | 200
-confirm-workout-delete-one-set.golden.html | GET /workouts/85eef01d-e4a4-5389-9b26-4e868e92b540/delete | bob | 200
 (no golden) confirm-workout-delete-foreign | GET /workouts/c76f5408-51e6-55ce-b637-4c873b32afca/delete | alice | 404 | ctype=text/plain; charset=utf-8 | location= | body=Workout not found
-confirm-log-delete.golden.html | GET /workouts/0c9604db-85f8-51ae-bfa0-b6a0d1bf53cd/logs/a1e7f98d-1592-55db-b31e-b0514388cde2/delete | alice | 200
 (no golden) confirm-log-delete-foreign | GET /workouts/0c9604db-85f8-51ae-bfa0-b6a0d1bf53cd/logs/8cc802ff-bd30-5526-8da0-4886aa207173/delete | alice | 404 | ctype=text/plain; charset=utf-8 | location= | body=Set not found
-confirm-revoke-share.golden.html | GET /workouts/4592a164-902e-551c-a8e9-a7cf803de5da/revoke-share | alice | 200
 (no golden) confirm-revoke-share-foreign | GET /workouts/c76f5408-51e6-55ce-b637-4c873b32afca/revoke-share | alice | 404 | ctype=text/plain; charset=utf-8 | location= | body=Workout not found
-confirm-exercise-delete.golden.html | GET /exercises/aaed55bc-3dc4-5ab0-84b9-a2b1a7d2e3ea/delete | alice | 200
 confirm-exercise-delete-escaped.golden.html | GET /exercises/0376c522-0917-5353-b064-fbfc9510d054/delete | alice | 200
 (no golden) confirm-exercise-delete-foreign | GET /exercises/22a1bd31-38fc-53db-9ce2-9d43243ea063/delete | alice | 404 | ctype=text/plain; charset=utf-8 | location= | body=Exercise not found
 confirm-logout-others.golden.html | GET /settings/logout-others | alice | 200
