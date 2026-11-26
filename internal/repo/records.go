@@ -137,7 +137,9 @@ func (r *Workouts) MaxWeightForExercise(ctx context.Context, userID, exerciseID 
 }
 
 // SessionMetricsForExercise returns per-session aggregates for one exercise,
-// oldest first: top set weight and reps (higher reps on ties) and volume.
+// oldest first: top set weight and reps (higher reps on ties) and volume. The
+// volume is rounded as in TotalVolumeSince, so equal sessions compare equal and
+// the chart does not mark float noise as a PR.
 func (r *Workouts) SessionMetricsForExercise(ctx context.Context, userID, exerciseID string) ([]models.ExerciseSessionMetric, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT
@@ -149,7 +151,7 @@ func (r *Workouts) SessionMetricsForExercise(ctx context.Context, userID, exerci
                  AND wl2.exercise_id = wl.exercise_id
                ORDER BY wl2.weight DESC, wl2.reps DESC
                LIMIT 1) AS top_reps,
-             SUM(wl.weight * wl.reps) AS volume
+             ROUND(SUM(wl.weight * wl.reps), 2) AS volume
          FROM workout_logs wl
          JOIN workout_sessions ws ON wl.session_id = ws.id
          WHERE ws.user_id = ? AND wl.exercise_id = ?

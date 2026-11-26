@@ -36,8 +36,14 @@ func normaliseVersion(page, current string) string {
 	).Replace(page)
 }
 
-// assertPageGolden compares the digest of the page, with its version mapped
-// back to capturedVersion, with the one captured from the Rust server. A
+// normaliseWeightStep maps the weight field's step back to the Rust server's.
+// This build deliberately accepts finer weights than it did.
+func normaliseWeightStep(page string) string {
+	return strings.ReplaceAll(page, `name="weight" step="`+weightStep+`"`, `name="weight" step="0.25"`)
+}
+
+// assertPageGolden compares the digest of the page, with its version and weight
+// step mapped back to the Rust server's, with the one captured from it. A
 // mismatch writes the page to a temporary file; the Rust golden is in git
 // history.
 func assertPageGolden(t *testing.T, name, got string) {
@@ -46,7 +52,7 @@ func assertPageGolden(t *testing.T, name, got string) {
 	if !ok {
 		t.Fatalf("no golden digest named %s", name)
 	}
-	normalised := normaliseVersion(got, version.Version())
+	normalised := normaliseWeightStep(normaliseVersion(got, version.Version()))
 	sum := sha256.Sum256([]byte(normalised))
 	if hex.EncodeToString(sum[:]) == want {
 		return
@@ -67,6 +73,14 @@ func assertPageGolden(t *testing.T, name, got string) {
 	t.Errorf("%s differs from the Rust golden (%d bytes of normalised output written to %s).\n"+
 		"The golden is in git history: git show $(git log --diff-filter=D --format=%%h -1 -- %s)^:%s",
 		name, len(normalised), file.Name(), path, path)
+}
+
+func TestNormaliseWeightStepRewritesOnlyTheWeightField(t *testing.T) {
+	const page = `<input name="weight" step="0.01"><input name="other" step="0.01">`
+	const want = `<input name="weight" step="0.25"><input name="other" step="0.01">`
+	if got := normaliseWeightStep(page); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
 }
 
 func TestNormaliseVersionRewritesOnlyTheVersionStamps(t *testing.T) {

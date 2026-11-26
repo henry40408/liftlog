@@ -241,6 +241,25 @@ func TestEditLogGoldens(t *testing.T) {
 	}
 }
 
+// The goldens cannot pin this: normaliseWeightStep accepts Rust's step too.
+func TestWeightFieldsAcceptHundredths(t *testing.T) {
+	w := wkSeeded(t)
+	workout := w.session(t, wkWorkoutShow, wkAlice)
+	log, err := w.workouts.FindLogByID(context.Background(), wkLogRPE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := map[string]string{
+		"add set":  ShowWorkout(w.showView(t, wkShowCase{"", wkAliceNav, wkAlice, wkWorkoutShow, ""})),
+		"edit set": EditLog(EditLogView{User: wkAliceNav, Workout: workout, Log: log}),
+	}
+	for name, page := range pages {
+		if !strings.Contains(page, `name="weight" step="0.01"`) {
+			t.Errorf("%s: the weight field does not step by 0.01", name)
+		}
+	}
+}
+
 func TestSharedWorkoutGoldens(t *testing.T) {
 	w := wkSeeded(t)
 	ctx := context.Background()

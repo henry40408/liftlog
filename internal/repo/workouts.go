@@ -137,10 +137,12 @@ func (r *Workouts) CountSessionsSince(ctx context.Context, userID string, since 
 }
 
 // TotalVolumeSince sums weight x reps over sessions dated on or after since.
+// Weights have two decimals, which binary floats cannot hold exactly, so the
+// sum is rounded to keep noise such as 168.29999999999998 off the pages.
 func (r *Workouts) TotalVolumeSince(ctx context.Context, userID string, since time.Time) (float64, error) {
 	var volume sql.NullFloat64
 	err := r.db.QueryRowContext(ctx,
-		"SELECT SUM(wl.weight * wl.reps) FROM workout_logs wl "+
+		"SELECT ROUND(SUM(wl.weight * wl.reps), 2) FROM workout_logs wl "+
 			"JOIN workout_sessions ws ON wl.session_id = ws.id "+
 			"WHERE ws.user_id = ? AND ws.date >= ?",
 		userID, db.FormatDate(since)).Scan(&volume)
