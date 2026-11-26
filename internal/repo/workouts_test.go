@@ -547,6 +547,19 @@ func TestWorkoutsTotalVolumeSince(t *testing.T) {
 	}
 }
 
+func TestWorkoutsTotalVolumeSinceHidesFloatNoise(t *testing.T) {
+	f := newWorkoutFixture(t, "user1")
+	createTestExercise(t, f.pool, "ex1", "user1")
+	session := f.session(t, "user1", day(2026, 11, 5), nil)
+	// 16.83 * 10 is 168.29999999999998 in binary floating point.
+	f.log(t, session.ID, "ex1", 1, 10, 16.83, nil)
+
+	volume, err := f.repo.TotalVolumeSince(f.ctx, "user1", day(2026, 11, 3))
+	if err != nil || volume != 168.3 {
+		t.Fatalf("volume = %v, %v; want 168.3", volume, err)
+	}
+}
+
 func TestWorkoutsLastWeightPerExerciseByUser(t *testing.T) {
 	f := newWorkoutFixture(t, "user1")
 	createTestExercise(t, f.pool, "ex-bench-press", "user1")
@@ -597,6 +610,25 @@ func TestWorkoutsSessionMetricsEmpty(t *testing.T) {
 }
 
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
+
+// 16.83x10 and 56.1x3 are both 168.3, but unrounded floats tell them apart and
+// the chart would then mark the second as a volume PR.
+func TestWorkoutsSessionMetricsEqualVolumesCompareEqual(t *testing.T) {
+	f := newWorkoutFixture(t, "user1")
+	createTestExercise(t, f.pool, "ex1", "user1")
+	first := f.session(t, "user1", day(2026, 11, 2), nil)
+	second := f.session(t, "user1", day(2026, 11, 3), nil)
+	f.log(t, first.ID, "ex1", 1, 10, 16.83, nil)
+	f.log(t, second.ID, "ex1", 1, 3, 56.1, nil)
+
+	metrics, err := f.repo.SessionMetricsForExercise(f.ctx, "user1", "ex1")
+	if err != nil || len(metrics) != 2 {
+		t.Fatalf("got %d metrics, %v; want 2", len(metrics), err)
+	}
+	if metrics[0].Volume != 168.3 || metrics[1].Volume != 168.3 {
+		t.Errorf("volumes = %v, %v; want 168.3 twice", metrics[0].Volume, metrics[1].Volume)
+	}
+}
 
 func TestWorkoutsSessionMetricsSingleSessionAggregates(t *testing.T) {
 	f := newWorkoutFixture(t, "user1")

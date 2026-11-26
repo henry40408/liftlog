@@ -178,7 +178,7 @@ func EditLog(view EditLogView) string {
 	}
 	weight := void("input",
 		a("type", "number"), a("inputmode", "decimal"), a("id", "weight"), a("name", "weight"),
-		a("step", "0.25"), a("min", "0"), a("value", chart.Display(log.Weight)), flag("required"))
+		a("step", weightStep), a("min", "0"), a("value", chart.Display(log.Weight)), flag("required"))
 	reps := void("input",
 		a("type", "number"), a("inputmode", "numeric"), a("id", "reps"), a("name", "reps"),
 		a("min", "1"), a("value", strconv.Itoa(log.Reps)), flag("required"))

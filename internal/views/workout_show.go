@@ -207,10 +207,14 @@ func categoryGroup(category models.ExerciseCategory, exercises []models.Exercise
 	return el("optgroup", []attr{a("label", category.DisplayName)}, options...)
 }
 
+// weightStep is the finest increment the weight fields accept; some equipment
+// is labelled with values such as 16.83.
+const weightStep = "0.01"
+
 func weightInput(prefill *PrefillSet) node {
 	attrs := []attr{
 		a("type", "number"), a("inputmode", "decimal"), a("id", "weight"), a("name", "weight"),
-		a("step", "0.25"), a("min", "0"), a("list", "weight-list"), a("autocomplete", "off"), flag("required"),
+		a("step", weightStep), a("min", "0"), a("list", "weight-list"), a("autocomplete", "off"), flag("required"),
 	}
 	if prefill != nil {
 		attrs = append(attrs, a("value", chart.Display(prefill.Weight)))
