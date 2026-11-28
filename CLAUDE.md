@@ -78,7 +78,7 @@ Rules for a new file:
 - Make it safe to run twice where SQLite allows it: `CREATE` and `DROP` take `IF (NOT) EXISTS`, and a data change leaves the data alone the second time. A restored `.dump` gets its version back by hand and may get it too low. `ADD COLUMN` has no such guard: let it fail.
 - No `BEGIN` or `COMMIT`; the runner owns the transaction.
 - Leave `_migrations` alone: releases up to 0.31 read it, and the baseline check relies on it.
-- Name the columns when copying rows. Databases created before 0.4 have extra columns in `exercises` and `workout_logs`, and a `personal_records` table.
+- Name the columns when copying rows. Databases created before 0.4 have extra columns in `exercises` and `workout_logs`, and a `personal_records` table. Their `exercises` also keeps default rows without an owner (`user_id` NULL): `Exercises.FindByID` skips them, and any other query that can reach them must too.
 - Rebuilding a table that foreign keys point to (`users`, `exercises`, `workout_sessions`) is dangerous. Foreign keys stay on inside the transaction (`PRAGMA foreign_keys` has no effect there), so `DROP TABLE` cascades into child rows without an error, or fails on `ON DELETE RESTRICT`. Preserve the child rows in the same file. A rebuilt table also moves to the end of the schema, and the cascades of a delete run from the end: deleting a user with logged sets fails once `exercises` comes after `workout_sessions`.
 
 **Storage conventions** (`internal/db`). Timestamps are written as text in chrono's format (`2006-01-02 15:04:05[.fraction]+00:00`) and read back from that, RFC 3339, or the bare form, always as UTC. Always bind strings, never `time.Time`. Dates are `YYYY-MM-DD`. An in-memory test database is limited to one connection.
