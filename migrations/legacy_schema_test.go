@@ -3,9 +3,13 @@ package migrations
 // pre04Tables turns release031Schema into what a database created before 0.4
 // still has after releases up to 0.31, with the statements as SQLite stored them:
 // exercises and workout_logs differ and personal_records remains. Those releases
-// never gave such a database idx_workout_logs_exercise_weight.
+// never gave such a database idx_workout_logs_exercise_weight. Every table after
+// users is created again to keep the original order, which decides the order of
+// the cascades when a user is deleted.
 const pre04Tables = `
+DROP TABLE sessions;
 DROP TABLE workout_logs;
+DROP TABLE workout_sessions;
 DROP TABLE exercises;
 CREATE TABLE exercises (
     id TEXT PRIMARY KEY NOT NULL,
@@ -19,6 +23,16 @@ CREATE TABLE exercises (
 );
 CREATE INDEX idx_exercises_category ON exercises(category);
 CREATE INDEX idx_exercises_user_id ON exercises(user_id);
+CREATE TABLE workout_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    date DATE NOT NULL,
+    notes TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, share_token TEXT, share_expires_at DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_workout_sessions_user_id ON workout_sessions(user_id);
+CREATE INDEX idx_workout_sessions_date ON workout_sessions(date);
 CREATE TABLE workout_logs (
     id TEXT PRIMARY KEY NOT NULL,
     session_id TEXT NOT NULL,
@@ -47,6 +61,17 @@ CREATE TABLE personal_records (
 CREATE INDEX idx_personal_records_user_id ON personal_records(user_id);
 CREATE INDEX idx_personal_records_exercise_id ON personal_records(exercise_id);
 CREATE UNIQUE INDEX idx_personal_records_unique ON personal_records(user_id, exercise_id, record_type);
+CREATE UNIQUE INDEX idx_workout_sessions_share_token
+    ON workout_sessions(share_token) WHERE share_token IS NOT NULL;
+CREATE TABLE "sessions" (
+    token TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    last_touched_at DATETIME NOT NULL
+);
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
 `
 
 // pre04Rows are a seeded exercise without an owner, a user's own one, and a row

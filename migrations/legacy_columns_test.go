@@ -23,6 +23,13 @@ func createPre04Database(t *testing.T, pool *sql.DB) {
 	mustExec(t, pool, pre04Rows)
 }
 
+// throughRelaxedColumn stops after the file that relaxes muscle_group, before any
+// later one changes rows or announces a schema change.
+func throughRelaxedColumn(t *testing.T) []migration {
+	t.Helper()
+	return shippedMigrations(t)[:2]
+}
+
 // referencingRows is every row of exercises and of the tables that point at it.
 func referencingRows(t *testing.T, pool *sql.DB) []string {
 	t.Helper()
@@ -44,7 +51,7 @@ func TestADatabaseCreatedBefore04AcceptsNewExercises(t *testing.T) {
 	}
 	rows := referencingRows(t, pool)
 
-	noError(t, Run(ctx, pool, discard))
+	applyTo(t, pool, throughRelaxedColumn(t))
 
 	if got := referencingRows(t, pool); !slices.Equal(got, rows) {
 		t.Errorf("data changed\n got: %q\nwant: %q", got, rows)
@@ -80,14 +87,14 @@ func TestOtherConnectionsSeeTheRelaxedColumn(t *testing.T) {
 		t.Fatal("the old schema accepted an exercise without muscle_group")
 	}
 
-	noError(t, Run(ctx, pool, discard))
+	applyTo(t, pool, throughRelaxedColumn(t))
 
 	_, err := other.ExecContext(ctx, addExercise, "after")
 	noError(t, err)
 }
 
 // A restored `.dump` loses user_version, so the migrations run again.
-func TestRelaxingTheLegacyColumnCanRunTwice(t *testing.T) {
+func TestUpgradingAPre04DatabaseCanRunTwice(t *testing.T) {
 	pool := openMemory(t)
 	createPre04Database(t, pool)
 	noError(t, Run(ctx, pool, discard))
@@ -104,7 +111,7 @@ func TestRelaxingTheLegacyColumnCanRunTwice(t *testing.T) {
 	}
 }
 
-func TestLaterMigrationsLeaveACurrentSchemaAlone(t *testing.T) {
+func TestLaterMigrationsLeaveACurrentDatabaseAlone(t *testing.T) {
 	for name, create := range map[string]func(*testing.T) *sql.DB{
 		"adopted": release031Database,
 		"new": func(t *testing.T) *sql.DB {
@@ -117,11 +124,18 @@ func TestLaterMigrationsLeaveACurrentSchemaAlone(t *testing.T) {
 			pool := create(t)
 			applyTo(t, pool, onlyBaseline(t))
 			schema := storedSchema(t, pool)
+			owners, logs := exerciseOwners(t, pool), loggedExercises(t, pool)
 
 			noError(t, Run(ctx, pool, discard))
 
 			if got := storedSchema(t, pool); !slices.Equal(got, schema) {
 				t.Errorf("schema changed\n got: %q\nwant: %q", got, schema)
+			}
+			if got := exerciseOwners(t, pool); !slices.Equal(got, owners) {
+				t.Errorf("exercises changed\n got: %q\nwant: %q", got, owners)
+			}
+			if got := loggedExercises(t, pool); !slices.Equal(got, logs) {
+				t.Errorf("logs changed\n got: %q\nwant: %q", got, logs)
 			}
 		})
 	}
