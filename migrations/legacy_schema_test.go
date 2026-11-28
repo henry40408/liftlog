@@ -1,8 +1,9 @@
 package migrations
 
-// release031Schema is sqlite_master of a database that releases up to 0.31 brought
-// to their last migration, as SQLite stored the statements. It is never
-// regenerated from the baseline.
+// release031Schema is sqlite_master of a database that 0.4 or later created and
+// releases up to 0.31 brought to their last migration, as SQLite stored the
+// statements. Databases created before 0.4 also keep columns and a table that are
+// not here. It is never regenerated from the baseline.
 const release031Schema = `
 CREATE TABLE _migrations (
             name TEXT PRIMARY KEY,
@@ -62,8 +63,8 @@ CREATE INDEX idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
 `
 
-// release031Rows are the records those releases wrote, those of the two
-// migrations that releases up to 0.3 also had, and a row in every table.
+// release031Rows are the records those releases wrote and a row in every table,
+// plus two records only releases up to 0.3 wrote, to show unknown ones are kept.
 const release031Rows = `
 INSERT INTO _migrations (name, applied_at) VALUES
     ('001_create_users.sql', '2026-02-01 00:00:00'),

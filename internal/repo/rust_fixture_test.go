@@ -91,9 +91,8 @@ func TestMigrationsRunKeepsTheRustCreatedTrackingRows(t *testing.T) {
 	if err := migrations.Run(context.Background(), pool, slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatal(err)
 	}
-	// A migration added later is appended; the captured rows keep their place.
 	after := trackedMigrations(t, pool)
-	if len(after) < len(before) || !slices.Equal(after[:len(before)], before) {
+	if !slices.Equal(after, before) {
 		t.Errorf("_migrations changed:\nbefore %q\nafter  %q", before, after)
 	}
 }

@@ -155,7 +155,11 @@ func TestTheBaselineComesFirst(t *testing.T) {
 
 func TestRunBringsANewDatabaseToTheLatestVersion(t *testing.T) {
 	pool := openMemory(t)
-	noError(t, Run(ctx, pool, discard))
+	var logged bytes.Buffer
+	noError(t, Run(ctx, pool, slog.New(slog.NewTextHandler(&logged, nil))))
+	if strings.Contains(logged.String(), "level=WARN") {
+		t.Fatalf("a clean database drew a warning: %s", logged.String())
+	}
 
 	shipped := shippedMigrations(t)
 	if got, want := schemaVersion(t, pool), shipped[len(shipped)-1].version; got != want {

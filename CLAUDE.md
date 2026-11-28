@@ -78,6 +78,7 @@ Rules for a new file:
 - Make it safe to run twice where SQLite allows it: `CREATE` and `DROP` take `IF (NOT) EXISTS`, and a data change leaves the data alone the second time. A restored `.dump` gets its version back by hand and may get it too low. `ADD COLUMN` has no such guard: let it fail.
 - No `BEGIN` or `COMMIT`; the runner owns the transaction.
 - Leave `_migrations` alone: releases up to 0.31 read it, and the baseline check relies on it.
+- Name the columns when copying rows. Databases created before 0.4 have extra columns in `exercises` and `workout_logs`, and a `personal_records` table.
 - Rebuilding a table that foreign keys point to (`users`, `exercises`, `workout_sessions`) is dangerous. Foreign keys stay on inside the transaction (`PRAGMA foreign_keys` has no effect there), so `DROP TABLE` cascades into child rows without an error, or fails on `ON DELETE RESTRICT`. Preserve the child rows in the same file.
 
 **Storage conventions** (`internal/db`). Timestamps are written as text in chrono's format (`2006-01-02 15:04:05[.fraction]+00:00`) and read back from that, RFC 3339, or the bare form, always as UTC. Always bind strings, never `time.Time`. Dates are `YYYY-MM-DD`. An in-memory test database is limited to one connection.
@@ -102,7 +103,7 @@ Rules for a new file:
 - **No `testdata` directories.** Everything the Rust build produced lives in the tests as Go values; the original files are in git history (`git log --diff-filter=D -- <old path>`).
 - **Golden pages.** `goldenDigests` (`internal/views/golden_digests_test.go`) holds one sha256 per page the Rust server rendered, because the e2e suite and the no-JS CSS depend on that exact markup. `assertPageGolden` (`golden_test.go`) hashes the Go output after `normaliseVersion` maps the build version back to `capturedVersion` and `normaliseWeightStep` maps the weight field's deliberately finer `step` back to Rust's; the clock comes from `wkClock` and the database from `wkSeedSQL` (`seed_test.go`). `login-shell` and `dashboard-nav` pin a cut of a page, not a whole one. A mismatch writes the page to a temp file and prints the `git show` command that recovers the Rust golden. Never recompute a digest to make a test pass.
 - **Other fixtures from the Rust build**: `rustCorpus` (`internal/zxcvbn/rust_corpus_test.go`, passwords scored by Rust zxcvbn 3.1.1), `rustPolicyCases` (`internal/auth/rust_policy_cases_test.go`, the password policy's verdicts and messages), `rustArgon2Hashes` (`internal/auth/password_test.go`), and `openRustDB` (`internal/repo/rust_created_test.go`), which rebuilds the Rust-created database from the embedded migrations plus the captured rows.
-- **Old schema.** `release031Schema` (`migrations/legacy_schema_test.go`) is the schema releases up to 0.31 left; the baseline is compared against it, so never regenerate it from the baseline.
+- **Old schema.** `release031Schema` (`migrations/legacy_schema_test.go`) is the schema releases up to 0.31 left in a database created by 0.4 or later; the baseline is compared against it, so never regenerate it from the baseline.
 - `cmd/liftlog/main_test.go` builds the binary in `TestMain` and execs it; use that shape for anything waiting on a log line or a signal.
 
 ## E2E tests

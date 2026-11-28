@@ -24,8 +24,8 @@ var embeddedMigrations embed.FS
 var migrationFileName = regexp.MustCompile(`^(\d+)_.+\.sql$`)
 
 // baselineRecord is the row of _migrations that shows a database reached the
-// baseline. Releases up to 0.31 wrote it for their last migration, and so does
-// the baseline, so that it is still there if user_version is lost.
+// baseline. Releases 0.29 to 0.31 wrote it for their last migration, and the
+// baseline writes it too, so that it is still there if user_version is lost.
 const baselineRecord = "013_add_user_timezone.sql"
 
 // migration brings the schema to version, which `PRAGMA user_version` records.
