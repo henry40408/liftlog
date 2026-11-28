@@ -1,5 +1,66 @@
 package migrations
 
+// pre04Tables turns release031Schema into what a database created before 0.4
+// still has after releases up to 0.31, with the statements as SQLite stored them:
+// exercises and workout_logs differ and personal_records remains. Those releases
+// never gave such a database idx_workout_logs_exercise_weight.
+const pre04Tables = `
+DROP TABLE workout_logs;
+DROP TABLE exercises;
+CREATE TABLE exercises (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    muscle_group TEXT NOT NULL,
+    equipment TEXT,
+    is_default BOOLEAN NOT NULL DEFAULT 0,
+    user_id TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_exercises_category ON exercises(category);
+CREATE INDEX idx_exercises_user_id ON exercises(user_id);
+CREATE TABLE workout_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    session_id TEXT NOT NULL,
+    exercise_id TEXT NOT NULL,
+    set_number INTEGER NOT NULL,
+    reps INTEGER NOT NULL,
+    weight REAL NOT NULL,
+    rpe INTEGER,
+    is_pr BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES workout_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE RESTRICT
+);
+CREATE INDEX idx_workout_logs_session_id ON workout_logs(session_id);
+CREATE INDEX idx_workout_logs_exercise_id ON workout_logs(exercise_id);
+CREATE TABLE personal_records (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    exercise_id TEXT NOT NULL,
+    record_type TEXT NOT NULL,
+    value REAL NOT NULL,
+    achieved_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_personal_records_user_id ON personal_records(user_id);
+CREATE INDEX idx_personal_records_exercise_id ON personal_records(exercise_id);
+CREATE UNIQUE INDEX idx_personal_records_unique ON personal_records(user_id, exercise_id, record_type);
+`
+
+// pre04Rows are a seeded exercise without an owner, a user's own one, and a row
+// referencing each from the tables that point at exercises.
+const pre04Rows = `
+INSERT INTO exercises VALUES
+    ('ex-squat', 'Squat', 'legs', 'quads', 'barbell', 1, NULL),
+    ('e1', 'Own squat', 'legs', 'quads', NULL, 0, 'u1');
+INSERT INTO workout_logs VALUES
+    ('l1', 'w1', 'e1', 1, 5, 102.5, 8, 1, '2026-02-01 00:00:00'),
+    ('l2', 'w1', 'ex-squat', 1, 3, 90, NULL, 0, '2026-02-01 00:00:00');
+INSERT INTO personal_records VALUES ('p1', 'u1', 'e1', 'max_weight', 102.5, '2026-02-01 00:00:00');
+`
+
 // release031Schema is sqlite_master of a database that 0.4 or later created and
 // releases up to 0.31 brought to their last migration, as SQLite stored the
 // statements. Databases created before 0.4 also keep columns and a table that are
