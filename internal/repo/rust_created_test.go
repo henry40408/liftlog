@@ -10,13 +10,6 @@ import (
 	"github.com/henry40408/liftlog/migrations"
 )
 
-// rustMigrationsTable is the `_migrations` statement as the Rust binary stored
-// it in sqlite_master.
-const rustMigrationsTable = `CREATE TABLE _migrations (
-            name TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )`
-
 // rustCreatedRows are the rows a Rust build (commit 19c79d8, all 11 migrations
 // applied) left behind on 2026-11-16 around 16:38 UTC, after a run through the
 // HTTP API of an empty server: setup of admin, a login and logout by bob (no
@@ -64,9 +57,8 @@ var rustCreatedRows = []string{
 }
 
 // openRustDB rebuilds the database the Rust binary left behind: the schema from
-// the embedded migrations, the `_migrations` table as the Rust binary wrote it,
-// and the captured rows, so that timestamps, dates and weights are in the
-// format chrono + rusqlite produced.
+// the embedded migrations, no user_version, and the captured rows, so that
+// timestamps, dates and weights are in the format chrono + rusqlite produced.
 func openRustDB(t *testing.T) *sql.DB {
 	t.Helper()
 	pool, err := db.Open("sqlite:" + filepath.Join(t.TempDir(), "liftlog.sqlite3"))
@@ -75,11 +67,12 @@ func openRustDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = pool.Close() })
 
-	// First, as in the capture: sqlite_master lists the tables in creation order.
-	mustExec(t, pool, rustMigrationsTable)
 	if err := migrations.RunForTests(context.Background(), pool); err != nil {
 		t.Fatal(err)
 	}
+	// The Rust binary set no version, and every tracking row is a captured one.
+	mustExec(t, pool, "PRAGMA user_version = 0")
+	mustExec(t, pool, "DELETE FROM _migrations")
 	for _, insert := range rustCreatedRows {
 		mustExec(t, pool, insert)
 	}

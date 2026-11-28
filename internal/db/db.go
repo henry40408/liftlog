@@ -24,13 +24,18 @@ func Open(databaseURL string) (*sql.DB, error) {
 		return OpenMemory()
 	}
 	// WAL gives concurrent readers; busy_timeout absorbs lock contention
-	// between the handlers' short writes.
-	pragmas := url.Values{"_pragma": {
-		"busy_timeout(5000)",
-		"journal_mode(WAL)",
-		"synchronous(NORMAL)",
-		"foreign_keys(1)",
-	}}
+	// between the handlers' short writes. With _txlock a transaction takes the
+	// write lock when it begins: a deferred one that reads and then writes fails,
+	// without waiting, if another writer got in between.
+	pragmas := url.Values{
+		"_pragma": {
+			"busy_timeout(5000)",
+			"journal_mode(WAL)",
+			"synchronous(NORMAL)",
+			"foreign_keys(1)",
+		},
+		"_txlock": {"immediate"},
+	}
 	dsn := "file:" + (&url.URL{Path: path}).EscapedPath() + "?" + pragmas.Encode()
 	return openPool(dsn, fileMaxOpenConns)
 }
