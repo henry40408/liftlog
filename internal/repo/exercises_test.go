@@ -48,6 +48,18 @@ func TestExercisesFindByID(t *testing.T) {
 	}
 }
 
+func TestExercisesWithoutAnOwnerAreNotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	// Only a database created before 0.4 allows the NULL.
+	mustExec(t, pool, `DROP TABLE exercises;
+		CREATE TABLE exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, user_id TEXT);
+		INSERT INTO exercises VALUES ('ex-squat', 'Squat', 'legs', NULL)`)
+
+	if _, err := NewExercises(pool).FindByID(context.Background(), "ex-squat"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestExercisesFindOwnedHidesOtherUsersExercises(t *testing.T) {
 	repo, ctx := newExerciseFixture(t, "user1", "user2")
 	id := mustCreateExercise(t, repo, "Bench Press", "chest", "user1")

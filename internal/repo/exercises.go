@@ -46,9 +46,11 @@ func scanExercise(row scanner) (models.Exercise, error) {
 	return exercise, err
 }
 
-// FindByID returns ErrNotFound when there is no such exercise.
+// FindByID returns ErrNotFound when there is no such exercise. Databases created
+// before 0.4 keep default exercises without an owner, which count as missing.
 func (r *Exercises) FindByID(ctx context.Context, id string) (models.Exercise, error) {
-	row := r.db.QueryRowContext(ctx, "SELECT "+exerciseColumns+" FROM exercises WHERE id = ?", id)
+	row := r.db.QueryRowContext(ctx,
+		"SELECT "+exerciseColumns+" FROM exercises WHERE id = ? AND user_id IS NOT NULL", id)
 	exercise, err := scanExercise(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Exercise{}, ErrNotFound
