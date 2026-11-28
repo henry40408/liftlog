@@ -381,8 +381,8 @@ func TestOpenDatabaseClosesThePoolWhenAMigrationFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A _migrations table without a name column makes listing applied
-	// migrations fail.
+	// A _migrations table without a name column makes reading the old migration
+	// records fail.
 	mustExec(t, seed, `CREATE TABLE _migrations (id INTEGER)`)
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
@@ -393,7 +393,7 @@ func TestOpenDatabaseClosesThePoolWhenAMigrationFails(t *testing.T) {
 	if err == nil || pool != nil {
 		t.Fatalf("pool = %v, err = %v; want a migration error and no pool", pool, err)
 	}
-	requireContains(t, err.Error(), "list applied migrations")
+	requireContains(t, err.Error(), "read old migration records")
 }
 
 func TestOpenDatabaseMigratesAFreshFile(t *testing.T) {

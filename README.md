@@ -60,7 +60,7 @@ Configuration is via environment variables. A `.env` file in the working directo
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite location: a `sqlite:path?query` URL or a bare path (the query is ignored); the container image sets `/data/liftlog.sqlite3`. Existing databases made by the Rust build open unchanged. |
+| `DATABASE_URL` | `sqlite:liftlog.sqlite3?mode=rwc` | SQLite location: a `sqlite:path?query` URL or a bare path (the query is ignored); the container image sets `/data/liftlog.sqlite3`. An existing database, the Rust build's included, is upgraded in place; see [Database and upgrades](#database-and-upgrades). |
 | `LIFTLOG_BIND` | `127.0.0.1:8080` | Bind address. Loopback by default; the container image sets `0.0.0.0:8080`. |
 | `LIFTLOG_TRUSTED_PROXY_HEADER` | (unset) | Header trusted to carry the client IP for the per-IP login limit: `x-forwarded-for` or `x-real-ip`. **Your proxy MUST overwrite it** (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` or `proxy_set_header X-Real-IP $remote_addr;`), otherwise clients can forge their IP. Unset, no header is read and every client behind a proxy shares one bucket. |
 | `LIFTLOG_TRUSTED_PROXIES` | (empty) | Comma-separated IPs of proxies allowed to supply that header. Loopback is always trusted. The **rightmost** `X-Forwarded-For` hop is used. A proxy in a separate container must be listed here. |
@@ -78,6 +78,19 @@ Precedence is flag, then environment, then default. Logs go to stdout; stderr ca
 
 - **Forward `Host` exactly as the browser sent it, port included** (nginx: `proxy_set_header Host $http_host;`, not `$host`). The CSRF guard compares `Origin` against host *and port*, and for requests without `Sec-Fetch-Site` (Safari < 16.4, any plain-HTTP origin) that is the only check. Getting it wrong yields `403`s logged as `csrf.rejected` / `reason=origin_fallback`. Caddy and Traefik forward `Host` unchanged by default.
 - **Prefer sending HSTS from the proxy** — liftlog doesn't terminate TLS. `LIFTLOG_HSTS_MAX_AGE` is an escape hatch; before enabling it make sure the whole domain (and subdomains, with `includeSubDomains`) serves HTTPS, since HSTS can only be waited out. There is no `preload` option. Set HSTS in one place only.
+
+## Database and upgrades
+
+The database is the file named by `DATABASE_URL`. SQLite runs in WAL mode, so `-wal` and `-shm` files appear next to it while it is open. Back up with SQLite's backup API (`sqlite3 liftlog.sqlite3 ".backup copy.sqlite3"`), or copy the files together while liftlog is stopped. A SQL dump (`.dump`) leaves out the schema version: read it from the original (`sqlite3 liftlog.sqlite3 "PRAGMA user_version"`) and set the same number on the restored database (for example `sqlite3 restored.sqlite3 "PRAGMA user_version = 13"`), otherwise liftlog runs the migrations again from the start, which can fail and stop it.
+
+### Upgrading from 0.31 or earlier
+
+Releases after 0.31 record the schema version differently. Back up first, then:
+
+1. If 0.29.0 or later has never run on the database, start 0.31.1 (`ghcr.io/henry40408/liftlog:0.31.1`) on it once, then stop it. Newer releases refuse such a database and leave its schema and data unchanged.
+2. Start the new release.
+
+Releases up to 0.31 do not check the schema version: they still open an upgraded database, and would keep doing so after a later release changes the schema, so restore the backup to go back. They cannot open a database that a newer release created.
 
 ## Security
 

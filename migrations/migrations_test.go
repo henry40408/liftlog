@@ -1,14 +1,25 @@
 package migrations
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 
 	"github.com/henry40408/liftlog/internal/db"
 )
+
+// baselineVersion is the schema version the baseline file creates. It stays the
+// same when later migrations are added.
+const baselineVersion = 13
 
 var (
 	ctx     = context.Background()
@@ -18,196 +29,464 @@ var (
 func openMemory(t *testing.T) *sql.DB {
 	t.Helper()
 	pool, err := db.OpenMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
+	noError(t, err)
 	t.Cleanup(func() { _ = pool.Close() })
 	return pool
 }
 
-func mustExec(t *testing.T, pool *sql.DB, query string, args ...any) {
+// openFile opens a database file as the server does, without migrating it.
+func openFile(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	if _, err := pool.ExecContext(ctx, query, args...); err != nil {
-		t.Fatalf("%s: %v", query, err)
-	}
+	pool, err := db.Open("sqlite:" + path)
+	noError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
 }
 
-func count(t *testing.T, pool *sql.DB, query string, args ...any) int {
+func noError(t *testing.T, err error) {
 	t.Helper()
-	var n int
-	if err := pool.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
-		t.Fatalf("%s: %v", query, err)
-	}
-	return n
-}
-
-func mustAll(t *testing.T) []migration {
-	t.Helper()
-	migrations, err := all()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return migrations
 }
 
-func indexOf(t *testing.T, migrations []migration, name string) int {
+func mustExec(t *testing.T, pool *sql.DB, script string) {
 	t.Helper()
-	for i, m := range migrations {
-		if m.name == name {
-			return i
-		}
-	}
-	t.Fatalf("%s is not registered", name)
-	return -1
-}
-
-func TestAllAreInAscendingOrder(t *testing.T) {
-	migrations := mustAll(t)
-	if len(migrations) != 11 {
-		t.Errorf("got %d migrations, want 11", len(migrations))
-	}
-	for i := 1; i < len(migrations); i++ {
-		if migrations[i-1].name >= migrations[i].name {
-			t.Errorf("%s is not before %s", migrations[i-1].name, migrations[i].name)
-		}
+	if _, err := pool.ExecContext(ctx, script); err != nil {
+		t.Fatalf("%s: %v", script, err)
 	}
 }
 
-func TestRunCreatesTrackingTableAndRecordsEachMigration(t *testing.T) {
+// release031Database is a database as releases up to 0.31 left it.
+func release031Database(t *testing.T) *sql.DB {
+	t.Helper()
 	pool := openMemory(t)
-	if err := Run(ctx, pool, discard); err != nil {
-		t.Fatal(err)
+	mustExec(t, pool, release031Schema)
+	mustExec(t, pool, release031Rows)
+	return pool
+}
+
+// queryStrings reads a query that yields one text column.
+func queryStrings(t *testing.T, pool *sql.DB, query string) []string {
+	t.Helper()
+	rows, err := pool.QueryContext(ctx, query)
+	noError(t, err)
+	defer func() { _ = rows.Close() }()
+	var all []string
+	for rows.Next() {
+		var value string
+		noError(t, rows.Scan(&value))
+		all = append(all, value)
 	}
-	if got, want := count(t, pool, "SELECT COUNT(*) FROM _migrations"), len(mustAll(t)); got != want {
-		t.Errorf("recorded %d migrations, want %d", got, want)
+	noError(t, rows.Err())
+	return all
+}
+
+// storedSchema is every statement as SQLite keeps it.
+func storedSchema(t *testing.T, pool *sql.DB) []string {
+	t.Helper()
+	return queryStrings(t, pool, "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+}
+
+// describedSchema lists columns, foreign keys and indexes, so a schema written in
+// one piece compares with one that ALTER TABLE grew.
+func describedSchema(t *testing.T, pool *sql.DB) []string {
+	t.Helper()
+	return queryStrings(t, pool, `
+		SELECT concat_ws('|', 'column', m.name, c.cid, c.name, c.type, c."notnull", ifnull(c.dflt_value, '-'), c.pk)
+		FROM sqlite_master m, pragma_table_info(m.name) c WHERE m.type = 'table'
+		UNION ALL
+		SELECT concat_ws('|', 'foreign key', m.name, f."from", f."table", f."to", f.on_update, f.on_delete)
+		FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table'
+		UNION ALL
+		SELECT concat_ws('|', 'index', m.name, i.name, i."unique", i.origin, i.partial,
+			x.seqno, ifnull(x.name, '-'), x."desc", x.key)
+		FROM sqlite_master m, pragma_index_list(m.name) i, pragma_index_xinfo(i.name) x WHERE m.type = 'table'
+		UNION ALL
+		SELECT concat_ws('|', 'index sql', replace(replace(sql, char(10), ''), ' ', ''))
+		FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL
+		ORDER BY 1`)
+}
+
+func trackedRows(t *testing.T, pool *sql.DB) []string {
+	t.Helper()
+	return queryStrings(t, pool, "SELECT name || ' ' || applied_at FROM _migrations ORDER BY rowid")
+}
+
+func schemaVersion(t *testing.T, pool *sql.DB) int64 {
+	t.Helper()
+	version, err := userVersion(ctx, pool)
+	noError(t, err)
+	return version
+}
+
+func shippedMigrations(t *testing.T) []migration {
+	t.Helper()
+	shipped, err := loadMigrations(embeddedMigrations)
+	noError(t, err)
+	return shipped
+}
+
+// onlyBaseline keeps a test about the baseline true after later migrations ship.
+func onlyBaseline(t *testing.T) []migration {
+	t.Helper()
+	return shippedMigrations(t)[:1]
+}
+
+func applyTo(t *testing.T, pool *sql.DB, migrations []migration) {
+	t.Helper()
+	noError(t, applyMigrations(ctx, pool, migrations, discard))
+}
+
+func requireError(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want it to say %q", err, want)
 	}
 }
 
-func TestRunIsIdempotent(t *testing.T) {
-	pool := openMemory(t)
-	for range 2 {
-		if err := Run(ctx, pool, discard); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if got, want := count(t, pool, "SELECT COUNT(*) FROM _migrations"), len(mustAll(t)); got != want {
-		t.Errorf("recorded %d migrations, want %d", got, want)
+// The baseline file replaced the migrations up to 013; a lower or higher number
+// would skip or repeat it on the databases those left.
+func TestTheBaselineComesFirst(t *testing.T) {
+	if got := shippedMigrations(t)[0].version; got != baselineVersion {
+		t.Fatalf("first migration = %d, want the baseline %d", got, baselineVersion)
 	}
 }
 
-func TestForeignKeyCheckIsCleanAfterMigrations(t *testing.T) {
+func TestRunBringsANewDatabaseToTheLatestVersion(t *testing.T) {
 	pool := openMemory(t)
-	if err := Run(ctx, pool, discard); err != nil {
-		t.Fatal(err)
-	}
-	if got := count(t, pool, "SELECT COUNT(*) FROM pragma_foreign_key_check"); got != 0 {
-		t.Errorf("%d foreign key violations", got)
-	}
-}
+	noError(t, Run(ctx, pool, discard))
 
-func TestForeignKeysAreOnAfterRun(t *testing.T) {
-	pool := openMemory(t)
-	if err := Run(ctx, pool, discard); err != nil {
-		t.Fatal(err)
+	shipped := shippedMigrations(t)
+	if got, want := schemaVersion(t, pool), shipped[len(shipped)-1].version; got != want {
+		t.Errorf("user_version = %d, want %d", got, want)
 	}
-	if got := count(t, pool, "SELECT foreign_keys FROM pragma_foreign_keys"); got != 1 {
-		t.Errorf("foreign_keys = %d, want 1", got)
+	records := queryStrings(t, pool, "SELECT name FROM _migrations")
+	if !slices.Equal(records, []string{baselineRecord}) {
+		t.Errorf("_migrations = %q, want only %q", records, baselineRecord)
 	}
-}
-
-func TestRunForTestsAppliesEverythingAndKeepsForeignKeysOn(t *testing.T) {
-	pool := openMemory(t)
-	if err := RunForTests(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	if got := count(t, pool, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'workout_logs'"); got != 1 {
-		t.Errorf("workout_logs table missing")
-	}
-	if got := count(t, pool, "SELECT foreign_keys FROM pragma_foreign_keys"); got != 1 {
-		t.Errorf("foreign_keys = %d, want 1", got)
-	}
-}
-
-func TestCleanupMigrationRemovesPreexistingOrphans(t *testing.T) {
-	pool := openMemory(t)
-	migrations := mustAll(t)
-	cleanup := indexOf(t, migrations, "011_cleanup_orphan_rows.sql")
-	for _, m := range migrations[:cleanup] {
-		mustExec(t, pool, m.sql)
-	}
-	// Explicit, so the orphan inserts do not rely on 010's side effect.
-	mustExec(t, pool, "PRAGMA foreign_keys = OFF")
-
-	mustExec(t, pool, `INSERT INTO users (id, username, password_hash, created_at)
-		VALUES ('u1', 'u1', 'hash', datetime('now'))`)
-	// Orphan session: user_id matches no users row.
-	mustExec(t, pool, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_touched_at)
-		VALUES ('tok1', 'ghost-user', datetime('now'), datetime('now', '+1 day'), datetime('now'))`)
-	// Orphan workout_log: session_id matches no workout_sessions row.
-	mustExec(t, pool, `INSERT INTO exercises (id, name, category, user_id)
-		VALUES ('ex1', 'Squat', 'legs', 'u1')`)
-	mustExec(t, pool, `INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight)
-		VALUES ('log1', 'ghost-session', 'ex1', 1, 5, 100.0)`)
-
-	mustExec(t, pool, migrations[cleanup].sql)
-
-	if got := count(t, pool, "SELECT COUNT(*) FROM sessions WHERE token = 'tok1'"); got != 0 {
-		t.Error("orphan session should be removed")
-	}
-	if got := count(t, pool, "SELECT COUNT(*) FROM workout_logs WHERE id = 'log1'"); got != 0 {
-		t.Error("orphan workout log should be removed")
-	}
-}
-
-// An existing database skips 010, so 011 must work without 010 having just
-// turned foreign_keys off.
-func TestCleanupMigrationClearsOrphansOnADatabaseAlreadyAt010(t *testing.T) {
-	pool := openMemory(t)
-	migrations := mustAll(t)
-	through010 := migrations[:indexOf(t, migrations, "010_rebuild_sessions_with_last_touched_at.sql")+1]
-
-	mustExec(t, pool, `CREATE TABLE IF NOT EXISTS _migrations (
-		name TEXT PRIMARY KEY,
-		applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`)
-	for _, m := range through010 {
-		mustExec(t, pool, m.sql)
-		// Recorded as applied, so Run starts at 011.
-		mustExec(t, pool, "INSERT INTO _migrations (name) VALUES (?)", m.name)
-	}
-	// Off only to insert the orphans below.
-	mustExec(t, pool, "PRAGMA foreign_keys = OFF")
-
-	mustExec(t, pool, `INSERT INTO users (id, username, password_hash, created_at)
-		VALUES ('u1', 'u1', 'hash', datetime('now'))`)
-	mustExec(t, pool, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_touched_at)
-		VALUES ('orphan-tok', 'ghost-user', datetime('now'), datetime('now', '+1 day'), datetime('now'))`)
-	mustExec(t, pool, `INSERT INTO workout_sessions (id, user_id, date, created_at)
-		VALUES ('orphan-ws', 'ghost-user2', '2024-01-01', datetime('now'))`)
-	mustExec(t, pool, `INSERT INTO exercises (id, name, category, user_id)
-		VALUES ('orphan-ex', 'Squat', 'legs', 'ghost-user3')`)
-	// A log under a real session but the orphan exercise: orphaned only once
-	// the exercise is deleted, so 011 must delete parents first.
-	mustExec(t, pool, `INSERT INTO workout_sessions (id, user_id, date, created_at)
-		VALUES ('real-ws', 'u1', '2024-01-02', datetime('now'))`)
-	mustExec(t, pool, `INSERT INTO workout_logs (id, session_id, exercise_id, set_number, reps, weight)
-		VALUES ('log1', 'real-ws', 'orphan-ex', 1, 5, 100.0)`)
-
-	if err := Run(ctx, pool, discard); err != nil {
-		t.Fatalf("Run must not abort on pre-existing orphans: %v", err)
-	}
-
-	if got := count(t, pool, "SELECT COUNT(*) FROM pragma_foreign_key_check"); got != 0 {
-		t.Errorf("%d foreign key violations remain", got)
-	}
-	for _, row := range []struct{ table, idColumn, id string }{
-		{"sessions", "token", "orphan-tok"},
-		{"workout_sessions", "id", "orphan-ws"},
-		{"exercises", "id", "orphan-ex"},
-		{"workout_logs", "id", "log1"},
+	for query, want := range map[string]string{
+		"SELECT count(*) FROM pragma_foreign_key_check": "0",
+		"SELECT foreign_keys FROM pragma_foreign_keys":  "1",
 	} {
-		query := "SELECT COUNT(*) FROM " + row.table + " WHERE " + row.idColumn + " = ?"
-		if got := count(t, pool, query, row.id); got != 0 {
-			t.Errorf("%s row %s should have been cleaned up", row.table, row.id)
+		if got := queryStrings(t, pool, query); !slices.Equal(got, []string{want}) {
+			t.Errorf("%s = %q, want %q", query, got, want)
 		}
+	}
+}
+
+func TestRunForTestsMigrates(t *testing.T) {
+	pool := openMemory(t)
+	noError(t, RunForTests(ctx, pool))
+	if got := schemaVersion(t, pool); got < baselineVersion {
+		t.Fatalf("user_version = %d", got)
+	}
+}
+
+func TestBaselineBuildsTheSchemaOlderReleasesBuilt(t *testing.T) {
+	fresh := openMemory(t)
+	applyTo(t, fresh, onlyBaseline(t))
+
+	got := describedSchema(t, fresh)
+	want := describedSchema(t, release031Database(t))
+	if !slices.Equal(got, want) {
+		t.Fatalf("schema differs\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// A database an older release left has user_version 0. A stale number below the
+// baseline, left by some other tool, must not matter either.
+func TestRunAdoptsADatabaseOfAnOlderRelease(t *testing.T) {
+	for _, stale := range []string{"0", "5", "12"} {
+		t.Run("user_version "+stale, func(t *testing.T) {
+			pool := release031Database(t)
+			mustExec(t, pool, "PRAGMA user_version = "+stale)
+			schema, records := storedSchema(t, pool), trackedRows(t, pool)
+
+			applyTo(t, pool, onlyBaseline(t))
+
+			if got := schemaVersion(t, pool); got != baselineVersion {
+				t.Errorf("user_version = %d", got)
+			}
+			if got := storedSchema(t, pool); !slices.Equal(got, schema) {
+				t.Errorf("schema changed\n got: %q\nwant: %q", got, schema)
+			}
+			if got := trackedRows(t, pool); !slices.Equal(got, records) {
+				t.Errorf("records changed\n got: %q\nwant: %q", got, records)
+			}
+			rows := queryStrings(t, pool, `SELECT concat_ws('|', u.username, u.timezone, l.weight, s.token)
+				FROM users u, workout_logs l, sessions s`)
+			if want := []string{"root|Asia/Taipei|102.5|t1"}; !slices.Equal(rows, want) {
+				t.Errorf("data = %q, want %q", rows, want)
+			}
+		})
+	}
+}
+
+// A restored `.dump` loses user_version.
+func TestBaselineReplaysOverADatabaseThatLostItsVersion(t *testing.T) {
+	fresh := func(t *testing.T) *sql.DB {
+		pool := openMemory(t)
+		applyTo(t, pool, onlyBaseline(t))
+		return pool
+	}
+	for name, create := range map[string]func(*testing.T) *sql.DB{
+		"adopted": release031Database,
+		"new":     fresh,
+	} {
+		t.Run(name, func(t *testing.T) {
+			pool := create(t)
+			applyTo(t, pool, onlyBaseline(t))
+			records := trackedRows(t, pool)
+			mustExec(t, pool, "PRAGMA user_version = 0")
+
+			applyTo(t, pool, onlyBaseline(t))
+
+			if got := schemaVersion(t, pool); got != baselineVersion {
+				t.Errorf("user_version = %d", got)
+			}
+			if got := trackedRows(t, pool); !slices.Equal(got, records) {
+				t.Errorf("records changed\n got: %q\nwant: %q", got, records)
+			}
+		})
+	}
+}
+
+func TestRunRefusesADatabaseItCannotUpgradeAndLeavesItAlone(t *testing.T) {
+	changed := func(change string) func(*testing.T) *sql.DB {
+		return func(t *testing.T) *sql.DB {
+			pool := release031Database(t)
+			mustExec(t, pool, change)
+			return pool
+		}
+	}
+	holding := func(script string) func(*testing.T) *sql.DB {
+		return func(t *testing.T) *sql.DB {
+			pool := openMemory(t)
+			mustExec(t, pool, script)
+			return pool
+		}
+	}
+	const noRecord = "no record of migration"
+	tests := map[string]struct {
+		create func(*testing.T) *sql.DB
+		want   string
+	}{
+		"one migration short":  {changed("DELETE FROM _migrations WHERE name = '" + baselineRecord + "'"), noRecord},
+		"of another program":   {holding("CREATE TABLE notes (body TEXT)"), noRecord},
+		"with only a view":     {holding("CREATE VIEW one AS SELECT 1"), noRecord},
+		"with unreadable rows": {holding("CREATE TABLE _migrations (id INTEGER)"), "read old migration records"},
+		"from a newer release": {changed("PRAGMA user_version = 1000"), "newer than"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			pool := test.create(t)
+			version, schema := schemaVersion(t, pool), storedSchema(t, pool)
+
+			requireError(t, Run(ctx, pool, discard), test.want)
+
+			if got := schemaVersion(t, pool); got != version {
+				t.Errorf("user_version = %d, was %d", got, version)
+			}
+			if got := storedSchema(t, pool); !slices.Equal(got, schema) {
+				t.Errorf("schema changed\n got: %q\nwant: %q", got, schema)
+			}
+		})
+	}
+}
+
+func TestLaterMigrationsApplyOnceAndInOrder(t *testing.T) {
+	pool := openMemory(t)
+	later := append(onlyBaseline(t),
+		migration{version: 14, sql: "CREATE TABLE later (id INTEGER)"},
+		migration{version: 15, sql: "ALTER TABLE later ADD COLUMN name TEXT"})
+
+	// Neither statement can run twice.
+	for range 2 {
+		applyTo(t, pool, later)
+		if got := schemaVersion(t, pool); got != 15 {
+			t.Fatalf("user_version = %d", got)
+		}
+	}
+}
+
+// From the baseline on, user_version alone counts: the old records are only for
+// databases below it.
+func TestLaterMigrationsDoNotNeedTheOldRecords(t *testing.T) {
+	pool := openMemory(t)
+	mustExec(t, pool, "CREATE TABLE kept (id INTEGER); PRAGMA user_version = 13")
+
+	applyTo(t, pool, append(onlyBaseline(t), migration{version: 14, sql: "CREATE TABLE later (id INTEGER)"}))
+
+	if got := schemaVersion(t, pool); got != 14 {
+		t.Fatalf("user_version = %d", got)
+	}
+}
+
+func TestApplyMigrationSkipsOneAlreadyApplied(t *testing.T) {
+	pool := openMemory(t)
+	applyTo(t, pool, onlyBaseline(t))
+	done := migration{version: baselineVersion, sql: "this is not SQL"}
+	known := versionRange{baseline: baselineVersion, latest: baselineVersion}
+	noError(t, applyMigration(ctx, pool, done, known))
+}
+
+// A newer release may upgrade the database between the first read and the write lock.
+func TestApplyMigrationRefusesADatabaseThatBecameNewer(t *testing.T) {
+	pool := openMemory(t)
+	mustExec(t, pool, "PRAGMA user_version = 14")
+	pending := migration{version: baselineVersion, sql: "this is not SQL"}
+	known := versionRange{baseline: baselineVersion, latest: baselineVersion}
+	requireError(t, applyMigration(ctx, pool, pending, known), "newer than")
+}
+
+func TestAFailedMigrationLeavesNothingBehind(t *testing.T) {
+	pool := openMemory(t)
+	broken := append(onlyBaseline(t),
+		migration{version: 14, sql: "CREATE TABLE done (id INTEGER)"},
+		migration{
+			version: 15, name: "0015_broken.sql",
+			sql: "CREATE TABLE half_done (id INTEGER); INSERT INTO no_such_table VALUES (1);",
+		})
+
+	requireError(t, applyMigrations(ctx, pool, broken, discard), "migration 0015_broken.sql")
+
+	if got := queryStrings(t, pool, "SELECT name FROM sqlite_master WHERE name = 'half_done'"); len(got) != 0 {
+		t.Error("the half-applied table survived")
+	}
+	if got := schemaVersion(t, pool); got != 14 {
+		t.Errorf("user_version = %d, want the last migration that succeeded", got)
+	}
+}
+
+func TestAVersionThatCannotBeRecordedRollsTheMigrationBack(t *testing.T) {
+	pool := openMemory(t)
+	// query_only makes the write of user_version fail after the script ran.
+	unrecordable := []migration{{version: 13, sql: "CREATE TABLE unrecorded (id INTEGER); PRAGMA query_only = 1"}}
+
+	requireError(t, applyMigrations(ctx, pool, unrecordable, discard), "set schema version")
+
+	if got := storedSchema(t, pool); len(got) != 0 {
+		t.Errorf("the table survived without its version: %q", got)
+	}
+}
+
+// A script that ends the transaction itself leaves nothing to commit.
+func TestAMigrationThatCannotCommitIsReported(t *testing.T) {
+	committing := []migration{{version: 13, sql: "COMMIT"}}
+	requireError(t, applyMigrations(ctx, openMemory(t), committing, discard), "commit")
+}
+
+func TestRunReportsADatabaseItCannotRead(t *testing.T) {
+	pool := openMemory(t)
+	noError(t, pool.Close())
+	requireError(t, Run(ctx, pool, discard), "read schema version")
+}
+
+func TestApplyMigrationStopsWhenCancelled(t *testing.T) {
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	known := versionRange{baseline: baselineVersion, latest: baselineVersion}
+	err := applyMigration(cancelled, openMemory(t), onlyBaseline(t)[0], known)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// An older release may be creating its tables while this one starts. A check made
+// before taking the write lock would still see the database as it was before.
+func TestTheBaselineCheckWaitsForOtherWriters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "race.db")
+	other, pool := openFile(t, path), openFile(t, path)
+	tx, err := other.BeginTx(ctx, nil)
+	noError(t, err)
+	_, err = tx.ExecContext(ctx, "CREATE TABLE users (id TEXT)")
+	noError(t, err)
+
+	migrated := make(chan error, 1)
+	go func() { migrated <- Run(ctx, pool, discard) }()
+	// Long enough for Run to reach the lock, far shorter than its busy_timeout.
+	time.Sleep(200 * time.Millisecond)
+	noError(t, tx.Commit())
+
+	requireError(t, <-migrated, "no record of migration")
+}
+
+// A second server may hold the write lock while this one starts.
+func TestAnUpToDateDatabaseNeedsNoWriteLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "current.db")
+	other, pool := openFile(t, path), openFile(t, path)
+	noError(t, Run(ctx, pool, discard))
+	tx, err := other.BeginTx(ctx, nil)
+	noError(t, err)
+	defer func() { _ = tx.Rollback() }()
+
+	noError(t, Run(ctx, pool, discard))
+}
+
+// Orphans are harmless, so they must not keep the server from starting.
+func TestRunWarnsAboutForeignKeyViolationsAndStarts(t *testing.T) {
+	pool := release031Database(t)
+	mustExec(t, pool, `PRAGMA foreign_keys = OFF;
+		INSERT INTO exercises VALUES ('orphan', 'Squat', 'legs', 'nobody');
+		PRAGMA foreign_keys = ON`)
+	var logged bytes.Buffer
+
+	noError(t, Run(ctx, pool, slog.New(slog.NewTextHandler(&logged, nil))))
+
+	if !strings.Contains(logged.String(), "reported violations after migrations") {
+		t.Errorf("log = %s", logged.String())
+	}
+}
+
+func TestLoadMigrationsReportsAFileItCannotRead(t *testing.T) {
+	// A directory named like a migration.
+	if _, err := loadMigrations(fstest.MapFS{"0001_directory.sql/nested": {}}); err == nil {
+		t.Fatal("the directory was loaded")
+	}
+}
+
+func TestLoadMigrationsOrdersByVersion(t *testing.T) {
+	fsys := fstest.MapFS{
+		"0010_late_one.sql":  {Data: []byte("SELECT 10;")},
+		"0002_early.sql":     {Data: []byte("SELECT 2;")},
+		"2147483647_end.sql": {Data: []byte("SELECT 3;")},
+		"notes.txt":          {Data: []byte("ignored")},
+	}
+	got, err := loadMigrations(fsys)
+	noError(t, err)
+	want := []migration{
+		{2, "0002_early.sql", "SELECT 2;"},
+		{10, "0010_late_one.sql", "SELECT 10;"},
+		{2147483647, "2147483647_end.sql", "SELECT 3;"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("migrations = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadMigrationsRejectsBadNames(t *testing.T) {
+	// user_version holds 1 to 2147483647 here.
+	names := []string{"init.sql", "x_init.sql", "0001.sql", "0000_zero.sql", "2147483648_big.sql"}
+	for _, name := range names {
+		fsys := fstest.MapFS{name: {Data: []byte("SELECT 1;")}}
+		if _, err := loadMigrations(fsys); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+func TestLoadMigrationsRejectsDuplicateVersions(t *testing.T) {
+	fsys := fstest.MapFS{
+		"0001_a.sql":  {Data: []byte("SELECT 1;")},
+		"00001_b.sql": {Data: []byte("SELECT 1;")},
+	}
+	_, err := loadMigrations(fsys)
+	requireError(t, err, "share version 1")
+}
+
+func TestLoadMigrationsRejectsAnEmptySet(t *testing.T) {
+	if _, err := loadMigrations(fstest.MapFS{}); err == nil {
+		t.Fatal("no files were accepted")
 	}
 }

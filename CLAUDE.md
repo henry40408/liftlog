@@ -70,7 +70,15 @@ The guard emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or 
 
 **Destructive actions confirm on the server.** Each is a GET + POST on one path: the trigger is an `<a href>`, the GET renders `writeConfirmPage` (`internal/server/confirm.go`), and only the POST acts. The GET must be inert and apply the **same ownership check** as the POST; each has a test for both. With JS, a delegated handler in `internal/assets/static/app.js` intercepts `a[data-confirm]`, shows `confirm()`, and POSTs directly. So a trigger needs **both** `href` and `data-confirm`. The dialog asks the short question; the page gives detail only the server knows (cascade counts etc.). Promote/delete-user use the same route shape plus an admin password re-check (`reauth.go`) with their own page, and are deliberately not JS-enhanced.
 
-**Migrations** are `go:embed`ded SQL files in `migrations/` and applied at startup (tracked in `_migrations`; `migrations.Run`). Add `NNN_description.sql` (gaps are fine); `migrations.go` picks it up by name. Tests use `migrations.RunForTests`. The numbering and the schema are shared with the former Rust build, so existing databases open unchanged.
+**Migrations** are `go:embed`ded SQL files in `migrations/`, named `<version>_<description>.sql` (gaps are fine) and applied at startup by `migrations.Run`; tests use `migrations.RunForTests`. `PRAGMA user_version` records the version, forward-only. Each file runs in one transaction together with the version bump. `0013_baseline.sql` is the whole schema of version 13, where releases up to 0.31 ended, so lower versions have no file. A non-empty database below 13 is accepted only if `_migrations` has the `013_add_user_timezone.sql` row; a database newer than the latest file is refused.
+
+Rules for a new file:
+
+- Never edit a released file; add one with the next number.
+- Make it safe to run twice where SQLite allows it: `CREATE` and `DROP` take `IF (NOT) EXISTS`, and a data change leaves the data alone the second time. A restored `.dump` gets its version back by hand and may get it too low. `ADD COLUMN` has no such guard: let it fail.
+- No `BEGIN` or `COMMIT`; the runner owns the transaction.
+- Leave `_migrations` alone: releases up to 0.31 read it, and the baseline check relies on it.
+- Rebuilding a table that foreign keys point to (`users`, `exercises`, `workout_sessions`) is dangerous. Foreign keys stay on inside the transaction (`PRAGMA foreign_keys` has no effect there), so `DROP TABLE` cascades into child rows without an error, or fails on `ON DELETE RESTRICT`. Preserve the child rows in the same file.
 
 **Storage conventions** (`internal/db`). Timestamps are written as text in chrono's format (`2006-01-02 15:04:05[.fraction]+00:00`) and read back from that, RFC 3339, or the bare form, always as UTC. Always bind strings, never `time.Time`. Dates are `YYYY-MM-DD`. An in-memory test database is limited to one connection.
 
@@ -94,6 +102,7 @@ The guard emits the `csrf.rejected` audit event (`reason` = `sec_fetch_site` or 
 - **No `testdata` directories.** Everything the Rust build produced lives in the tests as Go values; the original files are in git history (`git log --diff-filter=D -- <old path>`).
 - **Golden pages.** `goldenDigests` (`internal/views/golden_digests_test.go`) holds one sha256 per page the Rust server rendered, because the e2e suite and the no-JS CSS depend on that exact markup. `assertPageGolden` (`golden_test.go`) hashes the Go output after `normaliseVersion` maps the build version back to `capturedVersion` and `normaliseWeightStep` maps the weight field's deliberately finer `step` back to Rust's; the clock comes from `wkClock` and the database from `wkSeedSQL` (`seed_test.go`). `login-shell` and `dashboard-nav` pin a cut of a page, not a whole one. A mismatch writes the page to a temp file and prints the `git show` command that recovers the Rust golden. Never recompute a digest to make a test pass.
 - **Other fixtures from the Rust build**: `rustCorpus` (`internal/zxcvbn/rust_corpus_test.go`, passwords scored by Rust zxcvbn 3.1.1), `rustPolicyCases` (`internal/auth/rust_policy_cases_test.go`, the password policy's verdicts and messages), `rustArgon2Hashes` (`internal/auth/password_test.go`), and `openRustDB` (`internal/repo/rust_created_test.go`), which rebuilds the Rust-created database from the embedded migrations plus the captured rows.
+- **Old schema.** `release031Schema` (`migrations/legacy_schema_test.go`) is the schema releases up to 0.31 left; the baseline is compared against it, so never regenerate it from the baseline.
 - `cmd/liftlog/main_test.go` builds the binary in `TestMain` and execs it; use that shape for anything waiting on a log line or a signal.
 
 ## E2E tests
